@@ -1,0 +1,10 @@
+services:
+  ogham:
+    build: .
+    image: ogham-mcp:latest
+    env_file: .env
+    # stdio transport - stdin/stdout are the MCP channel
+    stdin_open: true
+    # Reach host Ollama from inside the container
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

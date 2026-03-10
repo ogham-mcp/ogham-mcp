@@ -1,0 +1,792 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Ogham MCP",
+    "description": "MCP server providing persistent shared memory across AI clients. This spec documents the tool interfaces \u2014 the actual transport is MCP over stdio, not HTTP.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/tools/switch_profile": {
+      "post": {
+        "operationId": "switch_profile",
+        "summary": "Switch to a different memory profile. Like Severance -- each profile is",
+        "description": "Switch to a different memory profile. Like Severance -- each profile is\na separate memory partition. Memories from other profiles are invisible.\n\nArgs:\n    profile: The profile to switch to (e.g. \"work\", \"personal\", \"default\").",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "profile": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "profile"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/current_profile": {
+      "post": {
+        "operationId": "current_profile",
+        "summary": "Show which memory profile is currently active.",
+        "description": "Show which memory profile is currently active.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/list_profiles": {
+      "post": {
+        "operationId": "list_profiles",
+        "summary": "List all memory profiles and how many memories each has.",
+        "description": "List all memory profiles and how many memories each has.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/store_memory": {
+      "post": {
+        "operationId": "store_memory",
+        "summary": "Store a memory in the active profile with automatic embedding generation.",
+        "description": "Store a memory in the active profile with automatic embedding generation.\n\nArgs:\n    content: The text content to remember.\n    source: Where this came from (e.g. \"claude-desktop\", \"cursor\", \"claude-code\").\n    tags: Categorization tags for filtering (e.g. [\"project:foo\", \"type:decision\"]).\n    metadata: Additional structured data to store alongside the memory.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  },
+                  "tags": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  },
+                  "metadata": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": [
+                  "content"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/hybrid_search": {
+      "post": {
+        "operationId": "hybrid_search",
+        "summary": "Search memories in the active profile by meaning and keywords (hybrid search).",
+        "description": "Search memories in the active profile by meaning and keywords (hybrid search).\n\nCombines semantic similarity (embeddings) with keyword matching (full-text search)\nusing Reciprocal Rank Fusion. Finds both conceptually similar memories and exact\nkeyword matches.\n\nArgs:\n    query: Natural language search query. Also used for keyword matching.\n    limit: Maximum number of results to return.\n    tags: Filter results to memories with any of these tags.\n    source: Filter results to memories from this source.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  },
+                  "limit": {
+                    "default": 10,
+                    "type": "integer"
+                  },
+                  "tags": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  },
+                  "source": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/list_recent": {
+      "post": {
+        "operationId": "list_recent",
+        "summary": "List recent memories in the active profile.",
+        "description": "List recent memories in the active profile.\n\nArgs:\n    limit: Maximum number of memories to return.\n    source: Filter to memories from this source.\n    tags: Filter to memories with any of these tags.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "limit": {
+                    "default": 10,
+                    "type": "integer"
+                  },
+                  "source": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  },
+                  "tags": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/delete_memory": {
+      "post": {
+        "operationId": "delete_memory",
+        "summary": "Delete a memory by its ID.",
+        "description": "Delete a memory by its ID.\n\nArgs:\n    memory_id: The UUID of the memory to delete.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "memory_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "memory_id"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/update_memory": {
+      "post": {
+        "operationId": "update_memory",
+        "summary": "Update an existing memory. Re-embeds if content changes.",
+        "description": "Update an existing memory. Re-embeds if content changes.\n\nArgs:\n    memory_id: The UUID of the memory to update.\n    content: New content (triggers re-embedding).\n    tags: New tags (replaces existing tags).\n    metadata: New metadata (replaces existing metadata).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "memory_id": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  },
+                  "tags": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  },
+                  "metadata": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": [
+                  "memory_id"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/reinforce_memory": {
+      "post": {
+        "operationId": "reinforce_memory",
+        "summary": "Reinforce a memory's confidence -- mark it as verified or confirmed.",
+        "description": "Reinforce a memory's confidence -- mark it as verified or confirmed.\n\nIncreases the memory's confidence score, making it rank higher in future searches.\nCall this when a memory has been validated as accurate.\n\nArgs:\n    memory_id: The UUID of the memory to reinforce.\n    strength: How strongly to reinforce (0.5-1.0, default 0.85). Higher = stronger boost.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "memory_id": {
+                    "type": "string"
+                  },
+                  "strength": {
+                    "default": 0.85,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "memory_id"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/contradict_memory": {
+      "post": {
+        "operationId": "contradict_memory",
+        "summary": "Contradict a memory's confidence -- mark it as disputed or outdated.",
+        "description": "Contradict a memory's confidence -- mark it as disputed or outdated.\n\nDecreases the memory's confidence score, making it rank lower in future searches.\nThe memory isn't deleted, just deprioritised. Call this when a memory is found to be\ninaccurate or superseded.\n\nArgs:\n    memory_id: The UUID of the memory to contradict.\n    strength: How strongly to contradict (0.0-0.5, default 0.15). Lower = stronger.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "memory_id": {
+                    "type": "string"
+                  },
+                  "strength": {
+                    "default": 0.15,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "memory_id"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/re_embed_all": {
+      "post": {
+        "operationId": "re_embed_all",
+        "summary": "Re-generate embeddings for all memories in the active profile.",
+        "description": "Re-generate embeddings for all memories in the active profile.\n\nRun this after switching embedding providers or models (e.g. Ollama to OpenAI,\nor mxbai-embed-large to bge-m3). Vectors from different models are incompatible,\nso all existing embeddings need to be regenerated to keep search working.\n\nReports progress via MCP progress notifications.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/health_check": {
+      "post": {
+        "operationId": "health_check",
+        "summary": "Check connectivity to Supabase and the embedding provider.",
+        "description": "Check connectivity to Supabase and the embedding provider.\n\nReturns status of each dependency and the active config.\nUse this to diagnose connection issues.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/set_profile_ttl": {
+      "post": {
+        "operationId": "set_profile_ttl",
+        "summary": "Set a time-to-live (TTL) for memories in a profile. New memories stored in this",
+        "description": "Set a time-to-live (TTL) for memories in a profile. New memories stored in this\nprofile will automatically expire after ttl_days. Existing memories are unaffected.\n\nArgs:\n    profile: The profile to configure (e.g. \"work\", \"personal\").\n    ttl_days: Number of days before memories expire. Pass None to remove TTL.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "profile": {
+                    "type": "string"
+                  },
+                  "ttl_days": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": [
+                  "profile"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/export_profile": {
+      "post": {
+        "operationId": "export_profile",
+        "summary": "Export all memories in the active profile.",
+        "description": "Export all memories in the active profile.\n\nArgs:\n    format: Output format \u2014 \"json\" or \"markdown\".",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "format": {
+                    "default": "json",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/import_memories_tool": {
+      "post": {
+        "operationId": "import_memories_tool",
+        "summary": "Import memories into the active profile from a JSON export.",
+        "description": "Import memories into the active profile from a JSON export.\n\nArgs:\n    data: JSON string from a previous export_profile call.\n    dedup_threshold: Skip memories with similarity above this (0 to disable dedup).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "data": {
+                    "type": "string"
+                  },
+                  "dedup_threshold": {
+                    "default": 0.8,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "data"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/cleanup_expired": {
+      "post": {
+        "operationId": "cleanup_expired",
+        "summary": "Delete expired memories in the active profile. Expired memories are already",
+        "description": "Delete expired memories in the active profile. Expired memories are already\nhidden from searches and listings \u2014 this permanently removes them.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/get_stats": {
+      "post": {
+        "operationId": "get_stats",
+        "summary": "Get summary statistics for the active memory profile.",
+        "description": "Get summary statistics for the active memory profile.\n\nReturns total count, source breakdown, and top tags.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tools/get_cache_stats": {
+      "post": {
+        "operationId": "get_cache_stats",
+        "summary": "Get embedding cache statistics.",
+        "description": "Get embedding cache statistics.\n\nReturns current size, max size, hit/miss counts, eviction count, and hit rate.\nUseful for monitoring cache effectiveness.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

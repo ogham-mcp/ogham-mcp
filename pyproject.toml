@@ -1,0 +1,48 @@
+[project]
+name = "ogham-mcp"
+version = "0.3.0"
+description = "Shared memory MCP server — persistent, searchable, cross-client"
+requires-python = ">=3.13"
+dependencies = [
+    "fastmcp>=2.14",
+    "supabase>=2.0",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+    "ollama>=0.4",
+    "openai>=1.0",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.9"]
+postgres = [
+    "psycopg-pool>=3.1",
+    "psycopg[binary]>=3.1",
+]
+mistral = ["mistralai>=1.0"]
+voyage = ["voyageai>=0.3"]
+all = ["mistralai>=1.0", "voyageai>=0.3"]
+
+[project.scripts]
+ogham = "ogham.cli:main"
+ogham-serve = "ogham.server:main"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests that hit real Supabase + embedding provider (deselect with -m 'not integration')",
+    "postgres_integration: tests that hit real Postgres (deselect with -m 'not postgres_integration')",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ogham"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
