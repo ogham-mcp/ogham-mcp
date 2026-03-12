@@ -520,10 +520,10 @@ def _test_connection(env_vars: dict) -> bool:
         os.environ[key] = value
 
     try:
-        # Force fresh settings instance
-        import ogham.config
+        # Force fresh settings instance from the temp env vars
+        from ogham.config import settings
 
-        ogham.config.settings = ogham.config.Settings()
+        settings._force()
 
         # Check database
         with console.status("   Checking database..."):
@@ -562,7 +562,7 @@ def _test_connection(env_vars: dict) -> bool:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = original
-        ogham.config.settings = ogham.config.Settings()
+        settings._reset()
 
 
 # ---------------------------------------------------------------------------

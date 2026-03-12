@@ -105,6 +105,16 @@ def _lazy_settings():
                 _instance = Settings()
             return getattr(_instance, name)
 
+        def _reset(self):
+            """Discard cached instance so next access re-reads env vars."""
+            nonlocal _instance
+            _instance = None
+
+        def _force(self):
+            """Force a fresh Settings instance from current env vars."""
+            nonlocal _instance
+            _instance = Settings()
+
     return _Proxy()
 
 
