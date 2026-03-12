@@ -94,4 +94,18 @@ class Settings(BaseSettings):
         return self
 
 
-settings = Settings()
+def _lazy_settings():
+    """Lazy proxy so 'ogham init' can run before config exists."""
+    _instance = None
+
+    class _Proxy:
+        def __getattr__(self, name):
+            nonlocal _instance
+            if _instance is None:
+                _instance = Settings()
+            return getattr(_instance, name)
+
+    return _Proxy()
+
+
+settings = _lazy_settings()

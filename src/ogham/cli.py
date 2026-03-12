@@ -6,20 +6,6 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from ogham.config import settings
-from ogham.database import cleanup_expired as db_cleanup_expired
-from ogham.database import count_expired as db_count_expired
-from ogham.database import (
-    get_memory_stats,
-    get_profile_ttl,
-    hybrid_search_memories,
-    list_recent_memories,
-)
-from ogham.database import list_profiles as db_list_profiles
-from ogham.database import store_memory as db_store
-from ogham.embeddings import generate_embedding
-from ogham.health import full_health_check
-
 app = typer.Typer(
     name="ogham",
     help="Ogham Shared Memory — persistent memory for AI clients.",
@@ -57,6 +43,10 @@ def store(
     """Store a new memory."""
     from datetime import datetime, timedelta, timezone
 
+    from ogham.config import settings
+    from ogham.database import get_profile_ttl, store_memory as db_store
+    from ogham.embeddings import generate_embedding
+
     target = profile or settings.default_profile
     embedding = generate_embedding(content)
 
@@ -83,6 +73,8 @@ def store(
 @app.command()
 def health():
     """Check connectivity to Supabase and embedding provider."""
+    from ogham.health import full_health_check
+
     result = full_health_check()
 
     table = Table(title="Health Check")
@@ -102,6 +94,8 @@ def health():
 @app.command()
 def profiles():
     """List all memory profiles and their counts."""
+    from ogham.database import list_profiles as db_list_profiles
+
     data = db_list_profiles()
 
     table = Table(title="Profiles")
@@ -117,6 +111,9 @@ def profiles():
 @app.command()
 def stats(profile: str = typer.Option(None, help="Profile to show stats for")):
     """Show statistics for a memory profile."""
+    from ogham.config import settings
+    from ogham.database import get_memory_stats
+
     target = profile or settings.default_profile
     data = get_memory_stats(profile=target)
 
@@ -144,6 +141,10 @@ def search(
     tags: Optional[list[str]] = typer.Option(None, "--tag", help="Filter by tag"),
 ):
     """Search memories by meaning and keywords (hybrid search)."""
+    from ogham.config import settings
+    from ogham.database import hybrid_search_memories
+    from ogham.embeddings import generate_embedding
+
     target = profile or settings.default_profile
     embedding = generate_embedding(query)
     results = hybrid_search_memories(
@@ -180,6 +181,9 @@ def list_memories(
     source: Optional[str] = typer.Option(None, help="Filter by source"),
 ):
     """List recent memories."""
+    from ogham.config import settings
+    from ogham.database import list_recent_memories
+
     target = profile or settings.default_profile
     results = list_recent_memories(profile=target, limit=limit, source=source, tags=tags)
 
@@ -210,6 +214,10 @@ def cleanup(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ):
     """Remove expired memories."""
+    from ogham.config import settings
+    from ogham.database import cleanup_expired as db_cleanup_expired
+    from ogham.database import count_expired as db_count_expired
+
     target = profile or settings.default_profile
     count = db_count_expired(target)
 
@@ -238,6 +246,7 @@ def export_cmd(
     ),
 ):
     """Export memories from a profile."""
+    from ogham.config import settings
     from ogham.export_import import export_memories
 
     target = profile or settings.default_profile
@@ -260,6 +269,7 @@ def import_cmd(
     """Import memories from a JSON export file."""
     from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
 
+    from ogham.config import settings
     from ogham.export_import import import_memories
 
     target = profile or settings.default_profile
