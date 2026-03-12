@@ -308,6 +308,38 @@ def import_cmd(
 
 
 @app.command()
+def init(
+    db_url: str = typer.Option(None, help="PostgreSQL connection string"),
+    provider: str = typer.Option(None, help="Embedding provider (ollama/openai/voyage/mistral)"),
+    api_key: str = typer.Option(None, help="Embedding provider API key"),
+    backend: str = typer.Option(None, help="Database backend (supabase/postgres)"),
+    supabase_url: str = typer.Option(None, help="Supabase project URL"),
+    supabase_key: str = typer.Option(None, help="Supabase anon key"),
+    dim: int = typer.Option(None, help="Embedding dimensions (default: 512)"),
+    mode: str = typer.Option(None, help="Execution mode (uvx/docker)"),
+    skip_schema: bool = typer.Option(False, help="Skip schema migration"),
+    skip_clients: bool = typer.Option(False, help="Skip MCP client configuration"),
+    skip_test: bool = typer.Option(False, help="Skip connection test"),
+):
+    """Interactive setup wizard. Configures database, embeddings, and MCP clients."""
+    from ogham.init_wizard import run_init
+
+    run_init(
+        db_url=db_url,
+        provider=provider,
+        api_key=api_key,
+        backend=backend,
+        supabase_url=supabase_url,
+        supabase_key=supabase_key,
+        dim=dim,
+        mode=mode,
+        skip_schema=skip_schema,
+        skip_clients=skip_clients,
+        skip_test=skip_test,
+    )
+
+
+@app.command()
 def openapi(
     output: str = typer.Option("docs/openapi.json", help="Output file path"),
 ):
