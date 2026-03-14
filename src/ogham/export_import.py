@@ -108,9 +108,7 @@ def import_memories(
 
     # Phase 1: Batch embed all memories upfront
     all_texts = [mem["content"] for mem in memories]
-    embeddings = generate_embeddings_batch(
-        all_texts, on_progress=on_embed_progress
-    )
+    embeddings = generate_embeddings_batch(all_texts, on_progress=on_embed_progress)
 
     # Phase 2: Parallel batch dedup (concurrent RPC batches to use multiple DB cores)
     skipped = 0

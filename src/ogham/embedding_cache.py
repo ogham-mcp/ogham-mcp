@@ -54,9 +54,7 @@ class EmbeddingCache:
 
     def __contains__(self, key: str) -> bool:
         with self._lock:
-            row = self._conn.execute(
-                "SELECT 1 FROM embeddings WHERE key = ?", (key,)
-            ).fetchone()
+            row = self._conn.execute("SELECT 1 FROM embeddings WHERE key = ?", (key,)).fetchone()
             return row is not None
 
     def __len__(self) -> int:

@@ -30,9 +30,7 @@ def _can_connect() -> bool:
 
 pytestmark = [
     pytest.mark.postgres_integration,
-    pytest.mark.skipif(
-        not _can_connect(), reason="Postgres backend not configured or unreachable"
-    ),
+    pytest.mark.skipif(not _can_connect(), reason="Postgres backend not configured or unreachable"),
 ]
 
 

@@ -416,7 +416,8 @@ def test_check_database_success():
     from ogham.health import check_database
 
     mock_backend = MagicMock()
-    mock_backend._get_client.return_value.table.return_value.select.return_value.limit.return_value.execute.return_value = MagicMock()
+    chain = mock_backend._get_client.return_value.table.return_value
+    chain.select.return_value.limit.return_value.execute.return_value = MagicMock()
 
     with patch("ogham.health.get_backend", return_value=mock_backend):
         result = check_database()

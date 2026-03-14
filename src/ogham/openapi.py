@@ -38,9 +38,7 @@ def generate_openapi_spec() -> dict[str, Any]:
         spec["paths"][path] = {
             "post": {
                 "operationId": tool_name,
-                "summary": (
-                    description.split("\n")[0][:100] if description else tool_name
-                ),
+                "summary": (description.split("\n")[0][:100] if description else tool_name),
                 "description": description,
                 "requestBody": {
                     "required": True,

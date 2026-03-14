@@ -177,9 +177,7 @@ def test_actr_scoring_boosts_accessed_memories():
     stored_a = store_memory(
         content=content_a, embedding=emb_a, profile=TEST_PROFILE, tags=["boosted"]
     )
-    store_memory(
-        content=content_b, embedding=emb_b, profile=TEST_PROFILE, tags=["not-boosted"]
-    )
+    store_memory(content=content_b, embedding=emb_b, profile=TEST_PROFILE, tags=["not-boosted"])
 
     # Boost memory A with repeated access
     for _ in range(10):
@@ -413,15 +411,11 @@ def test_profile_isolation():
         )
 
         # Search in test profile should not return the other profile's memory
-        results = search_memories(
-            query_embedding=embedding, profile=TEST_PROFILE, threshold=0.3
-        )
+        results = search_memories(query_embedding=embedding, profile=TEST_PROFILE, threshold=0.3)
         assert all(r["profile"] == TEST_PROFILE for r in results)
 
         # Search in other profile should not return test profile's memory
-        results = search_memories(
-            query_embedding=embedding, profile=other_profile, threshold=0.3
-        )
+        results = search_memories(query_embedding=embedding, profile=other_profile, threshold=0.3)
         assert all(r["profile"] == other_profile for r in results)
     finally:
         get_client().table("memories").delete().eq("profile", other_profile).execute()
@@ -507,9 +501,7 @@ def test_expired_memories_hidden_from_search():
         expires_at=expired_at,
     )
 
-    results = search_memories(
-        query_embedding=embedding, profile=TEST_PROFILE, threshold=0.3
-    )
+    results = search_memories(query_embedding=embedding, profile=TEST_PROFILE, threshold=0.3)
     assert all(r["content"] != content for r in results)
 
     recent = list_recent_memories(profile=TEST_PROFILE)
@@ -559,11 +551,7 @@ def test_reinforce_increases_confidence():
 
     # Default confidence is 0.5
     row = (
-        get_client()
-        .table("memories")
-        .select("confidence")
-        .eq("id", stored["id"])
-        .execute()
+        get_client().table("memories").select("confidence").eq("id", stored["id"]).execute()
     ).data[0]
     assert row["confidence"] == 0.5
 
@@ -601,12 +589,8 @@ def test_confidence_affects_search_ranking():
     emb_high = generate_embedding(content_high)
     emb_low = generate_embedding(content_low)
 
-    stored_high = store_memory(
-        content=content_high, embedding=emb_high, profile=TEST_PROFILE
-    )
-    stored_low = store_memory(
-        content=content_low, embedding=emb_low, profile=TEST_PROFILE
-    )
+    stored_high = store_memory(content=content_high, embedding=emb_high, profile=TEST_PROFILE)
+    stored_low = store_memory(content=content_low, embedding=emb_low, profile=TEST_PROFILE)
 
     # Boost one, lower the other
     for _ in range(3):
@@ -780,7 +764,7 @@ def test_batch_check_duplicates():
     )
 
     assert len(results) == 2
-    assert results[0] is True   # same embedding = duplicate
+    assert results[0] is True  # same embedding = duplicate
     assert results[1] is False  # unrelated embedding = not a match
 
 
@@ -800,12 +784,8 @@ def test_auto_link_creates_edges():
     emb_a = generate_embedding(content_a)
     emb_b = generate_embedding(content_b)
 
-    stored_a = store_memory(
-        content=content_a, embedding=emb_a, profile=TEST_PROFILE, source="test"
-    )
-    stored_b = store_memory(
-        content=content_b, embedding=emb_b, profile=TEST_PROFILE, source="test"
-    )
+    stored_a = store_memory(content=content_a, embedding=emb_a, profile=TEST_PROFILE, source="test")
+    stored_b = store_memory(content=content_b, embedding=emb_b, profile=TEST_PROFILE, source="test")
 
     # Auto-link memory B — should find A as similar
     links_created = auto_link_memory(
@@ -841,23 +821,17 @@ def test_explore_knowledge_returns_graph():
     # Memory A: will be a seed match
     content_a = "Kubernetes pods restart automatically when health checks fail"
     emb_a = generate_embedding(content_a)
-    stored_a = store_memory(
-        content=content_a, embedding=emb_a, profile=TEST_PROFILE, source="test"
-    )
+    stored_a = store_memory(content=content_a, embedding=emb_a, profile=TEST_PROFILE, source="test")
 
     # Memory B: similar to A (should be linked)
     content_b = "K8s container health probes trigger automatic pod restarts on failure"
     emb_b = generate_embedding(content_b)
-    stored_b = store_memory(
-        content=content_b, embedding=emb_b, profile=TEST_PROFILE, source="test"
-    )
+    stored_b = store_memory(content=content_b, embedding=emb_b, profile=TEST_PROFILE, source="test")
 
     # Memory C: unrelated
     content_c = "Python virtualenvs isolate package dependencies per project"
     emb_c = generate_embedding(content_c)
-    store_memory(
-        content=content_c, embedding=emb_c, profile=TEST_PROFILE, source="test"
-    )
+    store_memory(content=content_c, embedding=emb_c, profile=TEST_PROFILE, source="test")
 
     # Create auto-links between A and B (both directions for reliability)
     auto_link_memory(

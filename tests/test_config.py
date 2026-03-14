@@ -1,7 +1,5 @@
 """Tests for Ogham config transport settings."""
 
-import os
-
 import pytest
 
 

@@ -185,9 +185,7 @@ def test_cli_store_with_ttl():
         mock_embed.return_value = [0.1] * 1024
         mock_store.return_value = {"id": "abc123", "created_at": "2026-01-01T00:00:00Z"}
         mock_ttl.return_value = 90
-        result = runner.invoke(
-            app, ["store", "work note", "--profile", "work"]
-        )
+        result = runner.invoke(app, ["store", "work note", "--profile", "work"])
 
     assert result.exit_code == 0
     call_kwargs = mock_store.call_args[1]

@@ -51,7 +51,7 @@ def find_decisions(topic: str) -> str:
 
     lines = [f"Found {len(results)} decisions related to '{topic}':\n"]
     for r in results:
-        relevance = r.get('relevance', r.get('similarity', 0))
+        relevance = r.get("relevance", r.get("similarity", 0))
         lines.append(f"- (relevance: {relevance:.3f}) {r['content']}")
     lines.append("\nPlease summarize these decisions and any patterns you notice.")
     return "\n".join(lines)
@@ -69,9 +69,7 @@ def profile_overview() -> str:
 
     sources = stats.get("sources") or {}
     if sources:
-        lines.append(
-            f"Sources: {', '.join(f'{k}: {v}' for k, v in sources.items())}"
-        )
+        lines.append(f"Sources: {', '.join(f'{k}: {v}' for k, v in sources.items())}")
 
     top_tags = stats.get("top_tags") or []
     if top_tags:

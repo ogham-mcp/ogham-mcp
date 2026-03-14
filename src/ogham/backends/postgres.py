@@ -15,10 +15,20 @@ from ogham.retry import with_retry
 logger = logging.getLogger(__name__)
 
 # Allowlist of valid memory table columns to prevent SQL injection via dynamic column names
-_ALLOWED_MEMORY_COLUMNS = frozenset({
-    "content", "embedding", "metadata", "source", "profile", "tags",
-    "expires_at", "access_count", "last_accessed_at", "confidence",
-})
+_ALLOWED_MEMORY_COLUMNS = frozenset(
+    {
+        "content",
+        "embedding",
+        "metadata",
+        "source",
+        "profile",
+        "tags",
+        "expires_at",
+        "access_count",
+        "last_accessed_at",
+        "confidence",
+    }
+)
 
 # Columns to SELECT when we don't want the embedding or fts vectors.
 _COLUMNS = (
@@ -352,9 +362,7 @@ class PostgresBackend:
             return []
         emb_literals = [_embedding_literal(e) for e in query_embeddings]
         result = self._execute(
-            "SELECT batch_check_duplicates("
-            "  %(embeddings)s::vector[], %(threshold)s, %(profile)s"
-            ")",
+            "SELECT batch_check_duplicates(  %(embeddings)s::vector[], %(threshold)s, %(profile)s)",
             {"embeddings": emb_literals, "threshold": threshold, "profile": profile},
             fetch="scalar",
         )

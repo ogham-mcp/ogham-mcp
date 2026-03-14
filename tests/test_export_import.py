@@ -88,10 +88,12 @@ def test_import_json():
     """import should parse JSON and store each memory"""
     from ogham.export_import import import_memories
 
-    export_data = json.dumps({
-        "profile": "default",
-        "memories": FAKE_MEMORIES,
-    })
+    export_data = json.dumps(
+        {
+            "profile": "default",
+            "memories": FAKE_MEMORIES,
+        }
+    )
 
     with (
         patch("ogham.export_import.generate_embeddings_batch") as mock_embed,
@@ -111,10 +113,12 @@ def test_import_with_dedup():
     """import should skip memories with matching content when dedup enabled"""
     from ogham.export_import import import_memories
 
-    export_data = json.dumps({
-        "profile": "default",
-        "memories": FAKE_MEMORIES,
-    })
+    export_data = json.dumps(
+        {
+            "profile": "default",
+            "memories": FAKE_MEMORIES,
+        }
+    )
 
     with (
         patch("ogham.export_import.generate_embeddings_batch") as mock_embed,
@@ -136,10 +140,12 @@ def test_import_with_ttl():
     """import should compute expires_at when profile has TTL"""
     from ogham.export_import import import_memories
 
-    export_data = json.dumps({
-        "profile": "work",
-        "memories": [FAKE_MEMORIES[0]],
-    })
+    export_data = json.dumps(
+        {
+            "profile": "work",
+            "memories": [FAKE_MEMORIES[0]],
+        }
+    )
 
     with (
         patch("ogham.export_import.generate_embeddings_batch") as mock_embed,
@@ -243,13 +249,15 @@ def test_import_uses_batch_insert():
     """import_memories should use store_memories_batch instead of individual inserts"""
     from ogham.export_import import import_memories
 
-    export_data = json.dumps({
-        "memories": [
-            {"content": "mem 1", "source": "test", "tags": ["t1"], "metadata": {}},
-            {"content": "mem 2", "source": "test", "tags": ["t2"], "metadata": {}},
-            {"content": "mem 3", "source": "test", "tags": ["t3"], "metadata": {}},
-        ],
-    })
+    export_data = json.dumps(
+        {
+            "memories": [
+                {"content": "mem 1", "source": "test", "tags": ["t1"], "metadata": {}},
+                {"content": "mem 2", "source": "test", "tags": ["t2"], "metadata": {}},
+                {"content": "mem 3", "source": "test", "tags": ["t3"], "metadata": {}},
+            ],
+        }
+    )
 
     with (
         patch("ogham.export_import.generate_embeddings_batch") as mock_embed,
@@ -272,13 +280,15 @@ def test_import_batch_insert_with_dedup():
     """import should batch-insert only non-duplicate memories"""
     from ogham.export_import import import_memories
 
-    export_data = json.dumps({
-        "memories": [
-            {"content": "mem 1", "source": "test", "tags": [], "metadata": {}},
-            {"content": "mem 2 (dup)", "source": "test", "tags": [], "metadata": {}},
-            {"content": "mem 3", "source": "test", "tags": [], "metadata": {}},
-        ],
-    })
+    export_data = json.dumps(
+        {
+            "memories": [
+                {"content": "mem 1", "source": "test", "tags": [], "metadata": {}},
+                {"content": "mem 2 (dup)", "source": "test", "tags": [], "metadata": {}},
+                {"content": "mem 3", "source": "test", "tags": [], "metadata": {}},
+            ],
+        }
+    )
 
     emb_1 = [0.1] * 768
     emb_2 = [0.2] * 768  # this one will be the "duplicate"
@@ -310,8 +320,7 @@ def test_import_batch_dedup():
     from ogham.export_import import import_memories
 
     memories_data = [
-        {"content": f"memory {i}", "source": "test", "tags": [], "metadata": {}}
-        for i in range(20)
+        {"content": f"memory {i}", "source": "test", "tags": [], "metadata": {}} for i in range(20)
     ]
     export_data = json.dumps({"memories": memories_data})
 
@@ -344,8 +353,7 @@ def test_import_uses_batch_dedup():
     from ogham.export_import import import_memories
 
     memories_data = [
-        {"content": f"memory {i}", "source": "test", "tags": [], "metadata": {}}
-        for i in range(5)
+        {"content": f"memory {i}", "source": "test", "tags": [], "metadata": {}} for i in range(5)
     ]
     export_data = json.dumps({"memories": memories_data})
 

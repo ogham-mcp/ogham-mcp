@@ -163,12 +163,8 @@ def _prompt_database() -> dict:
         env_vars["SUPABASE_KEY"] = key
     else:
         console.print("\n   Great. Paste your PostgreSQL connection string.")
-        console.print(
-            "   [cyan]Neon: Dashboard -> Connection Details -> Connection string[/cyan]"
-        )
-        console.print(
-            "   [cyan]Format: postgresql://user:pass@host:5432/dbname[/cyan]"
-        )
+        console.print("   [cyan]Neon: Dashboard -> Connection Details -> Connection string[/cyan]")
+        console.print("   [cyan]Format: postgresql://user:pass@host:5432/dbname[/cyan]")
         console.print(
             "   [cyan]Neon tip: pooler endpoint works fine."
             " Use direct endpoint only for schema migrations.[/cyan]"
@@ -249,7 +245,9 @@ def _prompt_transport() -> tuple[str, str, int]:
     """Ask transport mode. Returns (transport, host, port)."""
     console.print("\n[bold]3. Server transport[/bold]")
     console.print("   [bold]1)[/bold] Stdio  -- spawned per session (default, works everywhere)")
-    console.print("   [bold]2)[/bold] SSE    -- persistent background server (better for multiple agents)\n")
+    console.print(
+        "   [bold]2)[/bold] SSE    -- persistent background server (better for multiple agents)\n"
+    )
 
     choice = Prompt.ask(
         "   Choose",
@@ -279,8 +277,13 @@ def _prompt_execution_mode() -> str:
     return "uvx" if choice in ("1", "uvx") else "docker"
 
 
-def _build_mcp_entry(env_vars: dict, mode: str, transport: str = "stdio",
-                     sse_host: str = "127.0.0.1", sse_port: int = 8742) -> dict:
+def _build_mcp_entry(
+    env_vars: dict,
+    mode: str,
+    transport: str = "stdio",
+    sse_host: str = "127.0.0.1",
+    sse_port: int = 8742,
+) -> dict:
     """Build the MCP server config entry for Ogham."""
     if transport == "sse":
         return {"url": f"http://{sse_host}:{sse_port}/sse"}
@@ -290,12 +293,8 @@ def _build_mcp_entry(env_vars: dict, mode: str, transport: str = "stdio",
     if mode == "docker":
         # Inside Docker, localhost means the container -- swap to host
         for key in env:
-            env[key] = env[key].replace(
-                "localhost", "host.docker.internal"
-            )
-            env[key] = env[key].replace(
-                "127.0.0.1", "host.docker.internal"
-            )
+            env[key] = env[key].replace("localhost", "host.docker.internal")
+            env[key] = env[key].replace("127.0.0.1", "host.docker.internal")
         return {
             "command": "docker",
             "args": [
@@ -358,8 +357,7 @@ def _run_schema(env_vars: dict) -> bool:
             adjusted_sql = _adjust_schema_dim(schema_path.read_text(), dim)
             adjusted_path.write_text(adjusted_sql)
             console.print(
-                f"   [yellow]Adjusted schema for {dim} dims:[/yellow]"
-                f" [bold]{adjusted_path}[/bold]"
+                f"   [yellow]Adjusted schema for {dim} dims:[/yellow] [bold]{adjusted_path}[/bold]"
             )
         elif schema_path:
             console.print(f"   Schema file: [bold]{schema_path}[/bold]")
@@ -504,8 +502,13 @@ def _write_mcp_config(client: dict, mcp_entry: dict):
     config_path.write_text(json.dumps(existing, indent=2) + "\n")
 
 
-def _configure_clients(env_vars: dict, mode: str, transport: str = "stdio",
-                       sse_host: str = "127.0.0.1", sse_port: int = 8742) -> list[str]:
+def _configure_clients(
+    env_vars: dict,
+    mode: str,
+    transport: str = "stdio",
+    sse_host: str = "127.0.0.1",
+    sse_port: int = 8742,
+) -> list[str]:
     """Write MCP config to detected AI clients."""
     step = "5" if transport == "stdio" else "4"
     console.print(f"\n[bold]{step}. Connect your AI clients[/bold]")

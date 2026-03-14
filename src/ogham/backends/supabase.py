@@ -251,13 +251,17 @@ class SupabaseBackend:
 
     def batch_update_embeddings(self, ids: list[str], embeddings: list[list[float]]) -> int:
         """Batch update embeddings for multiple memories in a single RPC call."""
-        result = self._get_client().rpc(
-            "batch_update_embeddings",
-            {
-                "memory_ids": ids,
-                "new_embeddings": [str(e) for e in embeddings],
-            },
-        ).execute()
+        result = (
+            self._get_client()
+            .rpc(
+                "batch_update_embeddings",
+                {
+                    "memory_ids": ids,
+                    "new_embeddings": [str(e) for e in embeddings],
+                },
+            )
+            .execute()
+        )
         return result.data if isinstance(result.data, int) else 0
 
     def record_access(self, memory_ids: list[str]) -> None:
@@ -268,10 +272,14 @@ class SupabaseBackend:
 
     def update_confidence(self, memory_id: str, signal: float, profile: str) -> float:
         """Update confidence via Bayesian posterior. Returns new confidence value."""
-        result = self._get_client().rpc(
-            "update_confidence",
-            {"memory_id": memory_id, "signal": signal, "memory_profile": profile},
-        ).execute()
+        result = (
+            self._get_client()
+            .rpc(
+                "update_confidence",
+                {"memory_id": memory_id, "signal": signal, "memory_profile": profile},
+            )
+            .execute()
+        )
         return result.data if isinstance(result.data, float) else 0.5
 
     def delete_memory(self, memory_id: str, profile: str) -> bool:
@@ -331,9 +339,7 @@ class SupabaseBackend:
     def count_expired(self, profile: str) -> int:
         """Count expired memories for a profile."""
         result = (
-            self._get_client()
-            .rpc("count_expired_memories", {"target_profile": profile})
-            .execute()
+            self._get_client().rpc("count_expired_memories", {"target_profile": profile}).execute()
         )
         return result.data if isinstance(result.data, int) else 0
 
@@ -347,16 +353,20 @@ class SupabaseBackend:
         max_links: int = 5,
     ) -> int:
         """Auto-link a memory to similar existing memories. Returns count of links created."""
-        result = self._get_client().rpc(
-            "auto_link_memory",
-            {
-                "new_memory_id": memory_id,
-                "new_embedding": str(embedding),
-                "link_threshold": threshold,
-                "max_links": max_links,
-                "filter_profile": profile,
-            },
-        ).execute()
+        result = (
+            self._get_client()
+            .rpc(
+                "auto_link_memory",
+                {
+                    "new_memory_id": memory_id,
+                    "new_embedding": str(embedding),
+                    "link_threshold": threshold,
+                    "max_links": max_links,
+                    "filter_profile": profile,
+                },
+            )
+            .execute()
+        )
         return result.data if isinstance(result.data, int) else 0
 
     @with_retry(max_attempts=2, base_delay=0.3)
@@ -371,15 +381,19 @@ class SupabaseBackend:
 
         Returns processed count.
         """
-        result = self._get_client().rpc(
-            "link_unlinked_memories",
-            {
-                "filter_profile": profile,
-                "link_threshold": threshold,
-                "max_links": max_links,
-                "batch_size": batch_size,
-            },
-        ).execute()
+        result = (
+            self._get_client()
+            .rpc(
+                "link_unlinked_memories",
+                {
+                    "filter_profile": profile,
+                    "link_threshold": threshold,
+                    "max_links": max_links,
+                    "batch_size": batch_size,
+                },
+            )
+            .execute()
+        )
         return result.data if isinstance(result.data, int) else 0
 
     @with_retry(max_attempts=2, base_delay=0.3)

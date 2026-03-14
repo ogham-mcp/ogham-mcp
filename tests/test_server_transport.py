@@ -32,9 +32,7 @@ def test_server_sse_transport(monkeypatch):
         from ogham.server import main
 
         main(transport="sse", host="0.0.0.0", port=9000)
-        mock_mcp.run.assert_called_once_with(
-            transport="sse", host="0.0.0.0", port=9000
-        )
+        mock_mcp.run.assert_called_once_with(transport="sse", host="0.0.0.0", port=9000)
 
 
 def test_server_cli_overrides_env(monkeypatch):
@@ -52,6 +50,4 @@ def test_server_cli_overrides_env(monkeypatch):
         from ogham.server import main
 
         main(transport="sse", host="127.0.0.1", port=9000)
-        mock_mcp.run.assert_called_once_with(
-            transport="sse", host="127.0.0.1", port=9000
-        )
+        mock_mcp.run.assert_called_once_with(transport="sse", host="127.0.0.1", port=9000)

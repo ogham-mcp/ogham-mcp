@@ -77,6 +77,7 @@ def test_embedding_generation_retries_on_connection_error():
         mock_client = MagicMock()
         mock_client.embed = mock_ollama_embed
         import uuid
+
         unique_text = f"retry_test_{uuid.uuid4()}"
         with patch("ogham.embeddings._ollama_client", mock_client):
             result = generate_embedding(unique_text)

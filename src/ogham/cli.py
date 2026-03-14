@@ -52,7 +52,8 @@ def store(
     from datetime import datetime, timedelta, timezone
 
     from ogham.config import settings
-    from ogham.database import get_profile_ttl, store_memory as db_store
+    from ogham.database import get_profile_ttl
+    from ogham.database import store_memory as db_store
     from ogham.embeddings import generate_embedding
 
     target = profile or settings.default_profile
@@ -61,9 +62,7 @@ def store(
     ttl_days = get_profile_ttl(target)
     expires_at = None
     if ttl_days is not None:
-        expires_at = (
-            datetime.now(timezone.utc) + timedelta(days=ttl_days)
-        ).isoformat()
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=ttl_days)).isoformat()
 
     result = db_store(
         content=content,

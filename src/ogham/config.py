@@ -92,13 +92,9 @@ class Settings(BaseSettings):
     def validate_config(self) -> "Settings":
         """Set provider-aware defaults and validate backend config."""
         if self.embedding_dim is None:
-            self.embedding_dim = PROVIDER_DEFAULT_DIMS.get(
-                self.embedding_provider, 1024
-            )
+            self.embedding_dim = PROVIDER_DEFAULT_DIMS.get(self.embedding_provider, 1024)
         if self.embedding_batch_size is None:
-            self.embedding_batch_size = PROVIDER_BATCH_DEFAULTS.get(
-                self.embedding_provider, 50
-            )
+            self.embedding_batch_size = PROVIDER_BATCH_DEFAULTS.get(self.embedding_provider, 50)
         if self.database_backend == "supabase" and not self.supabase_url:
             raise ValueError("SUPABASE_URL is required when DATABASE_BACKEND=supabase")
         if self.database_backend == "postgres" and not self.database_url:

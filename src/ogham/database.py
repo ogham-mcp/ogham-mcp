@@ -46,9 +46,7 @@ def get_client():
     """
     backend = get_backend()
     if not hasattr(backend, "_get_client"):
-        raise RuntimeError(
-            f"Backend {type(backend).__name__!r} does not expose a raw client"
-        )
+        raise RuntimeError(f"Backend {type(backend).__name__!r} does not expose a raw client")
     return backend._get_client()
 
 
