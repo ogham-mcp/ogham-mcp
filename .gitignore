@@ -28,6 +28,10 @@ htmlcov/
 # MCP config (local per-machine)
 .mcp*.json
 
+# Skills installed via npx (symlinked from .agents/)
+.agents/
+.claude/skills/
+
 # UV
 
 # Docker

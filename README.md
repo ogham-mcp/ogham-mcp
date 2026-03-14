@@ -234,7 +234,7 @@ Each provider clusters vectors differently, so the similarity threshold matters.
 
 ## Skills
 
-Ogham ships with three workflow skills in `skills/` that teach AI assistants how to orchestrate the MCP tools above. Install them in Claude Code, Cursor, or any client that supports skills.
+Ogham ships with three workflow skills in `skills/` that wire up common MCP tool chains. Install them in Claude Code, Cursor, or any client that supports skills.
 
 | Skill | Triggers on | What it does |
 |-------|-------------|-------------|
@@ -242,7 +242,7 @@ Ogham ships with three workflow skills in `skills/` that teach AI assistants how
 | `ogham-recall` | "what do I know about X", "find related", "context for this project" | Chains hybrid_search, find_related, and explore_knowledge to surface connections. Bootstraps session context at project start. |
 | `ogham-maintain` | "memory stats", "clean up my memory", "export my brain" | Runs health_check, get_stats, cleanup_expired, re_embed_all, link_unlinked. Warns before irreversible operations. |
 
-The skills orchestrate existing MCP tools -- they don't replace them. The MCP server must be connected for skills to work.
+Skills call existing MCP tools -- they don't replace them. The MCP server must be connected for skills to work.
 
 Install all three with npx:
 
