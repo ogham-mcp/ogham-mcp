@@ -2,7 +2,20 @@
 name = "ogham-mcp"
 version = "0.3.0"
 description = "Shared memory MCP server — persistent, searchable, cross-client"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.13"
+authors = [
+    { name = "Kevin Burns" },
+]
+keywords = ["mcp", "memory", "ai", "agents", "supabase", "pgvector", "embeddings"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
 dependencies = [
     "fastmcp>=2.14",
     "supabase>=2.0",
@@ -12,6 +25,11 @@ dependencies = [
     "openai>=1.0",
     "typer>=0.12",
 ]
+
+[project.urls]
+Homepage = "https://ogham-mcp.dev"
+Repository = "https://github.com/ogham-mcp/ogham-mcp"
+Documentation = "https://ogham-mcp.dev"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.9"]
