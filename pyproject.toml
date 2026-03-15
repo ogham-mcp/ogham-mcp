@@ -12,6 +12,7 @@ dependencies = [
     "openai>=1.0",
     "typer>=0.12",
     "stop-words>=2024.2.1",
+    "parsedatetime>=2.6",
 ]
 
 [project.optional-dependencies]

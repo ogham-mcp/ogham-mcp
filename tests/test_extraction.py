@@ -45,6 +45,39 @@ def test_extract_no_dates():
     assert extract_dates("No dates here at all") == []
 
 
+def test_extract_relative_yesterday():
+    from ogham.extraction import extract_dates
+
+    result = extract_dates("We discussed this yesterday")
+    assert len(result) == 1
+    # Should be a valid ISO date (we can't assert exact value since it's relative)
+    assert len(result[0]) == 10  # YYYY-MM-DD format
+
+
+def test_extract_relative_last_tuesday():
+    from ogham.extraction import extract_dates
+
+    result = extract_dates("The meeting was last Tuesday")
+    assert len(result) == 1
+    assert len(result[0]) == 10
+
+
+def test_extract_relative_weeks_ago():
+    from ogham.extraction import extract_dates
+
+    result = extract_dates("We decided this 2 weeks ago")
+    assert len(result) == 1
+    assert len(result[0]) == 10
+
+
+def test_extract_absolute_preferred_over_relative():
+    from ogham.extraction import extract_dates
+
+    # When absolute dates exist, relative parsing is skipped
+    result = extract_dates("On 2023-05-07 we had a meeting yesterday")
+    assert "2023-05-07" in result
+
+
 def test_temporal_intent_true():
     from ogham.extraction import has_temporal_intent
 

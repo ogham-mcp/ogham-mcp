@@ -7,7 +7,11 @@ metadata (dates) and tags (entities) automatically.
 import re
 from datetime import datetime
 
+import parsedatetime
 from stop_words import AVAILABLE_LANGUAGES, get_stop_words
+
+# parsedatetime calendar for relative date parsing (zero deps, English)
+_PDT_CAL = parsedatetime.Calendar()
 
 # --- Stopwords (34 languages, loaded once) ---
 
@@ -26,6 +30,16 @@ _MONTHS = (
 _NATURAL_DATE = re.compile(
     rf"\b{_MONTHS}\s+\d{{1,2}}(?:st|nd|rd|th)?,?\s*\d{{4}}\b"
     rf"|\b\d{{1,2}}\s+{_MONTHS}\s+\d{{4}}\b",
+    re.IGNORECASE,
+)
+
+# Patterns for relative date phrases to feed to parsedatetime
+_RELATIVE_PHRASES = re.compile(
+    r"\b((?:last|next|this)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday"
+    r"|week|month|year)"
+    r"|yesterday|today|tomorrow"
+    r"|\d+\s+(?:days?|weeks?|months?|years?)\s+ago"
+    r"|in\s+\d+\s+(?:days?|weeks?|months?|years?))\b",
     re.IGNORECASE,
 )
 
@@ -70,6 +84,18 @@ def extract_dates(content: str) -> list[str]:
                     continue
         except Exception:
             continue
+
+    # Relative dates via parsedatetime ("last Tuesday", "yesterday", "two weeks ago")
+    # Only attempt if no absolute dates found and content has temporal keywords
+    if not dates:
+        for phrase in _RELATIVE_PHRASES.findall(content):
+            try:
+                result, status = _PDT_CAL.parse(phrase)
+                if status:
+                    dt = datetime(*result[:6])
+                    dates.add(dt.strftime("%Y-%m-%d"))
+            except Exception:
+                continue
 
     return sorted(dates)
 
