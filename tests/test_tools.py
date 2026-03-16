@@ -26,7 +26,10 @@ def reset_profile():
 
 @pytest.fixture
 def mock_embedding():
-    with patch("ogham.tools.memory.generate_embedding") as mock:
+    with (
+        patch("ogham.tools.memory.generate_embedding") as mock,
+        patch("ogham.service.generate_embedding", mock),
+    ):
         mock.return_value = [0.1] * 1024
         yield mock
 
@@ -34,14 +37,14 @@ def mock_embedding():
 @pytest.fixture
 def mock_db():
     with (
-        patch("ogham.tools.memory.db_store") as store,
-        patch("ogham.tools.memory.hybrid_search_memories") as search,
+        patch("ogham.service.db_store") as store,
+        patch("ogham.service.hybrid_search_memories") as search,
+        patch("ogham.service.record_access") as rec_access,
+        patch("ogham.service.db_get_profile_ttl") as get_ttl,
+        patch("ogham.service.db_auto_link") as auto_link,
         patch("ogham.tools.memory.list_recent_memories") as list_recent,
         patch("ogham.tools.memory.db_delete") as delete,
         patch("ogham.tools.memory.db_update") as update,
-        patch("ogham.tools.memory.db_get_profile_ttl") as get_ttl,
-        patch("ogham.tools.memory.record_access") as rec_access,
-        patch("ogham.tools.memory.db_auto_link") as auto_link,
     ):
         store.return_value = {
             "id": FAKE_ID,
@@ -214,7 +217,7 @@ def test_update_memory_wrong_profile(mock_embedding, mock_db):
     mock_db["update"].side_effect = KeyError("not found in profile 'work'")
 
     with pytest.raises(KeyError, match="not found in profile"):
-        update_memory(memory_id=FAKE_ID, content="updated")
+        update_memory(memory_id=FAKE_ID, content="updated content for this memory")
 
     mock_db["update"].assert_called_once()
     call_args = mock_db["update"].call_args
@@ -343,6 +346,36 @@ def test_store_memory_too_long():
     long_content = "x" * 100_001
     with pytest.raises(ValueError, match="exceeds maximum length"):
         store_memory(content=long_content)
+
+
+def test_store_memory_too_short():
+    from ogham.tools.memory import store_memory
+
+    with pytest.raises(ValueError, match="too short"):
+        store_memory(content="hello")
+
+
+def test_store_memory_diff_noise_rejected():
+    from ogham.tools.memory import store_memory
+
+    diff_content = (
+        "diff --git a/foo.py b/foo.py\n"
+        "--- a/foo.py\n"
+        "+++ b/foo.py\n"
+        "@@ -1,3 +1,4 @@\n"
+        "+import os\n"
+        " import sys\n"
+    )
+    with pytest.raises(ValueError, match="diff"):
+        store_memory(content=diff_content)
+
+
+def test_store_memory_valid_content_passes():
+    """Content that mentions diffs in prose should NOT be rejected."""
+    from ogham.tools.memory import _require_content
+
+    # This mentions "diff" but isn't a raw diff dump
+    _require_content("We ran git diff and found that the migration was missing the new column.")
 
 
 def test_hybrid_search_no_threshold_param(mock_embedding, mock_db):
@@ -739,9 +772,9 @@ def test_store_memory_computes_expires_at(mock_embedding, mock_db):
     """store_memory should set expires_at when profile has TTL"""
     from ogham.tools.memory import store_memory
 
-    with patch("ogham.tools.memory.db_get_profile_ttl") as mock_ttl:
+    with patch("ogham.service.db_get_profile_ttl") as mock_ttl:
         mock_ttl.return_value = 90
-        store_memory(content="work note", source="test")
+        store_memory(content="work note about the project architecture", source="test")
 
     call_kwargs = mock_db["store"].call_args[1]
     assert "expires_at" in call_kwargs
@@ -752,9 +785,9 @@ def test_store_memory_no_expires_at_without_ttl(mock_embedding, mock_db):
     """store_memory should not set expires_at when profile has no TTL"""
     from ogham.tools.memory import store_memory
 
-    with patch("ogham.tools.memory.db_get_profile_ttl") as mock_ttl:
+    with patch("ogham.service.db_get_profile_ttl") as mock_ttl:
         mock_ttl.return_value = None
-        store_memory(content="personal note", source="test")
+        store_memory(content="personal note about a side project", source="test")
 
     call_kwargs = mock_db["store"].call_args[1]
     assert call_kwargs.get("expires_at") is None

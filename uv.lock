@@ -1295,14 +1295,16 @@ wheels = [
 
 [[package]]
 name = "ogham-mcp"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
     { name = "ollama" },
     { name = "openai" },
+    { name = "parsedatetime" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
+    { name = "stop-words" },
     { name = "supabase" },
     { name = "typer" },
 ]
@@ -1310,8 +1312,6 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "mistralai" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "psycopg-pool" },
     { name = "voyageai" },
 ]
 dev = [
@@ -1337,15 +1337,15 @@ requires-dist = [
     { name = "mistralai", marker = "extra == 'mistral'", specifier = ">=1.0" },
     { name = "ollama", specifier = ">=0.4" },
     { name = "openai", specifier = ">=1.0" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'all'", specifier = ">=3.1" },
+    { name = "parsedatetime", specifier = ">=2.6" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
-    { name = "psycopg-pool", marker = "extra == 'all'", specifier = ">=3.1" },
     { name = "psycopg-pool", marker = "extra == 'postgres'", specifier = ">=3.1" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9" },
+    { name = "stop-words", specifier = ">=2024.2.1" },
     { name = "supabase", specifier = ">=2.0" },
     { name = "typer", specifier = ">=0.12" },
     { name = "voyageai", marker = "extra == 'all'", specifier = ">=0.3" },
@@ -1524,6 +1524,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/65/ee/299d360cdc32edc7d2cf530f3accf79c4fca01e96ffc950d8a52213bd8e4/packaging-26.0.tar.gz", hash = "sha256:00243ae351a257117b6a241061796684b084ed1c516a08c48a3f7e147a9d80b4", size = 143416, upload-time = "2026-01-21T20:50:39.064Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/b9/c538f279a4e237a006a2c98387d081e9eb060d203d8ed34467cc0f0b9b53/packaging-26.0-py3-none-any.whl", hash = "sha256:b36f1fef9334a5588b4166f8bcd26a14e521f2b55e6b9de3aaa80d3ff7a37529", size = 74366, upload-time = "2026-01-21T20:50:37.788Z" },
+]
+
+[[package]]
+name = "parsedatetime"
+version = "2.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a8/20/cb587f6672dbe585d101f590c3871d16e7aec5a576a1694997a3777312ac/parsedatetime-2.6.tar.gz", hash = "sha256:4cb368fbb18a0b7231f4d76119165451c8d2e35951455dfee97c62a87b04d455", size = 60114, upload-time = "2020-05-31T23:50:57.443Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9d/a4/3dd804926a42537bf69fb3ebb9fd72a50ba84f807d95df5ae016606c976c/parsedatetime-2.6-py3-none-any.whl", hash = "sha256:cb96edd7016872f58479e35879294258c71437195760746faffedb692aef000b", size = 42548, upload-time = "2020-05-31T23:50:56.315Z" },
 ]
 
 [[package]]
@@ -2331,6 +2340,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c4/68/79977123bb7be889ad680d79a40f339082c1978b5cfcf62c2d8d196873ac/starlette-0.52.1.tar.gz", hash = "sha256:834edd1b0a23167694292e94f597773bc3f89f362be6effee198165a35d62933", size = 2653702, upload-time = "2026-01-18T13:34:11.062Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/81/0d/13d1d239a25cbfb19e740db83143e95c772a1fe10202dda4b76792b114dd/starlette-0.52.1-py3-none-any.whl", hash = "sha256:0029d43eb3d273bc4f83a08720b4912ea4b071087a3b48db01b7c839f7954d74", size = 74272, upload-time = "2026-01-18T13:34:09.188Z" },
+]
+
+[[package]]
+name = "stop-words"
+version = "2025.11.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b7/cb/27ee3d3e0b7b1169269e83331c075b2dd3c4bcc1a005821174c32a273dc4/stop_words-2025.11.4.tar.gz", hash = "sha256:0459072b54b11e43a6fb4c5b05bda87d2accfc4f14c1697974f3739af0f7b43d", size = 68622, upload-time = "2025-11-03T21:07:42.359Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fc/f5/992d668d21590ed39c6a9d1c62220e9b4b086a165e15fcb7580764cc7ceb/stop_words-2025.11.4-py3-none-any.whl", hash = "sha256:b3fc0722e42b722a9350aad59a8ba5850085a5b45a4ba9de390b4f5c4b86df25", size = 59496, upload-time = "2025-11-03T21:07:41.14Z" },
 ]
 
 [[package]]
