@@ -25,11 +25,7 @@ This runs the setup wizard. It walks you through everything: database connection
 
 ### 2. Add to your MCP client
 
-The wizard generates the right config for your client. For Claude Code:
-
-```bash
-claude mcp add ogham -- uvx ogham-mcp
-```
+The wizard configures everything and writes your client config -- including all environment variables the server needs. For Claude Code, it runs `claude mcp add` automatically. For other clients, copy the config snippet it prints.
 
 ### 3. Use it
 
