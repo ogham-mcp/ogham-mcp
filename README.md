@@ -13,21 +13,31 @@ Ogham gives your agents a shared memory that persists across sessions and client
 
 ## Quick start
 
-### 1. Set up your database
+### 1. Install
 
-**Supabase** (free tier works): create a project at [supabase.com](https://supabase.com), then run `sql/schema.sql` in the SQL editor.
+```bash
+uvx ogham-mcp init
+```
 
-**Postgres** ([Neon](https://neon.tech), self-hosted, etc.): run `sql/schema_postgres.sql` against your database. Needs PostgreSQL 15+ with pgvector.
+This runs the setup wizard. It walks you through everything: database connection, embedding provider, schema migration, and writes MCP client configs for Claude Code, Cursor, VS Code, and others.
 
-### 2. Install
+> **You need a database before running this.** Either create a free [Supabase](https://supabase.com) project or a [Neon](https://neon.tech) database. The wizard handles the rest.
+
+### 2. Add to your MCP client
+
+The wizard generates the right config for your client. For Claude Code:
 
 ```bash
 claude mcp add ogham -- uvx ogham-mcp
 ```
 
-The `ogham init` wizard walks you through database setup, embedding provider, and writes MCP client configs. Run it before adding the server to your client.
+### 3. Use it
 
-### 3. Configure
+Tell your agent to remember something, then ask about it later -- from the same client or a different one. It works because they all share the same database.
+
+### Manual setup (if you prefer)
+
+If you'd rather configure things yourself instead of using the wizard:
 
 ```bash
 # Supabase
@@ -43,17 +53,7 @@ export EMBEDDING_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
 ```
 
-Or skip the manual setup and run the interactive wizard:
-
-```bash
-ogham init
-```
-
-It walks you through database connection, embedding provider, schema migration, and writes MCP client configs for Claude Code, Cursor, VS Code, and others.
-
-### 4. Use it
-
-Tell your agent to remember something, then ask about it later -- from the same client or a different one. It works because they all hit the same database.
+Run the schema migration (`sql/schema.sql` for Supabase, `sql/schema_postgres.sql` for Neon/self-hosted), then add the MCP server to your client.
 
 ## Installation methods
 
