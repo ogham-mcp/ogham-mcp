@@ -325,6 +325,27 @@ Supabase and Neon both include pgvector out of the box -- no extra setup needed.
 
 For Postgres, set `DATABASE_BACKEND=postgres` and `DATABASE_URL=postgresql://...` in your environment.
 
+### Upgrading from v0.4.x
+
+If you already have an Ogham database, run the upgrade script to add temporal columns, halfvec compression, and lz4:
+
+```bash
+# Postgres / Neon (psql required)
+./sql/upgrade.sh $DATABASE_URL
+
+# Or run migrations individually
+psql $DATABASE_URL -f sql/migrations/012_temporal_columns.sql
+psql $DATABASE_URL -f sql/migrations/013_halfvec_compression.sql
+psql $DATABASE_URL -f sql/migrations/014_lz4_toast_compression.sql
+psql $DATABASE_URL -f sql/migrations/015_temporal_auto_extract.sql
+
+# Supabase: paste each migration file into the SQL Editor
+```
+
+All migrations are idempotent -- safe to re-run. The upgrade script checks your pgvector version and skips halfvec if pgvector is below 0.7.0.
+
+New installs don't need migrations -- the schema files already include everything.
+
 ## Architecture
 
 Ogham runs as an MCP server over stdio or SSE. Your AI client connects to it like any other MCP tool.
