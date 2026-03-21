@@ -9,6 +9,7 @@
 
 ## Contents
 
+- [Retrieval quality](#retrieval-quality) -- 97.2% R@10 on LongMemEval
 - [The problem](#the-problem)
 - [Quick start](#quick-start)
 - [Installation methods](#installation-methods) -- Claude Code, OpenCode, Docker, source
@@ -21,6 +22,22 @@
 - [Database setup](#database-setup) -- Supabase, Neon, vanilla Postgres
   - [Upgrading from v0.4.x](#upgrading-from-v04x)
 - [Architecture](#architecture)
+
+## Retrieval quality
+
+**97.2% Recall@10** on [LongMemEval](https://arxiv.org/abs/2410.10813) (500 questions, ICLR 2025). No LLM in the search pipeline -- one PostgreSQL query, no neural rerankers, no knowledge graph.
+
+| Category | R@10 | Questions |
+|----------|------|-----------|
+| single-session-assistant | 100% | 56 |
+| knowledge-update | 100% | 78 |
+| single-session-user | 98.6% | 70 |
+| multi-session | 97.3% | 133 |
+| single-session-preference | 96.7% | 30 |
+| temporal-reasoning | 93.5% | 133 |
+| **Overall** | **97.2%** | **500** |
+
+Full breakdown: [ogham-mcp.dev/features](https://ogham-mcp.dev/features/#retrieval-quality)
 
 ## The problem
 
