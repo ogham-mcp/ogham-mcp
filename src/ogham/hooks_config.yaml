@@ -1,0 +1,328 @@
+# Ogham Hooks Configuration
+# Signal filtering and secret masking patterns.
+# Edit this file to customise what gets captured and masked.
+# Changes take effect on next hook invocation (no restart needed).
+
+# --- Signal filtering ---
+# Only tool activity matching these keywords is captured.
+# Everything else is treated as noise and skipped.
+
+signals:
+  errors:
+    - error
+    - fail
+    - fix
+    - bug
+    - broke
+    - crash
+    - exception
+    - traceback
+    - stacktrace
+    - segfault
+    - panic
+
+  decisions:
+    - decided
+    - chose
+    - switch
+    - migrate
+    - replace
+    - refactor
+    - deprecated
+    - removed
+    - added
+    - changed
+
+  infrastructure:
+    - config
+    - deploy
+    - release
+    - install
+    - upgrade
+    - rollback
+    - permission
+    - denied
+    - timeout
+    - refused
+    - certificate
+
+  devops:
+    - docker
+    - railway
+    - neon
+    - supabase
+    - vercel
+    - cloudflare
+    - terraform
+    - kubernetes
+    - k8s
+    - helm
+    # Azure
+    - az
+    - bicep
+    - arm template
+    # AWS
+    - aws
+    - cdk
+    - cloudformation
+    - lambda
+    - s3
+    - ec2
+    - ecs
+    - eks
+
+  testing:
+    - test
+    - pytest
+    - jest
+    - vitest
+    - mocha
+    - passed
+    - failed
+    - coverage
+
+  security:
+    - secret
+    - credential
+    - auth
+    - token
+    - vulnerability
+    - cve
+    - cors
+    - csrf
+
+  database:
+    - migration
+    - schema
+    - index
+    - vacuum
+    - replication
+    - seed
+    - rollback
+
+  workarounds:
+    - todo
+    - hack
+    - workaround
+    - gotcha
+    - caveat
+    - warning
+    - fixme
+    - xxx
+
+  packages:
+    - pip install
+    - npm install
+    - yarn add
+    - pnpm add
+    - uv add
+    - go get
+    - cargo add
+    - dotnet add
+    - nuget install
+    - brew install
+
+# --- Noise filtering ---
+# These are always skipped, never captured.
+
+noise_commands:
+  - ls
+  - pwd
+  - cd
+  - cat
+  - head
+  - tail
+  - wc
+  - echo
+  - date
+  - whoami
+  - which
+  - type
+  - clear
+  - history
+  - man
+  - help
+
+routine_tools:
+  - Read
+  - Glob
+  - Grep
+  - Bash
+  - ListDir
+
+git_signal:
+  - commit
+  - push
+  - merge
+  - rebase
+  - tag
+  - release
+  - reset
+  - revert
+  - cherry-pick
+
+git_noise:
+  - add
+  - status
+  - diff
+  - log
+  - show
+  - branch
+  - checkout
+  - switch
+  - fetch
+  - pull
+  - stash
+  - clean
+  - gc
+  - remote
+  - config
+
+# --- Secret masking ---
+# Patterns for detecting secrets. Values are masked with ***MASKED***.
+
+secrets:
+  # Bare tokens (detected without KEY= prefix)
+  bare_tokens:
+    - name: GitHub PAT
+      pattern: 'ghp_[A-Za-z0-9]{36}'
+    - name: GitHub OAuth
+      pattern: 'gho_[A-Za-z0-9]{36}'
+    - name: GitHub fine-grained PAT
+      pattern: 'github_pat_[A-Za-z0-9_]{20,}'
+    - name: GitLab PAT
+      pattern: 'glpat-[A-Za-z0-9\-]{20,}'
+    - name: AWS access key
+      pattern: 'AKIA[A-Z0-9]{16}'
+    - name: SendGrid
+      pattern: 'SG\.[A-Za-z0-9_\-]{20,}'
+    - name: Slack
+      pattern: 'xox[bpars]-[A-Za-z0-9\-]{10,}'
+    - name: Anthropic
+      pattern: 'sk-ant-[A-Za-z0-9\-]{20,}'
+    - name: OpenAI project
+      pattern: 'sk-proj-[A-Za-z0-9\-]{20,}'
+    - name: OpenAI legacy
+      pattern: 'sk-[A-Za-z0-9]{40,}'
+    - name: NPM
+      pattern: 'npm_[A-Za-z0-9]{36}'
+    - name: PyPI
+      pattern: 'pypi-[A-Za-z0-9]{20,}'
+    - name: Webhook secret (Clerk/Svix)
+      pattern: 'whsec_[A-Za-z0-9]{20,}'
+    - name: Ogham API key
+      pattern: 'ogham_live_[A-Za-z0-9_\-]{20,}'
+    - name: Telegram bot token
+      pattern: '\d{8,12}:[A-Za-z0-9_-]{35}'
+    - name: Discord bot token
+      pattern: '[A-Za-z0-9]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27}'
+    - name: Supabase secret key
+      pattern: 'sb_secret_[A-Za-z0-9_\-]{20,}'
+    - name: Neon password
+      pattern: 'npg_[A-Za-z0-9]{10,}'
+    - name: Voyage AI
+      pattern: 'pa-[A-Za-z0-9_\-]{20,}'
+    # AWS (from gitleaks)
+    - name: AWS session token
+      pattern: 'FwoGZX[A-Za-z0-9/+=]{100,}'
+    - name: AWS MWS auth token
+      pattern: 'amzn\.mws\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+    # Azure (from gitleaks)
+    - name: Azure Storage key
+      pattern: '[A-Za-z0-9+/]{86}=='
+    - name: Azure AD client secret
+      pattern: '[A-Za-z0-9~._-]{34}'
+    - name: Azure DevOps PAT
+      pattern: '[a-z2-7]{52}'
+    - name: Azure Connection String
+      pattern: 'DefaultEndpointsProtocol=https;AccountName=[^;]+;AccountKey=[A-Za-z0-9+/=]{86}'
+    - name: Azure SAS token
+      pattern: 'sv=\d{4}-\d{2}-\d{2}&s[a-z]=[a-z]&[a-z]{2,3}=[^&]+'
+    # GCP (from gitleaks)
+    - name: GCP API key
+      pattern: 'AIza[A-Za-z0-9_\-]{35}'
+    - name: GCP service account
+      pattern: '"type"\s*:\s*"service_account"'
+    # Stripe (from gitleaks)
+    - name: Stripe live secret
+      pattern: 'sk_live_[0-9a-zA-Z]{24,}'
+    - name: Stripe test secret
+      pattern: 'sk_test_[0-9a-zA-Z]{24,}'
+    - name: Stripe restricted
+      pattern: 'rk_live_[0-9a-zA-Z]{24,}'
+    # Grafana (from gitleaks)
+    - name: Grafana API key
+      pattern: 'eyJr[A-Za-z0-9_\-]{30,}'
+    - name: Grafana cloud token
+      pattern: 'glc_[A-Za-z0-9+/]{32,}'
+    - name: Grafana service token
+      pattern: 'glsa_[A-Za-z0-9]{32}_[A-Fa-f0-9]{8}'
+    # Linear (from gitleaks)
+    - name: Linear API key
+      pattern: 'lin_api_[A-Za-z0-9]{40}'
+    # Postman (from gitleaks)
+    - name: Postman API key
+      pattern: 'PMAK-[A-Za-z0-9]{24}-[A-Za-z0-9]{34}'
+    # Datadog (contextual -- needs DD_ prefix, caught by env_keys)
+    # Heroku
+    - name: Heroku API key
+      pattern: '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}'
+    # Hashicorp (from gitleaks)
+    - name: Vault token
+      pattern: 'hvs\.[A-Za-z0-9]{24,}'
+    - name: Terraform Cloud token
+      pattern: '[a-z0-9]{14}\.atlasv1\.[a-z0-9\-_=]{60,}'
+    # Private keys
+    - name: Private key header
+      pattern: '-----BEGIN (?:RSA|DSA|EC|OPENSSH|PGP) PRIVATE KEY-----'
+    # Twilio (from gitleaks)
+    - name: Twilio API key
+      pattern: 'SK[0-9a-fA-F]{32}'
+    # Mailgun (from gitleaks)
+    - name: Mailgun API key
+      pattern: 'key-[0-9a-zA-Z]{32}'
+    # Shopify (from gitleaks)
+    - name: Shopify access token
+      pattern: 'shpat_[a-fA-F0-9]{32}'
+    # Planetscale (from gitleaks)
+    - name: Planetscale token
+      pattern: 'pscale_tkn_[A-Za-z0-9\-_.]{43}'
+    # Doppler (from gitleaks)
+    - name: Doppler token
+      pattern: 'dp\.pt\.[a-zA-Z0-9]{43}'
+
+  # Environment variable names whose values should be masked
+  env_keys:
+    - api_key
+    - secret_key
+    - access_key
+    - access_token
+    - auth_token
+    - password
+    - passwd
+    - bearer
+    - private_key
+    - database_url
+    - connection_string
+    - dsn
+    - redis_url
+    - valkey_url
+    - mongodb_uri
+    - encryption_key
+    - signing_key
+    - webhook_secret
+    - client_secret
+    - service_key
+    - master_key
+    # AWS
+    - aws_secret_access_key
+    - aws_session_token
+    # Azure
+    - azure_storage_key
+    - azure_client_secret
+    # GCP
+    - gcp_credentials
+    - google_application_credentials
+    # Datadog
+    - datadog_api_key
+    - dd_api_key

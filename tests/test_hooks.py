@@ -278,9 +278,9 @@ def test_mask_secrets_bare_tokens():
     # AWS access key
     assert "***MASKED***" in _mask_secrets("AKIA1234567890ABCDEF")
 
-    # Slack token
+    # Slack token (values deliberately fake to avoid GitHub push protection)
     assert "***MASKED***" in _mask_secrets(
-        "xoxb-123456789012-1234567890123-abcdefghijklmnopqrstuvwx"
+        "xoxb-FAKETOKEN00-FAKETOKEN0000-FAKEabcdefghijklmnopqrst"
     )
 
     # Anthropic key

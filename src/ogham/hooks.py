@@ -12,17 +12,113 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 # Tools we never capture (prevent infinite loops)
 _SKIP_PREFIXES = ("mcp__ogham__", "ogham_", "store_memory", "hybrid_search")
 
-# Tools that are routine -- only capture if they contain signal keywords
-_ROUTINE_TOOLS = frozenset({"Read", "Glob", "Grep", "Bash", "ListDir"})
+# --- Config loading ---
+_config_cache: dict | None = None
 
-# Signal keywords that make a routine tool worth capturing
-_SIGNAL_KEYWORDS = frozenset(
+
+def _load_config() -> dict:
+    """Load hooks config from YAML file, with caching.
+
+    Looks for hooks_config.yaml next to this module, then falls back
+    to hardcoded defaults. Config is cached after first load.
+    """
+    global _config_cache
+    if _config_cache is not None:
+        return _config_cache
+
+    config_path = Path(__file__).parent / "hooks_config.yaml"
+    if config_path.exists():
+        try:
+            import yaml
+
+            with open(config_path) as f:
+                _config_cache = yaml.safe_load(f)
+                logger.debug("Loaded hooks config from %s", config_path)
+                return _config_cache
+        except ImportError:
+            logger.debug("PyYAML not installed, using hardcoded defaults")
+        except Exception as e:
+            logger.debug("Failed to load hooks config: %s", e)
+
+    # Return None to signal "use hardcoded defaults"
+    _config_cache = {}
+    return _config_cache
+
+
+def _get_signal_keywords() -> frozenset[str]:
+    """Get signal keywords from config or hardcoded defaults."""
+    cfg = _load_config()
+    if cfg and "signals" in cfg:
+        keywords = set()
+        for category_words in cfg["signals"].values():
+            if isinstance(category_words, list):
+                keywords.update(category_words)
+        return frozenset(keywords)
+    return _DEFAULT_SIGNAL_KEYWORDS
+
+
+def _get_noise_commands() -> frozenset[str]:
+    """Get noise commands from config or hardcoded defaults."""
+    cfg = _load_config()
+    if cfg and "noise_commands" in cfg:
+        return frozenset(cfg["noise_commands"])
+    return _DEFAULT_NOISE_COMMANDS
+
+
+def _get_routine_tools() -> frozenset[str]:
+    """Get routine tools from config or hardcoded defaults."""
+    cfg = _load_config()
+    if cfg and "routine_tools" in cfg:
+        return frozenset(cfg["routine_tools"])
+    return _DEFAULT_ROUTINE_TOOLS
+
+
+def _get_git_signal() -> frozenset[str]:
+    """Get git signal subcommands from config or hardcoded defaults."""
+    cfg = _load_config()
+    if cfg and "git_signal" in cfg:
+        return frozenset(cfg["git_signal"])
+    return _DEFAULT_GIT_SIGNAL
+
+
+def _get_git_noise() -> frozenset[str]:
+    """Get git noise subcommands from config or hardcoded defaults."""
+    cfg = _load_config()
+    if cfg and "git_noise" in cfg:
+        return frozenset(cfg["git_noise"])
+    return _DEFAULT_GIT_NOISE
+
+
+def _build_bare_secret_patterns() -> re.Pattern:
+    """Build bare token regex from config or hardcoded defaults."""
+    cfg = _load_config()
+    if cfg and "secrets" in cfg and "bare_tokens" in cfg["secrets"]:
+        patterns = [entry["pattern"] for entry in cfg["secrets"]["bare_tokens"]]
+        combined = "|".join(f"(?:{p})" for p in patterns)
+        return re.compile(combined)
+    return _DEFAULT_BARE_SECRET_PATTERNS
+
+
+def _get_env_secret_keys() -> frozenset[str]:
+    """Get env secret key names from config or hardcoded defaults."""
+    cfg = _load_config()
+    if cfg and "secrets" in cfg and "env_keys" in cfg["secrets"]:
+        return frozenset(cfg["secrets"]["env_keys"])
+    return _DEFAULT_ENV_SECRET_KEYS
+
+
+# --- Hardcoded defaults (used when YAML config is missing or PyYAML not installed) ---
+
+_DEFAULT_ROUTINE_TOOLS = frozenset({"Read", "Glob", "Grep", "Bash", "ListDir"})
+
+_DEFAULT_SIGNAL_KEYWORDS = frozenset(
     {
         # Errors and debugging
         "error",
@@ -107,7 +203,7 @@ _SIGNAL_KEYWORDS = frozenset(
 )
 
 # Noise commands we never capture
-_NOISE_COMMANDS = frozenset(
+_DEFAULT_NOISE_COMMANDS = frozenset(
     {
         "ls",
         "pwd",
@@ -127,7 +223,7 @@ _NOISE_COMMANDS = frozenset(
 )
 
 # Git subcommands worth capturing (commits, pushes, merges -- not maintenance)
-_GIT_SIGNAL = frozenset(
+_DEFAULT_GIT_SIGNAL = frozenset(
     {
         "commit",
         "push",
@@ -141,7 +237,7 @@ _GIT_SIGNAL = frozenset(
     }
 )
 # Git subcommands that are noise
-_GIT_NOISE = frozenset(
+_DEFAULT_GIT_NOISE = frozenset(
     {
         "add",
         "status",
@@ -192,7 +288,7 @@ _SECRET_PATTERNS = re.compile(
 )
 
 # Bare tokens that don't need a KEY= prefix to be recognised
-_BARE_SECRET_PATTERNS = re.compile(
+_DEFAULT_BARE_SECRET_PATTERNS = re.compile(
     r"(?:"
     r"ghp_[A-Za-z0-9]{36}"  # GitHub PAT
     r"|gho_[A-Za-z0-9]{36}"  # GitHub OAuth
@@ -216,7 +312,7 @@ _BARE_SECRET_PATTERNS = re.compile(
 # Basic auth in URLs: user:pass@host
 _URL_CREDENTIALS = re.compile(r"://([^:]+):([^@]{3,})@")
 
-_ENV_SECRET_KEYS = frozenset(
+_DEFAULT_ENV_SECRET_KEYS = frozenset(
     {
         "api_key",
         "secret_key",
@@ -260,11 +356,11 @@ def _mask_secrets(text: str) -> str:
         text,
     )
     # Layer 2: Bare tokens (no KEY= prefix needed)
-    masked = _BARE_SECRET_PATTERNS.sub("***MASKED***", masked)
+    masked = _build_bare_secret_patterns().sub("***MASKED***", masked)
     # Layer 3: URL credentials (user:pass@host)
     masked = _URL_CREDENTIALS.sub("://***MASKED***:***MASKED***@", masked)
     # Layer 4: Generic env var names
-    for key in _ENV_SECRET_KEYS:
+    for key in _get_env_secret_keys():
         pattern = re.compile(rf"(?i){re.escape(key)}\s*[=:]\s*['\"]?([^\s'\"]+)['\"]?")
         masked = pattern.sub(
             lambda m: m.group(0)[: m.start(1) - m.start(0)] + "***MASKED***",
@@ -343,21 +439,21 @@ def post_tool(hook_input: dict, profile: str = "work") -> None:
     if tool_name == "Bash":
         parts = summary_lower.strip().split()
         cmd_word = parts[0] if parts else ""
-        if cmd_word in _NOISE_COMMANDS:
+        if cmd_word in _get_noise_commands():
             return
         # Git: only capture commits, pushes, merges -- not add, status, diff
         if cmd_word == "git" and len(parts) > 1:
             git_sub = parts[1]
-            if git_sub in _GIT_NOISE:
+            if git_sub in _get_git_noise():
                 return
-            if git_sub not in _GIT_SIGNAL:
+            if git_sub not in _get_git_signal():
                 # Unknown git subcommand -- skip unless it has signal keywords
-                if not any(kw in summary_lower for kw in _SIGNAL_KEYWORDS):
+                if not any(kw in summary_lower for kw in _get_signal_keywords()):
                     return
 
     # For routine tools, only capture if content has signal keywords
-    if tool_name in _ROUTINE_TOOLS:
-        if not any(kw in summary_lower for kw in _SIGNAL_KEYWORDS):
+    if tool_name in _get_routine_tools():
+        if not any(kw in summary_lower for kw in _get_signal_keywords()):
             return
 
     # Mask any secrets before storing
