@@ -1,6 +1,7 @@
 """CLI sub-commands for ogham hooks."""
 
 import json
+import os
 import select
 import sys
 
@@ -27,17 +28,49 @@ def _read_stdin() -> dict:
         return {}
 
 
+def _should_recall() -> bool:
+    """Debounce: only recall once per 30 minutes per directory.
+
+    Kiro's Prompt Submit fires on every prompt. Without debounce,
+    recall would search Ogham on every single message.
+    """
+    import time
+    from pathlib import Path
+
+    debounce_dir = Path.home() / ".ogham"
+    debounce_dir.mkdir(parents=True, exist_ok=True)
+
+    # Hash the cwd to create a per-project debounce file
+    import hashlib
+
+    cwd_hash = hashlib.md5(os.getcwd().encode(), usedforsecurity=False).hexdigest()[:8]
+    marker = debounce_dir / f".recall_{cwd_hash}"
+
+    now = time.time()
+    if marker.exists():
+        last_run = float(marker.read_text().strip())
+        if now - last_run < 1800:  # 30 minutes
+            return False
+
+    marker.write_text(str(now))
+    return True
+
+
 @hooks_app.command(name="recall")
 def recall_cmd(
     profile: str = typer.Option("work", help="Memory profile"),
+    force: bool = typer.Option(False, help="Skip debounce, always recall"),
 ):
     """Read from the stone. Load relevant memories for the current project."""
     from ogham.hooks import post_compact, session_start
 
+    # Debounce: only recall once per 30 min (Kiro fires on every prompt)
+    if not force and not _should_recall():
+        return
+
     data = _read_stdin()
     cwd = data.get("cwd", ".")
 
-    # Try session_start first (richer context), fall back to post_compact
     output = session_start(cwd=cwd, profile=profile)
     if not output:
         output = post_compact(cwd=cwd, profile=profile)

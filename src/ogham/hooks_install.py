@@ -85,11 +85,13 @@ def _install_kiro():
     console.print("    Event: Prompt Submit")
     console.print("    Action: Run Command")
     console.print("    Command: ogham hooks recall")
+    console.print("    [dim](Debounced -- only fires once per 30 minutes per project)[/dim]")
     console.print("")
     console.print("  [bold]Hook 2: Inscribe[/bold]")
-    console.print("    Event: Agent Stop")
+    console.print("    Event: Post Task Execution")
     console.print("    Action: Run Command")
     console.print("    Command: ogham hooks inscribe")
+    console.print("    [dim](Fires on meaningful task completions, not every chat)[/dim]")
     console.print("")
     console.print(
         "[dim]Kiro doesn't support compaction hooks. Session start covers context loading.[/dim]"

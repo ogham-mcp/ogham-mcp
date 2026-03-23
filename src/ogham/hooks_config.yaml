@@ -143,12 +143,26 @@ noise_commands:
   - man
   - help
 
-routine_tools:
+# Tools that are always noise -- never stored regardless of content.
+# Reconnaissance tools, skill invocations, task management.
+always_skip_tools:
+  - ToolSearch
+  - Skill
   - Read
   - Glob
   - Grep
-  - Bash
   - ListDir
+  - TaskCreate
+  - TaskUpdate
+  - TaskGet
+  - TaskList
+  - TaskOutput
+  - AskUserQuestion
+
+# Tools that are captured only if content contains signal keywords.
+# Bash is the main one -- ls/cat already filtered by noise_commands.
+routine_tools:
+  - Bash
 
 git_signal:
   - commit

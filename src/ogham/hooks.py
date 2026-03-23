@@ -16,8 +16,26 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Tools we never capture (prevent infinite loops)
+# Tools we never capture (prevent infinite loops + pure noise)
 _SKIP_PREFIXES = ("mcp__ogham__", "ogham_", "store_memory", "hybrid_search")
+
+# Tools that are always noise -- never worth storing
+_ALWAYS_SKIP_TOOLS = frozenset(
+    {
+        "ToolSearch",
+        "Skill",
+        "Read",
+        "Glob",
+        "Grep",
+        "ListDir",
+        "TaskCreate",
+        "TaskUpdate",
+        "TaskGet",
+        "TaskList",
+        "TaskOutput",
+        "AskUserQuestion",
+    }
+)
 
 # --- Config loading ---
 _config_cache: dict | None = None
@@ -72,6 +90,14 @@ def _get_noise_commands() -> frozenset[str]:
     return _DEFAULT_NOISE_COMMANDS
 
 
+def _get_always_skip_tools() -> frozenset[str]:
+    """Get always-skip tools from config or hardcoded defaults."""
+    cfg = _load_config()
+    if cfg and "always_skip_tools" in cfg:
+        return frozenset(cfg["always_skip_tools"])
+    return _ALWAYS_SKIP_TOOLS
+
+
 def _get_routine_tools() -> frozenset[str]:
     """Get routine tools from config or hardcoded defaults."""
     cfg = _load_config()
@@ -116,7 +142,7 @@ def _get_env_secret_keys() -> frozenset[str]:
 
 # --- Hardcoded defaults (used when YAML config is missing or PyYAML not installed) ---
 
-_DEFAULT_ROUTINE_TOOLS = frozenset({"Read", "Glob", "Grep", "Bash", "ListDir"})
+_DEFAULT_ROUTINE_TOOLS = frozenset({"Bash"})
 
 _DEFAULT_SIGNAL_KEYWORDS = frozenset(
     {
@@ -338,6 +364,33 @@ _DEFAULT_ENV_SECRET_KEYS = frozenset(
 # High-value tool input fields to extract for summaries
 _SUMMARY_FIELDS = ("command", "content", "query", "file_path", "url", "message")
 
+# --- Session dedup ---
+# Track recent (tool, target) pairs to collapse repeated edits to the same file.
+# Key: (session_id, tool_name, target_path) → timestamp
+_recent_actions: dict[tuple[str, str, str], float] = {}
+_DEDUP_WINDOW_SECONDS = 300  # 5 minutes
+
+
+def _is_duplicate(session_id: str, tool_name: str, target: str) -> bool:
+    """Check if this (tool, target) was already captured recently in this session."""
+    import time
+
+    key = (session_id, tool_name, target)
+    now = time.time()
+
+    # Prune old entries (> 30 min) to prevent unbounded growth
+    stale = [k for k, t in _recent_actions.items() if now - t > 1800]
+    for k in stale:
+        del _recent_actions[k]
+
+    if key in _recent_actions:
+        if now - _recent_actions[key] < _DEDUP_WINDOW_SECONDS:
+            _recent_actions[key] = now  # Refresh timestamp
+            return True
+
+    _recent_actions[key] = now
+    return False
+
 
 def _mask_secrets(text: str) -> str:
     """Replace anything that looks like a secret with a masked placeholder.
@@ -414,7 +467,12 @@ def post_tool(hook_input: dict, profile: str = "work") -> None:
     """
     tool_name = hook_input.get("tool_name", "")
 
+    # Skip Ogham's own tools (infinite loop prevention)
     if any(tool_name.startswith(p) for p in _SKIP_PREFIXES):
+        return
+
+    # Skip tools that are always noise (reconnaissance, not action)
+    if tool_name in _get_always_skip_tools():
         return
 
     tool_input = hook_input.get("tool_input", {})
@@ -423,7 +481,10 @@ def post_tool(hook_input: dict, profile: str = "work") -> None:
 
     # Extract summary from tool input
     summary = ""
+    target_path = ""
     if isinstance(tool_input, dict):
+        # Grab the target file/path for dedup
+        target_path = str(tool_input.get("file_path", tool_input.get("path", "")))
         for field in _SUMMARY_FIELDS:
             if field in tool_input:
                 summary = str(tool_input[field])[:200]
@@ -451,16 +512,28 @@ def post_tool(hook_input: dict, profile: str = "work") -> None:
                 if not any(kw in summary_lower for kw in _get_signal_keywords()):
                     return
 
-    # For routine tools, only capture if content has signal keywords
+    # For routine tools (Bash without signal), only capture if content has signal keywords
     if tool_name in _get_routine_tools():
         if not any(kw in summary_lower for kw in _get_signal_keywords()):
             return
 
+    # Dedup: skip if same (tool, target) was captured recently in this session
+    if target_path and _is_duplicate(session_id, tool_name, target_path):
+        logger.debug("post_tool: dedup skip %s on %s", tool_name, target_path)
+        return
+
     # Mask any secrets before storing
     summary = _mask_secrets(summary)
 
-    # High-value tools always captured (Write, Edit, Agent, WebFetch, etc.)
-    content = f"Tool: {tool_name}\nInput: {summary}\nDirectory: {cwd}"
+    # Build content -- use file basename for readability
+    target_display = os.path.basename(target_path) if target_path else ""
+    if target_display:
+        content = f"{tool_name} {target_display}: {summary[:150]}"
+    else:
+        content = f"{tool_name}: {summary[:150]}"
+    if cwd:
+        project = os.path.basename(cwd)
+        content += f" [{project}]"
 
     try:
         from ogham.service import store_memory_enriched

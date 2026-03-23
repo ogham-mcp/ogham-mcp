@@ -7,7 +7,8 @@
 #   make publish       Build + publish to PyPI (1Password token)
 #   make gateway       Build wheel + update gateway + lock + test
 #   make migrate       Apply migrations to all 3 Neon DBs
-#   make release       Full pipeline: sync → test → publish → gateway → migrate
+#   make tag           Commit, push, tag, create GitHub release
+#   make release       Full pipeline: sync → test → smoke → publish → tag → gateway
 #   make release-patch Bump patch version + full release
 #
 # Prerequisites:
@@ -15,7 +16,7 @@
 #   - uv for Python builds
 #   - psycopg installed (for migrations)
 
-.PHONY: test lint build publish clean wheel sync gateway migrate release release-patch check-clean version-check smoke preflight
+.PHONY: test lint build publish tag clean wheel sync gateway migrate release release-patch check-clean version-check smoke preflight
 
 # --- Paths ---
 DEV_REPO := /Users/kevinburns/Developer/web-projects/openbrain-sharedmemory
@@ -89,6 +90,28 @@ publish: build
 	uv publish --token $$(op read "op://Ogham-Gateway/PyPi - Ogham Dev token/api_key")
 	@echo ""
 	@echo "Published $$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+
+# --- GitHub release ---
+
+tag:
+	@VERSION=$$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"); \
+	echo "=== Creating GitHub release v$$VERSION ==="; \
+	git add -A && git commit -m "v$$VERSION" --allow-empty; \
+	git push origin main; \
+	git tag -a "v$$VERSION" -m "v$$VERSION"; \
+	git push origin "v$$VERSION"; \
+	PREV_TAG=$$(git tag --sort=-v:refname | grep -v "v$$VERSION" | head -1); \
+	if [ -n "$$PREV_TAG" ]; then \
+		CHANGES=$$(git log --oneline "$$PREV_TAG"..HEAD -- src/ tests/ | sed 's/^/- /'); \
+	else \
+		CHANGES=$$(git log --oneline -10 -- src/ tests/ | sed 's/^/- /'); \
+	fi; \
+	NOTES=$$(printf "## What'\''s changed\n\n$$CHANGES\n\n**Full changelog:** https://github.com/ogham-mcp/ogham-mcp/compare/$$PREV_TAG...v$$VERSION\n\n**Install:** \`uv tool install ogham-mcp\` or \`pip install ogham-mcp==$$VERSION\`"); \
+	gh release create "v$$VERSION" \
+		--title "v$$VERSION" \
+		--notes "$$NOTES" \
+		--latest; \
+	echo "Released v$$VERSION on GitHub"
 
 # --- Gateway wheel update ---
 
@@ -225,7 +248,7 @@ check-clean:
 		exit 1; \
 	fi
 
-release: check-clean sync test smoke publish gateway
+release: check-clean sync test smoke publish tag gateway
 	@echo ""
 	@echo "============================================"
 	@echo "  Release pipeline complete!"
@@ -237,7 +260,6 @@ release: check-clean sync test smoke publish gateway
 	@echo "  1. Review gateway changes: cd $(GATEWAY_REPO) && git diff"
 	@echo "  2. Push gateway: make gateway-push"
 	@echo "  3. Apply migrations if needed: make migrate"
-	@echo "  4. Tag release: gh release create v\$$(VERSION)"
 
 release-patch:
 	@echo "=== Bumping patch version ==="

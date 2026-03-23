@@ -2,6 +2,18 @@
 
 from unittest.mock import patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _clear_dedup_cache():
+    """Clear the dedup cache between tests."""
+    from ogham.hooks import _recent_actions
+
+    _recent_actions.clear()
+    yield
+    _recent_actions.clear()
+
 
 def test_session_start_returns_context():
     from ogham.hooks import session_start
@@ -80,6 +92,34 @@ def test_post_tool_skips_ogham_tools():
         mock_store.assert_not_called(), f"{tool_name} should be skipped"
 
 
+def test_post_tool_skips_always_skip_tools():
+    """ToolSearch, Skill, Read, Glob, Grep, ListDir are always skipped."""
+    from ogham.hooks import post_tool
+
+    for tool_name in [
+        "ToolSearch",
+        "Skill",
+        "Read",
+        "Glob",
+        "Grep",
+        "ListDir",
+        "TaskCreate",
+        "TaskUpdate",
+        "AskUserQuestion",
+    ]:
+        with patch("ogham.service.store_memory_enriched") as mock_store:
+            post_tool(
+                {
+                    "tool_name": tool_name,
+                    "tool_input": {"content": "some content with error keywords"},
+                    "cwd": "/tmp",
+                    "session_id": "s1",
+                },
+                profile="work",
+            )
+        mock_store.assert_not_called(), f"{tool_name} should be always-skipped"
+
+
 def test_post_tool_captures_high_value_tools():
     """Write, Edit, Agent, WebFetch are always captured."""
     from ogham.hooks import post_tool
@@ -139,40 +179,6 @@ def test_post_tool_captures_signal_bash():
         mock_store.assert_called_once(), f"'{cmd}' should be captured as signal"
 
 
-def test_post_tool_skips_routine_without_signal():
-    """Read/Grep without signal keywords should be skipped."""
-    from ogham.hooks import post_tool
-
-    with patch("ogham.service.store_memory_enriched") as mock_store:
-        post_tool(
-            {
-                "tool_name": "Read",
-                "tool_input": {"file_path": "/tmp/readme.md"},
-                "cwd": "/tmp",
-                "session_id": "s1",
-            },
-            profile="work",
-        )
-    mock_store.assert_not_called()
-
-
-def test_post_tool_captures_routine_with_signal():
-    """Read/Grep with error keywords should be captured."""
-    from ogham.hooks import post_tool
-
-    with patch("ogham.service.store_memory_enriched") as mock_store:
-        post_tool(
-            {
-                "tool_name": "Grep",
-                "tool_input": {"command": "grep error logs/deploy.log"},
-                "cwd": "/tmp",
-                "session_id": "s1",
-            },
-            profile="work",
-        )
-    mock_store.assert_called_once()
-
-
 def test_post_tool_tags_include_tool_name():
     from ogham.hooks import post_tool
 
@@ -191,6 +197,99 @@ def test_post_tool_tags_include_tool_name():
     assert "tool:Write" in tags
     assert "type:action" in tags
     assert "session:s1" in tags
+
+
+def test_post_tool_dedup_same_file():
+    """Repeated edits to the same file within 5 min should be collapsed."""
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        # First edit -- captured
+        post_tool(
+            {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "/tmp/foo.py", "content": "change 1"},
+                "cwd": "/tmp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+        # Second edit to same file -- deduped
+        post_tool(
+            {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "/tmp/foo.py", "content": "change 2"},
+                "cwd": "/tmp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+        # Edit to different file -- captured
+        post_tool(
+            {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "/tmp/bar.py", "content": "change 3"},
+                "cwd": "/tmp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+
+    assert mock_store.call_count == 2, "Second edit to foo.py should be deduped"
+
+
+def test_post_tool_dedup_different_sessions():
+    """Same file in different sessions should not dedup."""
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(
+            {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "/tmp/foo.py", "content": "change 1"},
+                "cwd": "/tmp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+        post_tool(
+            {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "/tmp/foo.py", "content": "change 2"},
+                "cwd": "/tmp",
+                "session_id": "s2",
+            },
+            profile="work",
+        )
+
+    assert mock_store.call_count == 2, "Different sessions should not dedup"
+
+
+def test_post_tool_content_format():
+    """Content should use readable format, not verbose Tool:/Input:/Directory:."""
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(
+            {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": "/Users/dev/myproject/src/main.py",
+                    "content": "new code",
+                },
+                "cwd": "/Users/dev/myproject",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+
+    content = mock_store.call_args.kwargs["content"]
+    # Should have basename, not full path as the main identifier
+    assert "main.py" in content
+    # Should include project name
+    assert "myproject" in content
+    # Should NOT have the old verbose format
+    assert "Directory:" not in content
 
 
 def test_pre_compact_stores_summary():

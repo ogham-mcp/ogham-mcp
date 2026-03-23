@@ -28,15 +28,19 @@ class SupabaseBackend:
             else:
                 base_url = f"{settings.supabase_url}/rest/v1"
 
-            self._client = SyncPostgrestClient(
-                base_url,
-                headers={
-                    "apikey": settings.supabase_key,
-                    "Authorization": f"Bearer {settings.supabase_key}",
-                    "Prefer": "return=representation",
-                },
-                timeout=120,
-            )
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                self._client = SyncPostgrestClient(
+                    base_url,
+                    headers={
+                        "apikey": settings.supabase_key,
+                        "Authorization": f"Bearer {settings.supabase_key}",
+                        "Prefer": "return=representation",
+                    },
+                    timeout=120,
+                )
         return self._client
 
     def store_memory(
