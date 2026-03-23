@@ -15,7 +15,7 @@
 #   - uv for Python builds
 #   - psycopg installed (for migrations)
 
-.PHONY: test lint build publish clean wheel sync gateway migrate release release-patch check-clean version-check
+.PHONY: test lint build publish clean wheel sync gateway migrate release release-patch check-clean version-check smoke preflight
 
 # --- Paths ---
 DEV_REPO := /Users/kevinburns/Developer/web-projects/openbrain-sharedmemory
@@ -153,6 +153,70 @@ version-check:
 
 # --- Full release pipeline ---
 
+# --- Sanity checks ---
+
+# Smoke test: install the wheel in a temp venv and verify all modules import
+smoke: build
+	@echo "=== Smoke test: clean install from wheel ==="
+	@TMPDIR=$$(mktemp -d); \
+	python3 -m venv "$$TMPDIR/venv"; \
+	WHL=$$(ls dist/ogham_mcp-*.whl | head -1); \
+	"$$TMPDIR/venv/bin/pip" install -q "$$WHL[postgres]" 2>&1 | tail -1; \
+	echo "--- Module imports ---"; \
+	"$$TMPDIR/venv/bin/python" -c "\
+import ogham.config; print('  ✓ ogham.config'); \
+import ogham.database; print('  ✓ ogham.database'); \
+import ogham.embeddings; print('  ✓ ogham.embeddings'); \
+import ogham.service; print('  ✓ ogham.service'); \
+import ogham.extraction; print('  ✓ ogham.extraction'); \
+import ogham.hooks; print('  ✓ ogham.hooks'); \
+import ogham.hooks_cli; print('  ✓ ogham.hooks_cli'); \
+import ogham.hooks_install; print('  ✓ ogham.hooks_install'); \
+import ogham.cli; print('  ✓ ogham.cli'); \
+import ogham.server; print('  ✓ ogham.server'); \
+import ogham.backends.postgres; print('  ✓ ogham.backends.postgres'); \
+import ogham.backends.supabase; print('  ✓ ogham.backends.supabase'); \
+import ogham.backends.gateway; print('  ✓ ogham.backends.gateway'); \
+" || (echo "✗ SMOKE TEST FAILED"; rm -rf "$$TMPDIR"; exit 1); \
+	echo "--- CLI entrypoint ---"; \
+	"$$TMPDIR/venv/bin/ogham" --help > /dev/null 2>&1 && echo "  ✓ ogham CLI starts" || echo "  ✗ ogham CLI failed"; \
+	"$$TMPDIR/venv/bin/ogham" hooks --help > /dev/null 2>&1 && echo "  ✓ ogham hooks sub-command" || (echo "  ✗ ogham hooks failed"; rm -rf "$$TMPDIR"; exit 1); \
+	echo "--- Wheel contents ---"; \
+	python3 -m zipfile -l dist/ogham_mcp-*.whl | grep -c "\.py$$" | xargs -I{} echo "  {} Python files in wheel"; \
+	python3 -m zipfile -l dist/ogham_mcp-*.whl | grep "hooks_config.yaml" > /dev/null && echo "  ✓ hooks_config.yaml included" || (echo "  ✗ hooks_config.yaml MISSING"; rm -rf "$$TMPDIR"; exit 1); \
+	rm -rf "$$TMPDIR"; \
+	echo ""; \
+	echo "✓ Smoke test passed."
+
+# Preflight: all checks before publishing
+preflight: version-check
+	@echo ""
+	@echo "=== Preflight checks ==="
+	@echo "--- Git state ---"
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "  ✗ Working directory not clean:"; \
+		git status --short | sed 's/^/    /'; \
+	else \
+		echo "  ✓ Working directory clean"; \
+	fi
+	@echo "--- Dev repo sync ---"
+	@DRIFT=0; \
+	for f in $(SYNC_SOURCES); do \
+		if [ -f "$(DEV_REPO)/$$f" ] && [ -f "$(PUB_REPO)/$$f" ]; then \
+			if ! diff -q "$(DEV_REPO)/$$f" "$(PUB_REPO)/$$f" > /dev/null 2>&1; then \
+				echo "  ✗ Out of sync: $$f"; \
+				DRIFT=1; \
+			fi; \
+		fi; \
+	done; \
+	if [ $$DRIFT -eq 0 ]; then echo "  ✓ All files in sync with dev repo"; fi
+	@echo "--- Version consistency ---"
+	@PUB_VER=$$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"); \
+	PYPI_VER=$$(curl -s https://pypi.org/pypi/ogham-mcp/json 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin)["info"]["version"])' 2>/dev/null || echo 'unknown'); \
+	GW_VER=$$(grep 'ogham_mcp-' $(GATEWAY_REPO)/pyproject.toml | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+'); \
+	if [ "$$PUB_VER" = "$$PYPI_VER" ]; then echo "  ✓ PyPI matches ($$PYPI_VER)"; else echo "  ✗ PyPI drift: repo=$$PUB_VER pypi=$$PYPI_VER"; fi; \
+	if [ "$$PUB_VER" = "$$GW_VER" ]; then echo "  ✓ Gateway matches ($$GW_VER)"; else echo "  ✗ Gateway drift: repo=$$PUB_VER gateway=$$GW_VER"; fi
+
 check-clean:
 	@if [ -n "$$(git status --porcelain)" ]; then \
 		echo "Error: working directory not clean. Commit or stash changes first."; \
@@ -160,7 +224,7 @@ check-clean:
 		exit 1; \
 	fi
 
-release: check-clean sync test publish gateway
+release: check-clean sync test smoke publish gateway
 	@echo ""
 	@echo "============================================"
 	@echo "  Release pipeline complete!"
