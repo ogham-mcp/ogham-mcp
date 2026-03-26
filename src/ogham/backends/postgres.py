@@ -58,7 +58,34 @@ class PostgresBackend:
                 max_size=5,
                 kwargs={"row_factory": dict_row},
             )
+            self._ensure_columns()
         return self._pool
+
+    def _ensure_columns(self) -> None:
+        """Auto-add columns introduced in newer versions.
+
+        Runs on first connection so upgraders don't need manual migrations.
+        All statements use IF NOT EXISTS -- safe to run repeatedly.
+        """
+        migrations = [
+            # v0.7.0: importance, surprise, compression
+            "ALTER TABLE memories ADD COLUMN IF NOT EXISTS importance real DEFAULT 0.5",
+            "ALTER TABLE memories ADD COLUMN IF NOT EXISTS surprise real DEFAULT 0.5",
+            "ALTER TABLE memories ADD COLUMN IF NOT EXISTS compression_level integer DEFAULT 0",
+            "ALTER TABLE memories ADD COLUMN IF NOT EXISTS original_content text",
+            # v0.8.0: temporal columns
+            "ALTER TABLE memories ADD COLUMN IF NOT EXISTS occurrence_period tstzrange",
+            "ALTER TABLE memories ADD COLUMN IF NOT EXISTS recurrence_days integer[]",
+        ]
+        try:
+            with self._pool.connection() as conn:  # type: ignore[union-attr]
+                for sql in migrations:
+                    conn.execute(sql)
+                conn.commit()
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).warning("Auto-migration skipped: %s", e)
 
     # ── Helper ────────────────────────────────────────────────────────
 
