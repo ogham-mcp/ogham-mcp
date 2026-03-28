@@ -1,0 +1,149 @@
+# Turkish word lists for Ogham MCP extraction and scoring.
+# Notes: Turkish uses dotted i/I and dotless i/I distinction. Store lowercase with
+# both forms. Agglutinative suffixes can attach to day/month names.
+
+day_names:
+  pazar: 0
+  pazartesi: 1
+  "salı": 2
+  sali: 2
+  "çarşamba": 3
+  carsamba: 3
+  "perşembe": 4
+  persembe: 4
+  cuma: 5
+  cumartesi: 6
+
+month_names:
+  ocak: 1
+  "şubat": 2
+  subat: 2
+  mart: 3
+  nisan: 4
+  "mayıs": 5
+  mayis: 5
+  haziran: 6
+  temmuz: 7
+  "ağustos": 8
+  agustos: 8
+  "eylül": 9
+  eylul: 9
+  ekim: 10
+  "kasım": 11
+  kasim: 11
+  "aralık": 12
+  aralik: 12
+
+every_words:
+  - her
+  - "her gün"
+  - "haftalık"
+  - haftalik
+  - "günlük"
+  - gunluk
+  - her hafta
+
+temporal_keywords:
+  - ne zaman
+  - tarih
+  - zaman
+  - saat
+  - "önce"
+  - once
+  - sonra
+  - "dün"
+  - dun
+  - "yarın"
+  - yarin
+  - "evvelsi gün"
+  - "öbür gün"
+  - "sırasında"
+  - sirasinda
+  - beri
+  - kadar
+  - "geçen"
+  - gecen
+  - gelecek
+  - hafta
+  - ay
+  - "yıl"
+  - yil
+  - "gün"
+  - gun
+  - "bugün"
+  - bugun
+
+direction_words:
+  after:
+    - sonra
+    - beri
+    - "ardından"
+    - ardindan
+    - takiben
+    - sonraki
+    - daha sonra
+  before:
+    - "önce"
+    - once
+    - "önceki"
+    - onceki
+    - "daha önce"
+    - evvel
+    - "öncesinde"
+
+decision_words:
+  - karar
+  - "seçti"
+  - "geçti"
+  - "taşıdı"
+  - "değiştirdi"
+  - benimsedi
+  - tercih
+  - belirledi
+  - "yapılandırdı"
+  - "uyguladı"
+
+error_words:
+  - hata
+  - istisna
+  - "başarısız"
+  - "arıza"
+  - "çöktü"
+  - bozuk
+  - "zaman aşımı"
+  - reddedildi
+  - "geçersiz"
+  - durdu
+
+architecture_words:
+  - "tasarım"
+  - "kalıp"
+  - "yeniden düzenleme"
+  - mimari
+  - "yeniden yapılandırma"
+  - "modüler"
+  - "ayrıştırma"
+  - soyutlama
+  - "arayüz"
+  - "geçiş"
+
+query_hints:
+  multi_hop:
+    - "kaç tane"
+    - "arasında"
+    - "hangisi önce"
+    - "kaç gün"
+    - "kaç ay"
+    - "ne kadar süre"
+  ordering:
+    - "sırası"
+    - "kronolojik"
+    - "eskiden yeniye"
+    - "yeniden eskiye"
+    - "hangi sırayla"
+  summary:
+    - "kapsamlı özet"
+    - "her şeyi özetle"
+    - "genel bakış"
+    - "tam özet"
+    - "özet"

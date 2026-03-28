@@ -11,6 +11,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ogham.data.loader import get_direction_words
 from ogham.database import auto_link_memory as db_auto_link
 from ogham.database import get_profile_ttl as db_get_profile_ttl
 from ogham.database import hybrid_search_memories, record_access
@@ -447,8 +448,9 @@ def _exact_content_search(anchor: str, profile: str, limit: int) -> list[dict[st
 _CONTENT_DATE_RE = re.compile(r"\[Date:\s*(\d{4}-\d{2}-\d{2})\]")
 
 # Direction keywords for asymmetric temporal decay
-_AFTER_WORDS = frozenset({"after", "since", "following", "subsequent", "later"})
-_BEFORE_WORDS = frozenset({"before", "prior", "previous", "earlier", "preceding"})
+_dir = get_direction_words("en")
+_AFTER_WORDS = frozenset(_dir.get("after", []))
+_BEFORE_WORDS = frozenset(_dir.get("before", []))
 
 
 def _extract_memory_date(r: dict[str, Any]) -> str | None:

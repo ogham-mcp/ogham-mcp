@@ -7,13 +7,16 @@ Original content is always preserved for decompression.
 import logging
 import re
 
+from ogham.data.loader import get_compression_decision_words
+
 logger = logging.getLogger(__name__)
 
 # Sentence scoring patterns for gist extraction
 _FILE_PATH_RE = re.compile(r"(?:\.{0,2}/)?(?:[\w@.-]+/)+[\w@.-]+\.\w+")
 _ERROR_RE = re.compile(r"\b\w*(?:Error|Exception|Traceback)\b")
+
 _DECISION_RE = re.compile(
-    r"\b(?:decided|chose|choosing|using|switched|migrated|selected)\b",
+    r"\b(?:" + "|".join(re.escape(w) for w in get_compression_decision_words("en")) + r")\b",
     re.IGNORECASE,
 )
 _NUMBER_VERSION_RE = re.compile(r"\b\d+(?:\.\d+)+\b")

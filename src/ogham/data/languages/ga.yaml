@@ -1,0 +1,161 @@
+# Irish (Gaelic) word lists for Ogham MCP extraction and scoring.
+# Notes: Days use "De" prefix (genitive, meaning "day of") for "on [day]".
+# Fada (a, e, i, o, u with accents) is critical but ASCII fallbacks included.
+
+day_names:
+  # Base forms
+  domhnach: 0
+  luan: 1
+  "máirt": 2
+  mairt: 2
+  "céadaoin": 3
+  ceadaoin: 3
+  "déardaoin": 4
+  deardaoin: 4
+  aoine: 5
+  satharn: 6
+  # "De" prefix forms (on a specific day)
+  "dé domhnaigh": 0
+  de domhnaigh: 0
+  "dé luain": 1
+  de luain: 1
+  "dé máirt": 2
+  de mairt: 2
+  "dé céadaoin": 3
+  de ceadaoin: 3
+  "dé haoine": 5
+  de haoine: 5
+  "dé sathairn": 6
+  de sathairn: 6
+  # "An" prefix forms (generic/habitual)
+  an domhnach: 0
+
+month_names:
+  "eanáir": 1
+  eanair: 1
+  feabhra: 2
+  "márta": 3
+  marta: 3
+  "aibreán": 4
+  aibrean: 4
+  bealtaine: 5
+  meitheamh: 6
+  "iúil": 7
+  iuil: 7
+  "lúnasa": 8
+  lunasa: 8
+  "meán fómhair": 9
+  mean fomhair: 9
+  "deireadh fómhair": 10
+  deireadh fomhair: 10
+  samhain: 11
+  nollaig: 12
+
+every_words:
+  - gach
+  - "gach lá"
+  - "seachtainiúil"
+  - "laethúil"
+  - gach seachtain
+
+temporal_keywords:
+  - cathain
+  - nuair
+  - "dáta"
+  - am
+  - "ó shin"
+  - roimh
+  - "tar éis"
+  - "inné"
+  - inne
+  - "amárach"
+  - amarach
+  - "arú inné"
+  - aru inne
+  - "i ndiaidh amárach"
+  - le linn
+  - "ó"
+  - "go dtí"
+  - seachtain
+  - "mí"
+  - mi
+  - bliain
+  - "lá"
+  - la
+  - inniu
+  - anuraidh
+  - seo caite
+
+direction_words:
+  after:
+    - "tar éis"
+    - tar eis
+    - "ó"
+    - "ó shin"
+    - ina dhiaidh
+    - ar ball
+    - "níos déanaí"
+    - nios deanai
+  before:
+    - roimh
+    - roimhe
+    - "níos luaithe"
+    - nios luaithe
+    - cheana
+    - "roimh ré"
+
+decision_words:
+  - chinn
+  - roghnaigh
+  - "d'aistrigh"
+  - athraigh
+  - ghlac le
+  - "d'iompaigh"
+  - chuir in ionad
+  - socraigh
+  - pioc
+  - "thóg"
+
+error_words:
+  - "earráid"
+  - eisceacht
+  - theip
+  - teip
+  - fabht
+  - cliseadh
+  - briste
+  - am istigh
+  - "diúltaithe"
+  - "neamhbhailí"
+
+architecture_words:
+  - dearadh
+  - "patrún"
+  - "athfhachtóiriú"
+  - ailtireacht
+  - "athstruchtúrú"
+  - "modúlach"
+  - "díchúpláil"
+  - "teibíocht"
+  - "comhéadan"
+  - imirce
+
+query_hints:
+  multi_hop:
+    - "cé mhéad"
+    - "idir"
+    - "cé acu a tháinig ar dtús"
+    - "cé mhéad lá"
+    - "cé mhéad mí"
+  ordering:
+    - "ord"
+    - "croineolaíoch"
+    - "ón is sine go dtí an is nua"
+    - "ón is nua go dtí an is sine"
+    - "cén t-ord"
+  summary:
+    - "achoimre iomlán"
+    - "achoimrigh gach rud"
+    - "forbhreathnú"
+    - "achoimre chuimsitheach"
+    - "léargas"

@@ -1,0 +1,150 @@
+# English word lists for Ogham MCP extraction and scoring.
+# Extracted from src/ogham/extraction.py, service.py, and compression.py.
+
+day_names:
+  sunday: 0
+  monday: 1
+  tuesday: 2
+  wednesday: 3
+  thursday: 4
+  friday: 5
+  saturday: 6
+
+every_words:
+  - every
+  - each
+  - weekly
+
+temporal_keywords:
+  - when
+  - date
+  - time
+  - ago
+  - last
+  - before
+  - after
+  - during
+  - since
+  - until
+  - yesterday
+  - tomorrow
+  - week
+  - month
+  - year
+
+direction_words:
+  after:
+    - after
+    - since
+    - following
+    - subsequent
+    - later
+  before:
+    - before
+    - prior
+    - previous
+    - earlier
+    - preceding
+
+decision_words:
+  - decided
+  - chose
+  - choosing
+  - switched
+  - migrated
+  - selected
+  - picked
+  - opted
+  - replaced
+  - adopted
+
+error_words:
+  - error
+  - exception
+  - failed
+  - failure
+  - bug
+  - crash
+  - broken
+  - traceback
+  - timeout
+  - denied
+
+architecture_words:
+  - design
+  - pattern
+  - refactor
+  - architecture
+  - restructure
+  - modular
+  - decouple
+  - abstract
+  - interface
+  - migrate
+
+month_names:
+  january: 1
+  february: 2
+  march: 3
+  april: 4
+  may: 5
+  june: 6
+  july: 7
+  august: 8
+  september: 9
+  october: 10
+  november: 11
+  december: 12
+  jan: 1
+  feb: 2
+  mar: 3
+  apr: 4
+  jun: 6
+  jul: 7
+  aug: 8
+  sep: 9
+  oct: 10
+  nov: 11
+  dec: 12
+
+word_numbers:
+  one: 1
+  two: 2
+  three: 3
+  four: 4
+  five: 5
+  six: 6
+  seven: 7
+  eight: 8
+  nine: 9
+  ten: 10
+  eleven: 11
+  twelve: 12
+  a: 1
+  an: 1
+
+query_hints:
+  multi_hop:
+    - "how many"
+    - "between"
+    - "which came first"
+    - "across sessions"
+  ordering:
+    - "order of"
+    - "earliest to latest"
+    - "chronological"
+    - "walk me through the order"
+  summary:
+    - "comprehensive summary"
+    - "summarize all"
+    - "overview of"
+    - "summarize everything"
+
+compression_decision_words:
+  - decided
+  - chose
+  - choosing
+  - using
+  - switched
+  - migrated
+  - selected

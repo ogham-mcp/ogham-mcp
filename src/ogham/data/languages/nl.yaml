@@ -1,0 +1,144 @@
+# Dutch word lists for Ogham MCP extraction and scoring.
+# Notes: Month/day names are lowercase in Dutch. "morgen" means both "tomorrow" and "morning".
+
+day_names:
+  zondag: 0
+  maandag: 1
+  dinsdag: 2
+  woensdag: 3
+  donderdag: 4
+  vrijdag: 5
+  zaterdag: 6
+
+month_names:
+  januari: 1
+  februari: 2
+  maart: 3
+  april: 4
+  mei: 5
+  juni: 6
+  juli: 7
+  augustus: 8
+  september: 9
+  oktober: 10
+  november: 11
+  december: 12
+  # Abbreviations
+  jan: 1
+  feb: 2
+  mrt: 3
+  apr: 4
+  jun: 6
+  jul: 7
+  aug: 8
+  sep: 9
+  okt: 10
+  nov: 11
+  dec: 12
+
+every_words:
+  - elke
+  - iedere
+  - ieder
+  - wekelijks
+  - dagelijks
+  - elk
+
+temporal_keywords:
+  - wanneer
+  - datum
+  - tijd
+  - geleden
+  - vorige
+  - vorig
+  - laatste
+  - voor
+  - na
+  - tijdens
+  - sinds
+  - tot
+  - gisteren
+  - morgen
+  - eergisteren
+  - overmorgen
+  - week
+  - maand
+  - jaar
+  - dag
+  - vandaag
+
+direction_words:
+  after:
+    - na
+    - sinds
+    - sindsdien
+    - daarna
+    - volgend
+    - later
+    - vervolgens
+  before:
+    - voor
+    - voordat
+    - vorig
+    - vorige
+    - eerder
+    - daarvoor
+    - voorheen
+    - voorafgaand
+
+decision_words:
+  - besloten
+  - gekozen
+  - gemigreerd
+  - geselecteerd
+  - vervangen
+  - overgestapt
+  - gewijzigd
+  - geconfigureerd
+  - aangenomen
+  - ingesteld
+
+error_words:
+  - fout
+  - uitzondering
+  - mislukt
+  - storing
+  - crash
+  - kapot
+  - timeout
+  - geweigerd
+  - ongeldig
+  - afgebroken
+
+architecture_words:
+  - ontwerp
+  - patroon
+  - refactoring
+  - architectuur
+  - herstructurering
+  - modulair
+  - ontkoppelen
+  - abstractie
+  - interface
+  - migratie
+
+query_hints:
+  multi_hop:
+    - "hoeveel"
+    - "tussen"
+    - "wat kwam eerst"
+    - "hoe lang tussen"
+    - "hoeveel dagen"
+    - "hoeveel maanden"
+  ordering:
+    - "volgorde van"
+    - "chronologisch"
+    - "van oudste naar nieuwste"
+    - "van nieuwste naar oudste"
+    - "in welke volgorde"
+  summary:
+    - "samenvatting"
+    - "vat samen"
+    - "overzicht van"
+    - "uitgebreide samenvatting"
+    - "alles samenvatten"

@@ -1,0 +1,151 @@
+# French word lists for Ogham MCP extraction and scoring.
+# Notes: Month/day names are lowercase in French. All months are masculine.
+
+day_names:
+  dimanche: 0
+  lundi: 1
+  mardi: 2
+  mercredi: 3
+  jeudi: 4
+  vendredi: 5
+  samedi: 6
+
+month_names:
+  janvier: 1
+  "février": 2
+  fevrier: 2
+  mars: 3
+  avril: 4
+  mai: 5
+  juin: 6
+  juillet: 7
+  "août": 8
+  aout: 8
+  septembre: 9
+  octobre: 10
+  novembre: 11
+  "décembre": 12
+  decembre: 12
+  # Abbreviations
+  jan: 1
+  "fév": 2
+  fev: 2
+  avr: 4
+  jui: 7
+  sep: 9
+  oct: 10
+  nov: 11
+  "déc": 12
+  dec: 12
+
+every_words:
+  - chaque
+  - tous les
+  - toutes les
+  - hebdomadaire
+  - quotidien
+  - quotidienne
+
+temporal_keywords:
+  - quand
+  - date
+  - heure
+  - temps
+  - il y a
+  - dernier
+  - "dernière"
+  - derniere
+  - avant
+  - "après"
+  - apres
+  - pendant
+  - depuis
+  - "jusqu'à"
+  - jusqua
+  - hier
+  - demain
+  - avant-hier
+  - "après-demain"
+  - semaine
+  - mois
+  - an
+  - "année"
+  - annee
+  - jour
+  - "aujourd'hui"
+
+direction_words:
+  after:
+    - "après"
+    - apres
+    - depuis
+    - ensuite
+    - suivant
+    - "ultérieur"
+    - plus tard
+  before:
+    - avant
+    - "précédent"
+    - precedent
+    - "antérieur"
+    - anterieur
+    - auparavant
+    - "plus tôt"
+    - plus tot
+
+decision_words:
+  - "décidé"
+  - choisi
+  - "migré"
+  - "sélectionné"
+  - "remplacé"
+  - "adopté"
+  - "opté"
+  - "basculé"
+  - "changé"
+  - retenu
+
+error_words:
+  - erreur
+  - exception
+  - "échoué"
+  - "échec"
+  - bogue
+  - plantage
+  - "cassé"
+  - "délai"
+  - "refusé"
+  - invalide
+
+architecture_words:
+  - conception
+  - "modèle"
+  - refactorisation
+  - architecture
+  - restructuration
+  - modulaire
+  - "découpler"
+  - abstraction
+  - interface
+  - migration
+
+query_hints:
+  multi_hop:
+    - "combien de"
+    - "entre"
+    - "qu'est-ce qui est venu en premier"
+    - "combien de temps entre"
+    - "combien de jours"
+    - "combien de mois"
+  ordering:
+    - "ordre de"
+    - "chronologique"
+    - "du plus ancien au plus récent"
+    - "du plus récent au plus ancien"
+    - "dans quel ordre"
+  summary:
+    - "résumé complet"
+    - "résumer tout"
+    - "vue d'ensemble"
+    - "synthèse"
+    - "aperçu de"

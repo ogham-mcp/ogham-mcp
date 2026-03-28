@@ -1,0 +1,151 @@
+# Polish word lists for Ogham MCP extraction and scoring.
+# Notes: Month names are Slavic-origin (not Latin-derived). Day names decline by case.
+# ASCII fallbacks provided for diacritics.
+
+day_names:
+  niedziela: 0
+  "poniedziałek": 1
+  poniedzialek: 1
+  wtorek: 2
+  "środa": 3
+  sroda: 3
+  czwartek: 4
+  "piątek": 5
+  piatek: 5
+  sobota: 6
+
+month_names:
+  "styczeń": 1
+  styczen: 1
+  luty: 2
+  marzec: 3
+  "kwiecień": 4
+  kwiecien: 4
+  maj: 5
+  czerwiec: 6
+  lipiec: 7
+  "sierpień": 8
+  sierpien: 8
+  "wrzesień": 9
+  wrzesien: 9
+  "październik": 10
+  pazdziernik: 10
+  listopad: 11
+  "grudzień": 12
+  grudzien: 12
+
+every_words:
+  - "każdy"
+  - kazdy
+  - "każda"
+  - kazda
+  - "każde"
+  - kazde
+  - "co tydzień"
+  - co tydzien
+  - codziennie
+  - tygodniowo
+
+temporal_keywords:
+  - kiedy
+  - data
+  - czas
+  - godzina
+  - temu
+  - ostatni
+  - ostatnia
+  - przed
+  - po
+  - podczas
+  - od
+  - do
+  - wczoraj
+  - jutro
+  - przedwczoraj
+  - pojutrze
+  - "tydzień"
+  - tydzien
+  - "miesiąc"
+  - miesiac
+  - rok
+  - "dzień"
+  - dzien
+  - dzisiaj
+  - "dziś"
+  - dzis
+
+direction_words:
+  after:
+    - po
+    - od
+    - potem
+    - "następnie"
+    - nastepnie
+    - "później"
+    - pozniej
+    - kolejny
+  before:
+    - przed
+    - "wcześniej"
+    - wczesniej
+    - poprzedni
+    - poprzednia
+    - uprzednio
+    - zanim
+
+decision_words:
+  - zdecydowali
+  - wybrali
+  - zmigrowali
+  - zamienili
+  - "przyjęli"
+  - przeszli
+  - zmienili
+  - skonfigurowali
+  - "zastąpili"
+  - "wdrożyli"
+
+error_words:
+  - "błąd"
+  - "wyjątek"
+  - niepowodzenie
+  - awaria
+  - crash
+  - timeout
+  - odmowa
+  - "nieprawidłowy"
+  - przerwano
+  - usterka
+
+architecture_words:
+  - projekt
+  - wzorzec
+  - refaktoryzacja
+  - architektura
+  - restrukturyzacja
+  - modularny
+  - rozdzielenie
+  - abstrakcja
+  - interfejs
+  - migracja
+
+query_hints:
+  multi_hop:
+    - "ile"
+    - "między"
+    - "co było pierwsze"
+    - "ile czasu między"
+    - "ile dni"
+    - "ile miesięcy"
+  ordering:
+    - "kolejność"
+    - "chronologicznie"
+    - "od najstarszego do najnowszego"
+    - "od najnowszego do najstarszego"
+    - "w jakiej kolejności"
+  summary:
+    - "podsumowanie"
+    - "podsumuj wszystko"
+    - "przegląd"
+    - "pełne podsumowanie"
+    - "streszczenie"

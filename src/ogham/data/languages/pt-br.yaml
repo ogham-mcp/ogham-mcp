@@ -1,0 +1,169 @@
+# Brazilian Portuguese word lists for Ogham MCP extraction and scoring.
+# Notes: Most vocabulary is shared with European Portuguese (pt).
+# Differences are mainly in colloquial temporal expressions and some word preferences.
+# The loader merges this on top of pt.yaml.
+
+day_names:
+  domingo: 0
+  segunda: 1
+  segunda-feira: 1
+  "terça": 2
+  "terça-feira": 2
+  terca: 2
+  terca-feira: 2
+  quarta: 3
+  quarta-feira: 3
+  quinta: 4
+  quinta-feira: 4
+  sexta: 5
+  sexta-feira: 5
+  "sábado": 6
+  sabado: 6
+
+month_names:
+  janeiro: 1
+  fevereiro: 2
+  "março": 3
+  marco: 3
+  abril: 4
+  maio: 5
+  junho: 6
+  julho: 7
+  agosto: 8
+  setembro: 9
+  outubro: 10
+  novembro: 11
+  dezembro: 12
+  # Abbreviations
+  jan: 1
+  fev: 2
+  mar: 3
+  abr: 4
+  mai: 5
+  jun: 6
+  jul: 7
+  ago: 8
+  set: 9
+  out: 10
+  nov: 11
+  dez: 12
+
+every_words:
+  - cada
+  - todo
+  - toda
+  - todos os
+  - todas as
+  - semanal
+  - semanalmente
+  - "diário"
+  - diariamente
+  - diario
+  - todo dia
+
+temporal_keywords:
+  - quando
+  - data
+  - hora
+  - tempo
+  - "atrás"
+  - atras
+  - "há"
+  - faz
+  - "último"
+  - ultima
+  - ultimo
+  - antes
+  - depois
+  - durante
+  - desde
+  - "até"
+  - ate
+  - ontem
+  - "amanhã"
+  - amanha
+  - anteontem
+  - semana
+  - "mês"
+  - mes
+  - ano
+  - dia
+  - hoje
+
+direction_words:
+  after:
+    - depois
+    - desde
+    - "após"
+    - apos
+    - em seguida
+    - seguinte
+    - posteriormente
+    - mais tarde
+    - depois que
+  before:
+    - antes
+    - anterior
+    - "prévio"
+    - previo
+    - anteriormente
+    - mais cedo
+    - previamente
+    - antes que
+
+decision_words:
+  - decidido
+  - escolhido
+  - migrado
+  - selecionado
+  - "substituído"
+  - adotado
+  - optado
+  - mudado
+  - trocado
+  - configurado
+
+error_words:
+  - erro
+  - "exceção"
+  - falhou
+  - falha
+  - bug
+  - travou
+  - quebrado
+  - timeout
+  - negado
+  - "inválido"
+
+architecture_words:
+  - projeto
+  - "padrão"
+  - "refatoração"
+  - arquitetura
+  - "reestruturação"
+  - modular
+  - desacoplar
+  - "abstração"
+  - interface
+  - "migração"
+
+query_hints:
+  multi_hop:
+    - "quantos"
+    - "entre"
+    - "o que veio primeiro"
+    - "quanto tempo entre"
+    - "quantos dias"
+    - "quantos meses"
+  ordering:
+    - "ordem de"
+    - "cronológico"
+    - "do mais antigo pro mais recente"
+    - "do mais recente pro mais antigo"
+    - "em que ordem"
+  summary:
+    - "resumo completo"
+    - "resumir tudo"
+    - "visão geral"
+    - "síntese"
+    - "panorama geral"

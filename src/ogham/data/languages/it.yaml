@@ -1,0 +1,152 @@
+# Italian word lists for Ogham MCP extraction and scoring.
+# Notes: Month/day names are lowercase. Accented forms included with ASCII fallbacks.
+
+day_names:
+  domenica: 0
+  "lunedì": 1
+  lunedi: 1
+  "martedì": 2
+  martedi: 2
+  "mercoledì": 3
+  mercoledi: 3
+  "giovedì": 4
+  giovedi: 4
+  "venerdì": 5
+  venerdi: 5
+  sabato: 6
+
+month_names:
+  gennaio: 1
+  febbraio: 2
+  marzo: 3
+  aprile: 4
+  maggio: 5
+  giugno: 6
+  luglio: 7
+  agosto: 8
+  settembre: 9
+  ottobre: 10
+  novembre: 11
+  dicembre: 12
+  # Abbreviations
+  gen: 1
+  feb: 2
+  mar: 3
+  apr: 4
+  mag: 5
+  giu: 6
+  lug: 7
+  ago: 8
+  set: 9
+  ott: 10
+  nov: 11
+  dic: 12
+
+every_words:
+  - ogni
+  - ciascuno
+  - ciascuna
+  - settimanale
+  - settimanalmente
+  - giornaliero
+  - quotidiano
+  - tutti i
+
+temporal_keywords:
+  - quando
+  - data
+  - ora
+  - tempo
+  - fa
+  - scorso
+  - scorsa
+  - ultimo
+  - ultima
+  - prima
+  - dopo
+  - durante
+  - da
+  - fino a
+  - ieri
+  - domani
+  - "l'altro ieri"
+  - dopodomani
+  - settimana
+  - mese
+  - anno
+  - giorno
+  - oggi
+
+direction_words:
+  after:
+    - dopo
+    - da
+    - in seguito
+    - successivo
+    - successiva
+    - poi
+    - "più tardi"
+  before:
+    - prima
+    - precedente
+    - anteriore
+    - prima di
+    - in precedenza
+    - "più presto"
+
+decision_words:
+  - deciso
+  - scelto
+  - migrato
+  - selezionato
+  - sostituito
+  - adottato
+  - optato
+  - cambiato
+  - passato
+  - configurato
+
+error_words:
+  - errore
+  - eccezione
+  - fallito
+  - guasto
+  - crash
+  - rotto
+  - scaduto
+  - negato
+  - invalido
+  - interrotto
+
+architecture_words:
+  - progettazione
+  - modello
+  - refactoring
+  - architettura
+  - ristrutturazione
+  - modulare
+  - disaccoppiare
+  - astrazione
+  - interfaccia
+  - migrazione
+
+query_hints:
+  multi_hop:
+    - "quanti"
+    - "tra"
+    - "cosa è venuto prima"
+    - "quanto tempo tra"
+    - "quanti giorni"
+    - "quanti mesi"
+  ordering:
+    - "ordine di"
+    - "cronologico"
+    - "dal più vecchio al più recente"
+    - "dal più recente al più vecchio"
+    - "in che ordine"
+  summary:
+    - "riepilogo completo"
+    - "riassumere tutto"
+    - "panoramica"
+    - "sintesi"
+    - "sommario"

@@ -1,0 +1,162 @@
+# German word lists for Ogham MCP extraction and scoring.
+# Notes: Day names have adverbial "-s" forms (montags = "on Mondays") implying recurrence.
+# All nouns capitalized in German but we store lowercase for matching.
+
+day_names:
+  sonntag: 0
+  montag: 1
+  dienstag: 2
+  mittwoch: 3
+  donnerstag: 4
+  freitag: 5
+  samstag: 6
+  # Adverbial recurrence forms
+  sonntags: 0
+  montags: 1
+  dienstags: 2
+  mittwochs: 3
+  donnerstags: 4
+  freitags: 5
+  samstags: 6
+
+month_names:
+  januar: 1
+  februar: 2
+  "märz": 3
+  maerz: 3
+  april: 4
+  mai: 5
+  juni: 6
+  juli: 7
+  august: 8
+  september: 9
+  oktober: 10
+  november: 11
+  dezember: 12
+  # Abbreviations
+  jan: 1
+  feb: 2
+  "mär": 3
+  apr: 4
+  jun: 6
+  jul: 7
+  aug: 8
+  sep: 9
+  okt: 10
+  nov: 11
+  dez: 12
+
+every_words:
+  - jeden
+  - jede
+  - jedes
+  - jeder
+  - "wöchentlich"
+  - wochentlich
+  - "täglich"
+  - taeglich
+
+temporal_keywords:
+  - wann
+  - datum
+  - zeit
+  - uhrzeit
+  - vor
+  - nach
+  - gestern
+  - morgen
+  - "übermorgen"
+  - vorgestern
+  - letzte
+  - letzten
+  - letzter
+  - "nächste"
+  - naechste
+  - vorher
+  - nachher
+  - "während"
+  - waehrend
+  - seit
+  - bis
+  - woche
+  - monat
+  - jahr
+  - tag
+  - heute
+
+direction_words:
+  after:
+    - nach
+    - seit
+    - danach
+    - seitdem
+    - "anschließend"
+    - folgend
+    - "später"
+    - spaeter
+  before:
+    - vor
+    - vorher
+    - vorherig
+    - "früher"
+    - frueher
+    - zuvor
+    - davor
+    - eher
+
+decision_words:
+  - entschieden
+  - "gewählt"
+  - gewechselt
+  - migriert
+  - "ausgewählt"
+  - ersetzt
+  - umgestiegen
+  - beschlossen
+  - festgelegt
+  - "übernommen"
+
+error_words:
+  - fehler
+  - ausnahme
+  - fehlgeschlagen
+  - absturz
+  - defekt
+  - "zeitüberschreitung"
+  - abgelehnt
+  - abgebrochen
+  - "ungültig"
+  - kaputt
+
+architecture_words:
+  - entwurf
+  - muster
+  - refaktorisierung
+  - architektur
+  - umstrukturierung
+  - modular
+  - entkoppeln
+  - abstraktion
+  - schnittstelle
+  - migration
+
+query_hints:
+  multi_hop:
+    - "wie viele"
+    - "zwischen"
+    - "was kam zuerst"
+    - "wie lange zwischen"
+    - "wie viele tage"
+    - "wie viele monate"
+  ordering:
+    - "reihenfolge"
+    - "chronologisch"
+    - "vom ältesten zum neuesten"
+    - "vom neuesten zum ältesten"
+    - "in welcher reihenfolge"
+  summary:
+    - "zusammenfassung"
+    - "fasse zusammen"
+    - "überblick über"
+    - "übersicht"
+    - "umfassende zusammenfassung"
