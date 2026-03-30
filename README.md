@@ -74,7 +74,7 @@ Ogham gives your agents a shared memory that persists across sessions and client
 ### 1. Install
 
 ```bash
-uvx ogham-mcp init
+uvx --from ogham-mcp ogham init
 ```
 
 This runs the setup wizard. It walks you through everything: database connection, embedding provider, schema migration, and writes MCP client configs for Claude Code, Cursor, VS Code, and others.
@@ -83,7 +83,7 @@ This runs the setup wizard. It walks you through everything: database connection
 
 > **Using Neon or self-hosted Postgres?** Install with the postgres extra so the driver is available:
 > ```bash
-> uvx --from 'ogham-mcp[postgres]' ogham-mcp init
+> uvx --from 'ogham-mcp[postgres]' ogham init
 > ```
 
 ### 2. Add to your MCP client
