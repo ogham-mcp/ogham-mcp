@@ -288,7 +288,7 @@ class PostgresBackend:
         }
         return self._execute(
             "SELECT * FROM match_memories("
-            "  %(embedding)s::vector, %(threshold)s, %(limit)s,"
+            "  %(embedding)s::vector, %(threshold)s::float, %(limit)s::integer,"
             "  %(tags)s, %(source)s, %(profile)s"
             ")",
             params,
@@ -316,9 +316,9 @@ class PostgresBackend:
         }
         return self._execute(
             "SELECT * FROM hybrid_search_memories("
-            "  %(query_text)s, %(embedding)s::vector, %(limit)s,"
+            "  %(query_text)s, %(embedding)s::vector, %(limit)s::integer,"
             "  %(profile)s, %(tags)s, %(source)s,"
-            "  0.3, 0.7, 10, %(profiles)s"
+            "  0.3::float, 0.7::float, 10::integer, %(profiles)s"
             ")",
             params,
         )
@@ -571,7 +571,7 @@ class PostgresBackend:
         return self._execute(
             "SELECT * FROM explore_memory_graph("
             "  %(query_text)s, %(embedding)s::vector, %(profile)s,"
-            "  %(limit)s, %(depth)s, %(min_strength)s,"
+            "  %(limit)s::integer, %(depth)s::integer, %(min_strength)s::float,"
             "  %(tags)s, %(source)s"
             ")",
             {
@@ -626,8 +626,8 @@ class PostgresBackend:
     ) -> list[dict[str, Any]]:
         return self._execute(
             "SELECT * FROM get_related_memories("
-            "  %(memory_id)s, %(depth)s, %(min_strength)s,"
-            "  %(types)s::relationship_type[], %(limit)s"
+            "  %(memory_id)s, %(depth)s::integer, %(min_strength)s::float,"
+            "  %(types)s::relationship_type[], %(limit)s::integer"
             ")",
             {
                 "memory_id": memory_id,
