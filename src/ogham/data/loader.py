@@ -155,6 +155,84 @@ def get_compression_decision_words(lang: str = "en") -> list[str]:
     return _load_language_file(lang).get("compression_decision_words", [])
 
 
+def get_event_words(lang: str = "en") -> list[str]:
+    """Return event word list for a language."""
+    return _load_language_file(lang).get("event_words", [])
+
+
+def get_all_event_words() -> set[str]:
+    """Return merged event words from all languages."""
+    merged: set[str] = set()
+    for lang in _available_languages():
+        merged.update(get_event_words(lang))
+    return merged
+
+
+def get_activity_words(lang: str = "en") -> list[str]:
+    """Return activity word list for a language."""
+    return _load_language_file(lang).get("activity_words", [])
+
+
+def get_all_activity_words() -> set[str]:
+    """Return merged activity words from all languages."""
+    merged: set[str] = set()
+    for lang in _available_languages():
+        merged.update(get_activity_words(lang))
+    return merged
+
+
+def get_emotion_words(lang: str = "en") -> list[str]:
+    """Return emotion word list for a language."""
+    return _load_language_file(lang).get("emotion_words", [])
+
+
+def get_all_emotion_words() -> set[str]:
+    """Return merged emotion words from all languages."""
+    merged: set[str] = set()
+    for lang in _available_languages():
+        merged.update(get_emotion_words(lang))
+    return merged
+
+
+def get_relationship_words(lang: str = "en") -> list[str]:
+    """Return relationship word list for a language."""
+    return _load_language_file(lang).get("relationship_words", [])
+
+
+def get_all_relationship_words() -> set[str]:
+    """Return merged relationship words from all languages."""
+    merged: set[str] = set()
+    for lang in _available_languages():
+        merged.update(get_relationship_words(lang))
+    return merged
+
+
+def get_possessive_triggers(lang: str = "en") -> list[str]:
+    """Return possessive trigger words for a language."""
+    return _load_language_file(lang).get("possessive_triggers", [])
+
+
+def get_all_possessive_triggers() -> set[str]:
+    """Return merged possessive triggers from all languages."""
+    merged: set[str] = set()
+    for lang in _available_languages():
+        merged.update(get_possessive_triggers(lang))
+    return merged
+
+
+def get_quantity_units(lang: str = "en") -> list[str]:
+    """Return quantity unit words for a language."""
+    return _load_language_file(lang).get("quantity_units", [])
+
+
+def get_all_quantity_units() -> set[str]:
+    """Return merged quantity units from all languages."""
+    merged: set[str] = set()
+    for lang in _available_languages():
+        merged.update(get_quantity_units(lang))
+    return merged
+
+
 def invalidate_cache() -> None:
     """Clear the language file LRU cache."""
     _load_language_file.cache_clear()

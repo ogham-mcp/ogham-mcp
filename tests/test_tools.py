@@ -1,5 +1,5 @@
 import hashlib
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -26,11 +26,9 @@ def reset_profile():
 
 @pytest.fixture
 def mock_embedding():
-    mock_full = MagicMock(return_value=([0.1] * 1024, None))
     with (
         patch("ogham.tools.memory.generate_embedding") as mock,
         patch("ogham.service.generate_embedding", mock),
-        patch("ogham.service.generate_embedding_full", mock_full),
     ):
         mock.return_value = [0.1] * 1024
         yield mock
@@ -157,10 +155,9 @@ def test_hybrid_search(mock_embedding, mock_db):
     assert "relevance" in results[0]
     assert "confidence" in results[0]
     mock_db["search"].assert_called_once()
-    call_args = mock_db["search"].call_args
-    # _do_hybrid_search passes positional args
-    assert call_args[0][0] == "test query"  # query_text
-    assert call_args[0][2] == "default"  # profile
+    call_kwargs = mock_db["search"].call_args[1]
+    assert call_kwargs["query_text"] == "test query"
+    assert call_kwargs["profile"] == "default"
     mock_db["record_access"].assert_called_once_with([FAKE_ID])
 
 
@@ -246,21 +243,16 @@ async def test_re_embed_all(mock_embedding, mock_db):
     mock_ctx.info = AsyncMock()
     mock_ctx.report_progress = AsyncMock()
 
-    mock_backend = MagicMock()
-    # No _execute attr → sparse writes skipped
-    del mock_backend._execute
-
     with (
         patch("ogham.tools.memory.get_all_memories_content") as mock_get_all,
-        patch("ogham.tools.memory.generate_embeddings_batch_full") as mock_gen_batch,
+        patch("ogham.tools.memory.generate_embeddings_batch") as mock_gen_batch,
         patch("ogham.tools.memory.batch_update_embeddings") as mock_batch,
-        patch("ogham.tools.memory.get_backend", return_value=mock_backend),
     ):
         mock_get_all.return_value = [
             {"id": FAKE_ID, "content": "memory one"},
             {"id": "b2c3d4e5-0000-0000-0000-000000000002", "content": "memory two"},
         ]
-        mock_gen_batch.return_value = [([0.1] * 512, None), ([0.2] * 512, None)]
+        mock_gen_batch.return_value = [[0.1] * 512, [0.2] * 512]
         mock_batch.return_value = 2
         result = await re_embed_all(mock_ctx)
 
@@ -268,9 +260,9 @@ async def test_re_embed_all(mock_embedding, mock_db):
     assert result["profile"] == "default"
     assert result["total"] == 2
     assert result["succeeded"] == 2
-    assert result["sparse_updated"] == 0
+    assert result["failed"] == 0
     mock_get_all.assert_called_once_with(profile="default")
-    mock_ctx.report_progress.assert_called_with(2, 2)
+    mock_ctx.report_progress.assert_called_once_with(2, 2)
     mock_batch.assert_called_once()
 
 
@@ -1127,10 +1119,7 @@ def test_explore_knowledge(mock_embedding, mock_db):
     """explore_knowledge should search and traverse graph"""
     from ogham.tools.memory import explore_knowledge
 
-    with (
-        patch("ogham.tools.memory.db_explore_graph") as mock_explore,
-        patch("ogham.tools.memory.record_access"),
-    ):
+    with patch("ogham.tools.memory.db_explore_graph") as mock_explore:
         mock_explore.return_value = [
             {
                 "id": FAKE_ID,

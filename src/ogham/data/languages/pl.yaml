@@ -149,3 +149,317 @@ query_hints:
     - "przegląd"
     - "pełne podsumowanie"
     - "streszczenie"
+
+# --- Entity enrichment (v1) ---
+
+event_words:
+  - "ślub"
+  - slub
+  - wesele
+  - pogrzeb
+  - koncert
+  - konferencja
+  - spotkanie
+  - rozmowa kwalifikacyjna
+  - impreza
+  - urodziny
+  - rocznica
+  - ukończenie studiów
+  - matura
+  - ceremonia
+  - przyjęcie
+  - przyjecie
+  - zjazd
+  - wycieczka
+  - wakacje
+  - lot
+  - wizyta
+  - egzamin
+  - "spektakl"
+  - prezentacja
+  - maraton
+  - turniej
+  - mecz
+  - zawody
+  - barbecue
+  - piknik
+  - hackathon
+  # Accusative case (na ślub, na imprezę)
+  - "ślubie"
+  - slubie
+  - "imprezę"
+  - impreze
+  - "wycieczką"
+  - "konferencję"
+  - konferencje
+  - "ceremoniję"
+  - "prezentację"
+  - prezentacje
+  # Locative/prepositional case (na weselu, na koncercie)
+  - weselu
+  - "na weselu"
+  - koncercie
+  - spotkaniu
+  - "na spotkaniu"
+  - "na imprezie"
+  - "na wycieczce"
+  - "na urodzinach"
+  - "na meczu"
+  - "na turnieju"
+  - egzaminie
+  - "na egzaminie"
+  # Instrumental case (z wycieczką, przed ślubem)
+  - "ślubem"
+  - slubem
+  - "spotkaniem"
+  - "wyjazdem"
+
+activity_words:
+  - gotować
+  - gotowałem
+  - gotowałam
+  - gotował
+  - gotowała
+  - piesze wędrówki
+  - "wędrówka"
+  - biegać
+  - biegałem
+  - biegałam
+  - pływać
+  - pływałem
+  - pływałam
+  - yoga
+  - medytacja
+  - jazda na rowerze
+  - jechałem
+  - wędkowanie
+  - ogrodnictwo
+  - malowanie
+  - malowałem
+  - czytać
+  - czytałem
+  - pisać
+  - pisałem
+  - tańczyć
+  - tańczyłem
+  - tańczyłam
+  - śpiewać
+  - śpiewałem
+  - podróżować
+  - podróżowałem
+  - biwakować
+  - wspinaczka
+  - narciarstwo
+  - jogging
+  - wolontariat
+  - uczyć się
+  - programować
+  - programowałem
+  - debugować
+  - ćwiczyć
+  - ćwiczyłem
+
+emotion_words:
+  # wysoka pobudzenie pozytywne
+  - podekscytowany
+  - podekscytowana
+  - zachwycony
+  - zachwycona
+  - euforyczny
+  - euforyczna
+  # niska pobudzenie pozytywne
+  - szczęśliwy
+  - szczęśliwa
+  - zadowolony
+  - zadowolona
+  - wdzięczny
+  - wdzięczna
+  - odprężony
+  - odprężona
+  - spokojny
+  - spokojna
+  # wysoka pobudzenie negatywne
+  - sfrustrowany
+  - sfrustrowana
+  - zły
+  - zła
+  - zdenerwowany
+  - zdenerwowana
+  - przytłoczony
+  - przytłoczona
+  - zestresowany
+  - zestresowana
+  # niska pobudzenie negatywne
+  - smutny
+  - smutna
+  - rozczarowany
+  - rozczarowana
+  - znudzony
+  - znudzona
+  - zmęczony
+  - zmęczona
+  - wyczerpany
+  - wyczerpana
+  - zaniepokojony
+  - zaniepokojona
+  - zdenerwowany
+  - zdezorientowany
+  - zdezorientowana
+  # neutralne/mieszane
+  - zaskoczony
+  - zaskoczona
+  - ciekawy
+  - ciekawa
+  - nostalgiczny
+  - nostalgiczna
+
+relationship_words:
+  - matka
+  - mama
+  - ojciec
+  - tata
+  - siostra
+  - brat
+  - żona
+  - mąż
+  - maz
+  - partner
+  - partnerka
+  - córka
+  - corka
+  - syn
+  - ciotka
+  - wuj
+  - kuzynka
+  - kuzyn
+  - babcia
+  - dziadek
+  - bratanica
+  - bratanek
+  - przyjaciółka
+  - przyjaciel
+  - dziewczyna
+  - chłopak
+  - szef
+  - kierownik
+  - kolega
+  - koleżanka
+  - nauczycielka
+  - nauczyciel
+  - lekarka
+  - lekarz
+  - terapeuta
+  - prawniczka
+  - prawnik
+  - sąsiadka
+  - sąsiad
+  - współlokator
+  - współlokatorka
+  - klient
+  - trenerka
+  - trener
+  # Accusative case (widziałem mamę, spotkałem siostrę)
+  - "mamę"
+  - mame
+  - "siostrę"
+  - siostry
+  - "babcię"
+  - babcie
+  - "przyjaciółkę"
+  - przyjaciolke
+  - "dziewczynę"
+  - dziewczyne
+  - "koleżankę"
+  - koleżance
+  - "córkę"
+  - corke
+  # Genitive case (nie ma mamy, u brata)
+  - matki
+  - taty
+  - siostry
+  - "brata"
+  - "żony"
+  - "męża"
+  - "córki"
+  - corki
+  - syna
+  - "przyjaciela"
+  - "chłopaka"
+  - babci
+  - "dziadka"
+  # Dative case (dałem mamie, piszę do brata)
+  - mamie
+  - tacie
+  - siostrze
+  - bratu
+  - "żonie"
+  - "córce"
+  - synowi
+  - babci
+  - "dziadkowi"
+  - "przyjacielowi"
+  - "lekarzowi"
+  - "trenerowi"
+  # Instrumental case (z mamą, ze siostrą)
+  - "z mamą"
+  - "z tatą"
+  - "z siostrą"
+  - "z bratem"
+  - "z żoną"
+  - "z mężem"
+  - "z córką"
+  - "z synem"
+  - "z babcią"
+  - "z przyjacielem"
+
+possessive_triggers:
+  - mój
+  - moja
+  - moje
+  - moi
+  - jego
+  - jej
+  - ich
+  - nasz
+  - nasza
+  - nasze
+
+quantity_units:
+  - dolary
+  - dolar
+  - euro
+  - funty
+  - funt
+  - kilogramy
+  - kilogram
+  - kg
+  - kilometry
+  - km
+  - litry
+  - litr
+  - filiżanki
+  - filiżanka
+  - butelki
+  - butelka
+  - książki
+  - książka
+  - strony
+  - strona
+  - filmy
+  - film
+  - zdjęcia
+  - zdjęcie
+  - posiłki
+  - posiłek
+  - lekcje
+  - lekcja
+  - sesje
+  - sesja
+  - odcinki
+  - odcinek
+  - bilety
+  - bilet
+  - rundy
+  - runda
+  - serie
+  - seria

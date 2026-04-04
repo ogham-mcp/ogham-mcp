@@ -147,3 +147,295 @@ query_hints:
     - "genel bakış"
     - "tam özet"
     - "özet"
+
+# --- Entity enrichment (v1) ---
+
+event_words:
+  - "düğün"
+  - dugun
+  - "cenaze"
+  - konser
+  - konferans
+  - "toplantı"
+  - toplanti
+  - "mülakat"
+  - mulakat
+  - parti
+  - "doğum günü"
+  - dogum gunu
+  - "yıldönümü"
+  - yildonumu
+  - mezuniyet
+  - tören
+  - toren
+  - resepsiyon
+  - "buluşma"
+  - bulusma
+  - gezi
+  - "tatil"
+  - "uçuş"
+  - ucus
+  - "randevu"
+  - muayene
+  - "sınav"
+  - sinav
+  - gösteri
+  - gosteri
+  - sunum
+  - maraton
+  - turnuva
+  - "maç"
+  - mac
+  - barbecue
+  - piknik
+  - hackathon
+  # Dative case -e/-a (düğüne gittim, toplantıya geldim)
+  - "düğüne"
+  - dugune
+  - "konsere"
+  - "konferansa"
+  - "toplantıya"
+  - toplantiya
+  - "partiye"
+  - "törene"
+  - torene
+  - "geziye"
+  - "tatile"
+  - "randevuya"
+  - "sınava"
+  - sinava
+  - "sunuma"
+  - "maça"
+  - maca
+  - "mezuniyete"
+  # Locative case -de/-da (düğünde, toplantıda)
+  - "düğünde"
+  - dugunde
+  - "konserde"
+  - "konferansta"
+  - "toplantıda"
+  - toplantida
+  - "partide"
+  - "törende"
+  - "sınavda"
+  - sinavda
+  - "tatilde"
+  - "gezide"
+  - "maçta"
+  - macta
+  # Ablative case -den/-dan (düğünden, toplantıdan)
+  - "düğünden"
+  - "konserden"
+  - "toplantıdan"
+  - toplantidan
+  - "tatilden"
+  - "sınavdan"
+  - sinavdan
+
+activity_words:
+  - "yemek pişirmek"
+  - "yemek pişirdim"
+  - "yürüyüş"
+  - yuruyus
+  - "koşmak"
+  - kosmak
+  - "koştum"
+  - kostum
+  - "yüzmek"
+  - yuzmek
+  - "yüzdüm"
+  - "yoga"
+  - "meditasyon"
+  - "bisiklet sürmek"
+  - "balık tutmak"
+  - "bahçecilik"
+  - "resim yapmak"
+  - "okumak"
+  - "okudum"
+  - "yazmak"
+  - "yazdım"
+  - "dans etmek"
+  - "dans ettim"
+  - "şarkı söylemek"
+  - "seyahat etmek"
+  - "seyahat ettim"
+  - "kamp yapmak"
+  - "tırmanmak"
+  - "kayak yapmak"
+  - "yavaş koşmak"
+  - "gönüllülük"
+  - "çalışmak"
+  - "calismak"
+  - "programlama yapmak"
+  - "hata ayıklamak"
+  - "antrenman yapmak"
+
+emotion_words:
+  # yüksek uyarılma pozitif
+  - "heyecanlı"
+  - heyecanli
+  - "coşkulu"
+  - coskulu
+  - "neşeli"
+  - neseli
+  # düşük uyarılma pozitif
+  - "mutlu"
+  - "memnun"
+  - "tatmin olmuş"
+  - "minnettar"
+  - "rahatlamış"
+  - rahatlamis
+  - "sakin"
+  - "huzurlu"
+  # yüksek uyarılma negatif
+  - "sinirlenmiş"
+  - sinirli
+  - "öfkeli"
+  - ofkeli
+  - "endişeli"
+  - endiseli
+  - "bunalmış"
+  - bunalmis
+  - "stresli"
+  # düşük uyarılma negatif
+  - "üzgün"
+  - uzgun
+  - "hayal kırıklığına uğramış"
+  - "sıkılmış"
+  - sikilmis
+  - "yorgun"
+  - "bitkin"
+  - "kaygılı"
+  - kaygili
+  - "gergin"
+  - "kafası karışmış"
+  # nötr/karışık
+  - "şaşırmış"
+  - sasirimis
+  - "meraklı"
+  - merakli
+  - "nostaljik"
+
+relationship_words:
+  - anne
+  - annem
+  - baba
+  - babam
+  - "kız kardeş"
+  - "erkek kardeş"
+  - "karı"
+  - kari
+  - "eş"
+  - koca
+  - partner
+  - "kız çocuğu"
+  - "oğul"
+  - "hala"
+  - teyze
+  - amca
+  - "dayı"
+  - "kuzen"
+  - "büyükanne"
+  - buyukanne
+  - "büyükbaba"
+  - buyukbaba
+  - "yeğen"
+  - arkadaş
+  - arkadas
+  - "kız arkadaş"
+  - "erkek arkadaş"
+  - patron
+  - "yönetici"
+  - yonetici
+  - "meslektaş"
+  - meslektas
+  - "öğretmen"
+  - ogretmen
+  - doktor
+  - terapist
+  - avukat
+  - "komşu"
+  - komsu
+  - "ev arkadaşı"
+  - "kiracı"
+  - "müşteri"
+  - musteri
+  - antrenör
+  - antrenor
+  # Dative -e/-a (anneme, babama, arkadaşa)
+  - anneme
+  - babama
+  - "kardeşime"
+  - kardesime
+  - "arkadaşa"
+  - arkadasa
+  - "arkadaşıma"
+  - arkadasima
+  - "eşime"
+  - "doktora"
+  - "öğretmene"
+  - ogretmene
+  - "antrenöre"
+  - antrenore
+  # Locative -de/-da (annede, arkadaşta)
+  - annede
+  - babada
+  # Ablative -den/-dan (anneden, arkadaştan)
+  - anneden
+  - babadan
+  - "kardeşten"
+  - kardesden
+  - "arkadaştan"
+  - arkadastan
+  # Accusative -i/-ı/-u/-ü (annemi gördüm, arkadaşımı aradım)
+  - annemi
+  - babamı
+  - "kardeşimi"
+  - kardesimi
+  - "arkadaşımı"
+  - arkadasimi
+  - "eşimi"
+  - "kızımı"
+
+possessive_triggers:
+  - benim
+  - onun
+  - onların
+  - bizim
+  - "kendi"
+
+quantity_units:
+  - dolar
+  - euro
+  - "sterlin"
+  - kilogram
+  - kilo
+  - kg
+  - kilometre
+  - km
+  - litre
+  - "bardak"
+  - "şişe"
+  - sise
+  - kitap
+  - kitaplar
+  - sayfa
+  - sayfalar
+  - film
+  - filmler
+  - "fotoğraf"
+  - fotograf
+  - yemek
+  - yemekler
+  - ders
+  - dersler
+  - "oturum"
+  - oturumlar
+  - "bölüm"
+  - bolum
+  - bilet
+  - biletler
+  - tur
+  - turlar
+  - set
+  - setler

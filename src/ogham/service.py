@@ -157,14 +157,98 @@ def search_memories_enriched(
     3. Record access for retrieved memories
     """
     results = _search_memories_raw(
-        query, profile, limit, tags, source, graph_depth, embedding, profiles
+        query,
+        profile,
+        limit,
+        tags,
+        source,
+        graph_depth,
+        embedding,
+        profiles,
     )
 
     if results:
         results = _maybe_rerank(query, results, limit)
+        results = _reorder_for_attention(results)
         record_access([r["id"] for r in results])
 
     return results
+
+
+def build_timeline_table(
+    results: list[dict],
+    reference_date: datetime | None = None,
+) -> str:
+    """Build a chronological timeline table from retrieved memories.
+
+    Extracts dates from each memory, sorts chronologically, computes
+    "days ago" relative to reference_date (defaults to now), and creates
+    a Markdown table with memory ID hard links (M1, M3, etc.).
+
+    Returns an empty string if fewer than 2 dated events are found.
+    """
+    ref_dt = reference_date or datetime.now(timezone.utc)
+    ref_dt_naive = ref_dt.replace(tzinfo=None)
+
+    # Collect and parse dates
+    dated_events = []
+    for idx, r in enumerate(results, 1):
+        content = r.get("content", "")
+        meta = r.get("metadata") or {}
+        dates = meta.get("dates") or extract_dates(content)
+
+        if dates:
+            summary = content[:100].replace("\n", " ")
+            for d in dates:
+                dated_events.append({"date": d, "summary": summary, "idx": idx})
+
+    if len(dated_events) < 2:
+        return ""
+
+    # Group by date (dict preserves insertion order in Python 3.7+)
+    dated_events.sort(key=lambda x: x["date"])
+    day_groups: dict[str, list[dict]] = {}
+    for ev in dated_events:
+        day_groups.setdefault(ev["date"], []).append(ev)
+
+    # Build table
+    ref_str = ref_dt.strftime("%Y-%m-%d")
+    lines = [
+        f"### CHRONOLOGICAL TIMELINE (Today = {ref_str}) ###",
+        "| Date | Event Summary | Days Ago | Ref |",
+        "|:---|:---|:---|:---|",
+    ]
+
+    for date_str, entries in list(day_groups.items())[:20]:
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")  # noqa: DTZ007
+            delta = (ref_dt_naive - dt).days
+            ago = f"{delta} days" if delta > 0 else "TODAY"
+        except ValueError:
+            ago = "---"
+
+        summary = " + ".join(e["summary"][:35] for e in entries)
+        refs = ", ".join(f"M{e['idx']}" for e in entries)
+        lines.append(f"| {date_str} | {summary[:38]} | {ago} | {refs} |")
+
+    lines.append(f"| {ref_str} | >>> TODAY (reference point) <<< | TODAY | |")
+
+    return "\n".join(lines)
+
+
+def _reorder_for_attention(results: list[dict]) -> list[dict]:
+    """Reorder results to combat 'Lost in the Middle' (Liu et al. 2023).
+
+    LLMs attend better to items at the start and end of the context.
+    Put top 30% first, bottom 20% last, middle items in between.
+    """
+    if len(results) < 5:
+        return results
+    n = len(results)
+    top = results[: max(1, n * 3 // 10)]
+    bottom = results[max(1, n * 8 // 10) :]
+    middle = results[max(1, n * 3 // 10) : max(1, n * 8 // 10)]
+    return top + middle + bottom
 
 
 def _maybe_rerank(query: str, results: list[dict], limit: int) -> list[dict]:

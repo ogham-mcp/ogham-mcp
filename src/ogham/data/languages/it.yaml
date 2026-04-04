@@ -150,3 +150,242 @@ query_hints:
     - "panoramica"
     - "sintesi"
     - "sommario"
+
+# --- Entity enrichment (v1) ---
+
+event_words:
+  - matrimonio
+  - nozze
+  - funerale
+  - concerto
+  - conferenza
+  - riunione
+  - colloquio
+  - festa
+  - compleanno
+  - anniversario
+  - laurea
+  - cerimonia
+  - ricevimento
+  - viaggio
+  - vacanza
+  - ferie
+  - volo
+  - check-in
+  - appuntamento
+  - visita medica
+  - esame
+  - audizione
+  - spettacolo
+  - presentazione
+  - gita
+  - maratona
+  - torneo
+  - partita
+  - gara
+  - barbecue
+  - picnic
+  - raduno
+  - hackathon
+
+activity_words:
+  - cucinare
+  - cucinato
+  - escursione
+  - escursionismo
+  - correre
+  - corso
+  - nuotare
+  - nuotato
+  - yoga
+  - meditazione
+  - ciclismo
+  - pedalare
+  - pesca
+  - giardinaggio
+  - dipingere
+  - dipinto
+  - leggere
+  - lettura
+  - scrivere
+  - scritto
+  - ballare
+  - ballato
+  - cantare
+  - cantato
+  - viaggiare
+  - viaggiato
+  - campeggio
+  - scalare
+  - sciare
+  - fare jogging
+  - camminare
+  - camminato
+  - volontariato
+  - studiare
+  - studiato
+  - programmare
+  - programmato
+  - debug
+  - refactoring
+  - allenarsi
+  - allenato
+
+emotion_words:
+  # alta eccitazione positiva
+  - entusiasta
+  - entusiasmato
+  - entusiasmata
+  - emozionato
+  - emozionata
+  - euforico
+  - euforica
+  - esaltato
+  - esaltata
+  # bassa eccitazione positiva
+  - felice
+  - contento
+  - contenta
+  - soddisfatto
+  - soddisfatta
+  - grato
+  - grata
+  - sollevato
+  - sollevata
+  - tranquillo
+  - tranquilla
+  - sereno
+  - serena
+  # alta eccitazione negativa
+  - frustrato
+  - frustrata
+  - arrabbiato
+  - arrabbiata
+  - ansioso
+  - ansiosa
+  - sopraffatto
+  - sopraffatta
+  - stressato
+  - stressata
+  # bassa eccitazione negativa
+  - triste
+  - deluso
+  - delusa
+  - annoiato
+  - annoiata
+  - stanco
+  - stanca
+  - esausto
+  - esausta
+  - preoccupato
+  - preoccupata
+  - nervoso
+  - nervosa
+  - confuso
+  - confusa
+  # neutro/misto
+  - sorpreso
+  - sorpresa
+  - curioso
+  - curiosa
+  - nostalgico
+  - nostalgica
+
+relationship_words:
+  - madre
+  - mamma
+  - padre
+  - papà
+  - papa
+  - sorella
+  - fratello
+  - moglie
+  - marito
+  - partner
+  - figlia
+  - figlio
+  - zia
+  - zio
+  - cugina
+  - cugino
+  - nonna
+  - nonno
+  - nipote
+  - amica
+  - amico
+  - fidanzata
+  - fidanzato
+  - capo
+  - manager
+  - collega
+  - colleghi
+  - insegnante
+  - professoressa
+  - professore
+  - dottoressa
+  - dottore
+  - terapeuta
+  - avvocata
+  - avvocato
+  - vicina
+  - vicino
+  - coinquilina
+  - coinquilino
+  - cliente
+  - allenatrice
+  - allenatore
+
+possessive_triggers:
+  - mio
+  - mia
+  - miei
+  - mie
+  - suo
+  - sua
+  - suoi
+  - sue
+  - loro
+  - nostro
+  - nostra
+  - nostri
+  - nostre
+
+quantity_units:
+  - dollari
+  - dollaro
+  - euro
+  - sterline
+  - sterlina
+  - chilogrammi
+  - chili
+  - kg
+  - chilometri
+  - km
+  - litri
+  - litro
+  - tazze
+  - tazza
+  - bottiglie
+  - bottiglia
+  - libri
+  - libro
+  - pagine
+  - pagina
+  - film
+  - foto
+  - fotografie
+  - fotografia
+  - pasti
+  - pasto
+  - lezioni
+  - lezione
+  - sessioni
+  - sessione
+  - episodi
+  - episodio
+  - biglietti
+  - biglietto
+  - round
+  - serie
+  - ripetizioni
+  - ripetizione

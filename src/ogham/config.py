@@ -12,7 +12,6 @@ PROVIDER_BATCH_DEFAULTS: dict[str, int] = {
     "mistral": 32,
     "voyage": 500,
     "gemini": 100,
-    "onnx": 10,
 }
 
 # Default embedding dimensions per provider (used when EMBEDDING_DIM is not set).
@@ -22,7 +21,6 @@ PROVIDER_DEFAULT_DIMS: dict[str, int] = {
     "mistral": 1024,
     "voyage": 1024,
     "gemini": 512,
-    "onnx": 1024,
 }
 
 
@@ -69,6 +67,8 @@ class Settings(BaseSettings):
     voyage_embed_model: str = "voyage-4-lite"
     gemini_embed_model: str = "gemini-embedding-2-preview"
 
+    onnx_model_path: str = ""
+
     default_match_threshold: float = 0.7
     default_match_count: int = 10
 
@@ -85,8 +85,6 @@ class Settings(BaseSettings):
     # (e.g. "llama3.2") for local LLM, or "gpt-4o-mini" for OpenAI, or any
     # litellm-compatible model string. Requires litellm installed.
     temporal_llm_model: str = ""
-
-    onnx_model_path: str = ""
 
     rerank_enabled: bool = False
     rerank_alpha: float = 0.55

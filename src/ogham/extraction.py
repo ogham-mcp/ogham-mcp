@@ -12,11 +12,17 @@ import parsedatetime
 from stop_words import AVAILABLE_LANGUAGES, get_stop_words
 
 from ogham.data.loader import (
+    get_all_activity_words,
     get_all_architecture_words,
     get_all_day_names,
     get_all_decision_words,
+    get_all_emotion_words,
     get_all_error_words,
+    get_all_event_words,
     get_all_every_words,
+    get_all_possessive_triggers,
+    get_all_quantity_units,
+    get_all_relationship_words,
     get_day_names,
     get_month_names,
     get_temporal_keywords,
@@ -476,6 +482,26 @@ _ERROR_TYPE = re.compile(r"\b\w*(?:Error|Exception)\b")
 _DECISION_WORDS: set[str] = get_all_decision_words()
 _ERROR_WORDS: set[str] = get_all_error_words()
 _ARCHITECTURE_WORDS: set[str] = get_all_architecture_words()
+_EVENT_WORDS: set[str] = get_all_event_words()
+_ACTIVITY_WORDS: set[str] = get_all_activity_words()
+_EMOTION_WORDS: set[str] = get_all_emotion_words()
+_RELATIONSHIP_WORDS: set[str] = get_all_relationship_words()
+_POSSESSIVE_TRIGGERS: set[str] = get_all_possessive_triggers()
+_QUANTITY_UNITS: set[str] = get_all_quantity_units()
+
+# GeoText for location extraction (pre-compiled city/country database from GeoNames)
+try:
+    from geotext import GeoText as _GeoText
+except ImportError:
+    _GeoText = None
+
+# Pre-compile quantity pattern: number + unit, excluding years
+_QUANTITY_PATTERN = re.compile(
+    r"\b(?!(?:19|20)\d{2}\b)(\d+(?:\.\d+)?)\s+("
+    + "|".join(re.escape(u) for u in sorted(_QUANTITY_UNITS, key=len, reverse=True))
+    + r")\b",
+    re.IGNORECASE,
+)
 
 
 def _content_has_signal(content: str, word_set: set[str]) -> bool:
@@ -517,14 +543,20 @@ _PUNCT = str.maketrans("", "", ".,!?:;\"'()")
 def extract_entities(content: str) -> list[str]:
     """Extract named entities from content for tagging.
 
-    Returns sorted list of prefixed tags, capped at 15:
+    Returns sorted list of prefixed tags, capped at 20:
       person:FirstName LastName
       entity:CamelCaseName
       file:path/to/file.ext
       error:SomeError
+      event:wedding
+      activity:hiking
+      emotion:frustrated
+      relationship:sister
+      quantity:3 tanks
     """
     entities: set[str] = set()
 
+    # --- Technical entities (existing) ---
     for m in _CAMEL_CASE.finditer(content):
         entities.add(f"entity:{m.group(0)}")
 
@@ -536,7 +568,7 @@ def extract_entities(content: str) -> list[str]:
     for m in _ERROR_TYPE.finditer(content):
         entities.add(f"error:{m.group(0)}")
 
-    # Person names: two consecutive capitalised words not in stopwords
+    # --- Person names (existing): two consecutive capitalised words ---
     words = content.split()
     for i in range(len(words) - 1):
         w1 = words[i].translate(_PUNCT)
@@ -555,4 +587,108 @@ def extract_entities(content: str) -> list[str]:
         ):
             entities.add(f"person:{w1} {w2}")
 
-    return sorted(entities)[:15]
+    # --- Enrichment entities (v1, multilingual) ---
+    content_lower = content.lower()
+    content_words = set(content_lower.split())
+
+    def _match(word: str) -> bool:
+        """Match word in content. Use substring for non-Latin/short CJK, word-set for Latin."""
+        if len(word) < 2:
+            return False
+        # Non-ASCII (CJK, Arabic, Cyrillic, Devanagari, etc.) -- substring match
+        if not word[0].isascii():
+            return word in content_lower
+        # Latin script -- word-set match to avoid partial matches
+        return word in content_words
+
+    # Events (cap 2)
+    event_count = 0
+    for word in _EVENT_WORDS:
+        if event_count >= 2:
+            break
+        if _match(word):
+            entities.add(f"event:{word}")
+            event_count += 1
+
+    # Activities (cap 2)
+    activity_count = 0
+    for word in _ACTIVITY_WORDS:
+        if activity_count >= 2:
+            break
+        if _match(word):
+            entities.add(f"activity:{word}")
+            activity_count += 1
+
+    # Emotions (cap 2)
+    emotion_count = 0
+    for word in _EMOTION_WORDS:
+        if emotion_count >= 2:
+            break
+        if _match(word):
+            entities.add(f"emotion:{word}")
+            emotion_count += 1
+
+    # Relationships: require social context (preposition or event/activity nearby)
+    _SOCIAL_PREPS = {"with", "mit", "avec", "con", "com", "for", "für", "pour", "para"}
+    rel_count = 0
+    for i, w in enumerate(words):
+        if rel_count >= 2:
+            break
+        w_lower = w.translate(_PUNCT).lower()
+        # Pattern 1: preposition + relationship word ("with my sister")
+        if w_lower in _SOCIAL_PREPS:
+            for j in range(i + 1, min(i + 4, len(words))):
+                next_w = words[j].translate(_PUNCT).lower()
+                if next_w in _POSSESSIVE_TRIGGERS:
+                    continue  # skip "with my" and check next
+                if next_w in _RELATIONSHIP_WORDS:
+                    entities.add(f"relationship:{next_w}")
+                    rel_count += 1
+                    break
+        # Pattern 2: possessive + relationship word + event/activity nearby
+        elif w_lower in _POSSESSIVE_TRIGGERS:
+            for j in range(i + 1, min(i + 4, len(words))):
+                next_w = words[j].translate(_PUNCT).lower()
+                if next_w in _RELATIONSHIP_WORDS:
+                    # Check if an event or activity word exists in the content
+                    if content_words & _EVENT_WORDS or content_words & _ACTIVITY_WORDS:
+                        entities.add(f"relationship:{next_w}")
+                        rel_count += 1
+                    break
+
+    # Fallback: substring match for non-Latin relationship words (CJK, Arabic, Cyrillic)
+    if rel_count < 2:
+        for word in _RELATIONSHIP_WORDS:
+            if rel_count >= 2:
+                break
+            if not word[0].isascii() and len(word) >= 2 and word in content_lower:
+                entities.add(f"relationship:{word}")
+                rel_count += 1
+
+    # Quantities: number + unit noun (excluding years)
+    qty_count = 0
+    for m in _QUANTITY_PATTERN.finditer(content):
+        if qty_count >= 3:
+            break
+        entities.add(f"quantity:{m.group(1)} {m.group(2).lower()}")
+        qty_count += 1
+
+    # Locations: GeoText city/country extraction (GeoNames database, no LLM)
+    if _GeoText is not None:
+        try:
+            places = _GeoText(content)
+            loc_count = 0
+            for city in places.cities:
+                if loc_count >= 2:
+                    break
+                entities.add(f"location:{city}")
+                loc_count += 1
+            for country in places.country_mentions:
+                if loc_count >= 3:
+                    break
+                entities.add(f"location:{country}")
+                loc_count += 1
+        except Exception:
+            logger.debug("GeoText extraction failed, skipping locations")
+
+    return sorted(entities)[:20]

@@ -149,3 +149,201 @@ query_hints:
     - "vue d'ensemble"
     - "synthèse"
     - "aperçu de"
+
+# --- Entity enrichment (v1) ---
+
+event_words:
+  - mariage
+  - "funérailles"
+  - enterrement
+  - concert
+  - "conférence"
+  - "réunion"
+  - entretien
+  - "fête"
+  - anniversaire
+  - "cérémonie"
+  - "réception"
+  - retrouvailles
+  - voyage
+  - vacances
+  - vol
+  - rendez-vous
+  - "opération"
+  - examen
+  - "présentation"
+  - "démonstration"
+  - marathon
+  - course
+  - tournoi
+  - match
+  - pique-nique
+  - barbecue
+
+activity_words:
+  - cuisiner
+  - "cuisiné"
+  - "randonnée"
+  - "randonné"
+  - courir
+  - couru
+  - nager
+  - "nagé"
+  - yoga
+  - "méditation"
+  - cyclisme
+  - "pêcher"
+  - "pêché"
+  - jardinage
+  - peinture
+  - peint
+  - lire
+  - lu
+  - "écrire"
+  - "écrit"
+  - danser
+  - "dansé"
+  - chanter
+  - "chanté"
+  - voyager
+  - "voyagé"
+  - camping
+  - escalade
+  - ski
+  - jogging
+  - marcher
+  - "marché"
+  - "bénévolat"
+  - "étudier"
+  - "étudié"
+
+emotion_words:
+  # positif intense
+  - "enthousiaste"
+  - ravi
+  - "extatique"
+  - euphorique
+  # positif calme
+  - heureux
+  - heureuse
+  - content
+  - contente
+  - satisfait
+  - satisfaite
+  - reconnaissant
+  - reconnaissante
+  - "soulagé"
+  - "soulagée"
+  - calme
+  - paisible
+  # négatif intense
+  - "frustré"
+  - "frustrée"
+  - "en colère"
+  - furieux
+  - furieuse
+  - anxieux
+  - anxieuse
+  - "débordé"
+  - "débordée"
+  - "stressé"
+  - "stressée"
+  # négatif calme
+  - triste
+  - "déçu"
+  - "déçue"
+  - "ennuyé"
+  - "ennuyée"
+  - "fatigué"
+  - "fatiguée"
+  - "épuisé"
+  - "épuisée"
+  - inquiet
+  - "inquiète"
+  - nerveux
+  - nerveuse
+  - confus
+  - confuse
+  # neutre
+  - surpris
+  - surprise
+  - curieux
+  - curieuse
+  - nostalgique
+
+relationship_words:
+  - "mère"
+  - "père"
+  - soeur
+  - "frère"
+  - femme
+  - mari
+  - partenaire
+  - fille
+  - fils
+  - tante
+  - oncle
+  - cousine
+  - cousin
+  - "grand-mère"
+  - "grand-père"
+  - "nièce"
+  - neveu
+  - amie
+  - ami
+  - copine
+  - copain
+  - "fiancée"
+  - "fiancé"
+  - patronne
+  - patron
+  - "collègue"
+  - mentor
+  - professeure
+  - professeur
+  - "médecin"
+  - docteur
+  - "thérapeute"
+  - avocate
+  - avocat
+  - voisine
+  - voisin
+  - colocataire
+  - propriétaire
+  - cliente
+  - client
+  - entraîneuse
+  - "entraîneur"
+
+possessive_triggers:
+  - mon
+  - ma
+  - mes
+  - son
+  - sa
+  - ses
+  - leur
+  - leurs
+  - notre
+  - nos
+
+quantity_units:
+  - dollars
+  - euros
+  - livres
+  - kilogrammes
+  - kg
+  - "kilomètres"
+  - km
+  - litres
+  - tasses
+  - verres
+  - bouteilles
+  - films
+  - livres
+  - pages
+  - photos
+  - repas
+  - cours
+  - tours
+  - "séries"

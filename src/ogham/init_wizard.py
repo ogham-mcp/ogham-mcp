@@ -329,18 +329,12 @@ def _build_mcp_entry(
 
 
 def _find_schema_file(backend: str) -> Path | None:
-    """Locate the appropriate schema SQL file.
-
-    Checks: bundled package files first, then source tree, then cwd.
-    """
+    """Locate the appropriate schema SQL file."""
     filename = "schema.sql" if backend == "supabase" else "schema_postgres.sql"
 
     candidates = [
-        # Bundled in the wheel (src/ogham/sql/)
-        Path(__file__).parent / "sql" / filename,
-        # Source tree (when running from git clone)
         Path(__file__).parent.parent.parent / "sql" / filename,
-        # Current working directory
+        Path(__file__).parent / "sql" / filename,
         Path.cwd() / "sql" / filename,
     ]
     for p in candidates:

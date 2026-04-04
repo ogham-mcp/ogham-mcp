@@ -1,6 +1,6 @@
 [project]
 name = "ogham-mcp"
-version = "0.8.6"
+version = "0.9.0"
 description = "Shared memory MCP server — persistent, searchable, cross-client"
 requires-python = ">=3.13"
 dependencies = [
@@ -14,6 +14,7 @@ dependencies = [
     "stop-words>=2024.2.1",
     "parsedatetime>=2.6",
     "pyyaml>=6.0",
+    "geotext>=0.4",
 ]
 
 [project.optional-dependencies]
