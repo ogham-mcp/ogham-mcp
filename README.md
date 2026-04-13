@@ -27,7 +27,9 @@
 
 ## Retrieval quality
 
-**91.8% QA accuracy** on [LongMemEval](https://arxiv.org/abs/2410.10813) (500 questions, ICLR 2025) -- 459/500 questions answered correctly by gpt-5.4-mini with reasoning, reading from Ogham's retrieved memories. Retrieval R@10: 97.2%. Up from 62.4% baseline through context engineering -- timeline tables, multilingual entity extraction across 18 languages, session boundary headers, preference detection. No fine-tuning, no model training. [Full write-up](https://ogham-mcp.dev/blog/longmemeval-92/).
+**85.8% QA accuracy on the [AMB benchmark harness](https://github.com/vectorize-io/agent-memory-benchmark)** (500 questions, April 2026) -- 429/500 questions answered correctly using GPT-5-mini with reasoning, evaluated by Gemini 2.5 Flash Lite as a strict judge. Retrieval R@10: 99.5%. AMB is the standardised evaluation harness built by the [Vectorize](https://vectorize.io) team (creators of Hindsight). Thanks to Nicolo and the Vectorize team for making the harness open.
+
+Previously: 91.8% on our internal LongMemEval benchmark pipeline (gpt-5.4-mini reader, rubric judge). The AMB number is lower because AMB uses a stricter substring-matching judge -- see the [full write-up](https://ogham-mcp.dev/blog/longmemeval-92/) for methodology differences.
 
 **0.554 nugget score on [BEAM](https://arxiv.org/abs/2510.27246) 100K** (400 questions across 10 memory abilities, ICLR 2026), using the paper's exact judge prompt from Appendix G. The published baseline is 0.358 (Llama-4-Maverick + LIGHT). Retrieval R@10: 0.737. Seven of nine categories beat the paper. [Full write-up](https://ogham-mcp.dev/blog/beam-benchmark-v090/).
 
@@ -37,7 +39,8 @@
 |--------|----------|-------------|
 | [OMEGA](https://dev.to/singularityjason/how-i-built-a-memory-system-that-scores-954-on-longmemeval-1-on-the-leaderboard-2md3) | 95.4% | Classification + extraction pipeline |
 | [Observational Memory (Mastra)](https://mastra.ai/research/observational-memory) | 94.9% | Observation extraction + GPT-5-mini |
-| **Ogham v0.9.1** | **91.8%** | Hybrid search + context engineering + gpt-5.4-mini |
+| **Ogham v0.9.2** | **85.8%** | Verbatim + read-time extraction + gpt-5-mini (AMB harness, strict judge) |
+| Ogham v0.9.1 | 91.8% | Hybrid search + context engineering + gpt-5.4-mini (internal benchmark) |
 | [Hindsight (Vectorize)](https://venturebeat.com/data/with-91-accuracy-open-source-hindsight-agentic-memory-provides-20-20-vision) | 91.4% | 4 memory types + Gemini-3 |
 | [Zep (Graphiti)](https://blog.getzep.com/state-of-the-art-agent-memory/) | 71.2% | Temporal knowledge graph + GPT-4o |
 | [Mem0](https://mem0.ai) | 49.0% | RAG-based |
@@ -538,6 +541,22 @@ PostgreSQL + pgvector
 Memories are stored as rows with vector embeddings. Search combines pgvector cosine similarity with PostgreSQL full-text search using Reciprocal Rank Fusion (RRF) -- position-based, score-agnostic fusion that handles different score scales correctly. Optional FlashRank cross-encoder reranking adds a second pass for self-hosters. The Supabase backend uses `postgrest-py` directly (not the full Supabase SDK) for a lightweight dependency footprint.
 
 The knowledge graph uses a `memory_relationships` table with recursive CTEs for traversal -- no separate graph database.
+
+## Research foundations
+
+Ogham's retrieval pipeline combines established information retrieval and cognitive science techniques:
+
+- **Hybrid search** -- Reciprocal Rank Fusion ([Cormack, Clarke & Butt, SIGIR 2009](https://dl.acm.org/doi/10.1145/1571941.1572114)) combining dense vector similarity (pgvector) with BM25-style keyword matching (PostgreSQL tsvector). Two independent retrieval systems, rank-fused without score normalisation.
+
+- **Entity overlap boost** -- memories sharing named entities with the query receive a bounded relevance boost (up to 1.4x), inspired by entity-linking literature ([Kolitsas et al., CoNLL 2018](https://aclanthology.org/K18-1050/)). Entity extraction covers 18 languages via YAML-based word lists with no LLM in the write path.
+
+- **Matryoshka embeddings** -- flexible dimensionality via Matryoshka Representation Learning ([Kusupati et al., NeurIPS 2022](https://arxiv.org/abs/2205.13147)). Embedding providers (OpenAI, Voyage, Gemini, Ollama) produce native-dimension vectors truncated to 512d, enabling provider-portable storage without re-embedding.
+
+- **Temporal diversity re-ranking** -- density-gated soft penalty preventing semantic clustering on a single time period, extending Maximal Marginal Relevance principles ([Carbonell & Goldstein, SIGIR 1998](https://dl.acm.org/doi/10.1145/290941.291025)). Only activates when the top-k results are temporally concentrated, leaving well-distributed results untouched.
+
+- **ACT-R importance scoring** -- cognitive-architecture-inspired memory weighting based on recency, access frequency, and surprise ([Anderson & Lebiere, 1998](https://act-r.psy.cmu.edu/about/)). Frequently accessed memories stay sharp, rarely accessed ones fade, disputed ones drop in ranking without deletion.
+
+- **Read-time fact extraction** -- query-aware extraction at retrieval time preserves verbatim storage for auditability, contrasting with write-time compression approaches. Verbatim storage ensures the ground truth is always available for re-extraction with different questions later -- a design choice informed by alignment considerations in persistent agent memory ([Anthropic, arXiv:2510.05179](https://arxiv.org/abs/2510.05179)).
 
 ## Documentation
 
