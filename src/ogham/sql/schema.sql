@@ -352,7 +352,10 @@ CREATE OR REPLACE FUNCTION hybrid_search_memories(
     filter_source text DEFAULT NULL,
     full_text_weight float DEFAULT 0.3,
     semantic_weight float DEFAULT 0.7,
-    rrf_k integer DEFAULT 10
+    rrf_k integer DEFAULT 10,
+    filter_profiles text[] DEFAULT NULL,      -- multi-profile search
+    query_entity_tags text[] DEFAULT NULL,    -- entity tag filter
+    recency_decay float DEFAULT 0.0           -- time decay factor (days^-1)
 )
 RETURNS TABLE(
     id uuid, content text, metadata jsonb, source text, profile text, tags text[],
@@ -363,15 +366,26 @@ RETURNS TABLE(
 LANGUAGE sql
 SET search_path = public, extensions
 AS $function$
-with semantic as (
+with profiles_to_search as (
+    -- Use filter_profiles if provided, otherwise single filter_profile
+    select unnest(
+        case
+            when filter_profiles is not null and array_length(filter_profiles, 1) > 0
+            then filter_profiles
+            else array[filter_profile]
+        end
+    ) as p
+),
+semantic as (
     select
         m.id,
         (1 - (m.embedding::halfvec(512) <=> query_embedding::halfvec(512)))::float as similarity,
         row_number() over (order by m.embedding::halfvec(512) <=> query_embedding::halfvec(512)) as rank_ix
     from memories m
-    where m.profile = filter_profile
+    where m.profile in (select p from profiles_to_search)
       and (filter_tags is null or m.tags && filter_tags)
       and (filter_source is null or m.source = filter_source)
+      and (query_entity_tags is null or m.tags && query_entity_tags)
       and (m.expires_at is null or m.expires_at > now())
     order by m.embedding::halfvec(512) <=> query_embedding::halfvec(512)
     limit match_count * 3
@@ -382,10 +396,11 @@ keyword as (
         ts_rank_cd(m.fts, websearch_to_tsquery(query_text), 34)::float as keyword_rank,
         row_number() over (order by ts_rank_cd(m.fts, websearch_to_tsquery(query_text), 34) desc) as rank_ix
     from memories m
-    where m.profile = filter_profile
+    where m.profile in (select p from profiles_to_search)
       and m.fts @@ websearch_to_tsquery(query_text)
       and (filter_tags is null or m.tags && filter_tags)
       and (filter_source is null or m.source = filter_source)
+      and (query_entity_tags is null or m.tags && query_entity_tags)
       and (m.expires_at is null or m.expires_at > now())
     order by keyword_rank desc
     limit match_count * 3
@@ -411,6 +426,12 @@ select
         * (1.0 + ln(m.access_count + 1.0) * 0.1)
         * m.confidence
         * (1.0 + g.graph_boost * 0.2)
+        -- Apply recency decay: reduce relevance for older memories
+        * case
+            when recency_decay > 0
+            then greatest(0.1, 1.0 - recency_decay * extract(epoch from (now() - m.created_at)) / 86400.0)
+            else 1.0
+          end
     )::float as relevance,
     m.access_count, m.last_accessed_at, m.confidence, m.created_at, m.updated_at
 from fused f
