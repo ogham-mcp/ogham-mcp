@@ -56,7 +56,7 @@ Supabase users: paste the migration body into the SQL Editor.
 
 ### Credits
 
-- **Josh Rothenberg** ([@ninthhousestudios](https://github.com/ninthhousestudios)) for issues #22, #24, and the dimension-aware halfvec pattern in PR #25.
+- **Josh** ([@ninthhousestudios](https://github.com/ninthhousestudios)) for issues #22, #24, and the dimension-aware halfvec pattern in PR #25.
 - **Bram** ([@bramvera](https://github.com/bramvera)) for PRs #17, #21, and #23 catching `hybrid_search_memories` parameter mismatches.
 
 ## [0.9.1] - 2026-04-08
