@@ -29,26 +29,33 @@ def test_no_unnumbered_migrations():
     )
 
 
-def test_no_file_sorts_after_017():
-    """No migration may sort alphabetically after 017_rrf_bm25.sql.
+def test_later_hybrid_search_migrations_preserve_rrf():
+    """Later migrations may evolve hybrid search, but must keep true RRF.
 
-    017 is the RRF fix. If anything alphabetically-later re-defines
-    hybrid_search_memories, it will overwrite the fix on every upgrade.
+    017 introduced the v0.9.2 RRF fix. Later migrations such as 021 may
+    legitimately re-define hybrid_search_memories, but they must preserve
+    the position-based RRF formula rather than silently reintroducing the
+    older raw-score fusion regression.
     """
     migrations = _top_level_migrations()
     rrf_fix = next((p for p in migrations if p.name == "017_rrf_bm25.sql"), None)
     assert rrf_fix is not None, "expected 017_rrf_bm25.sql at top-level sql/migrations/"
 
     later = [p.name for p in migrations if p.name > rrf_fix.name]
-    hybrid_offenders = [
-        name
-        for name in later
-        if "hybrid_search_memories" in (MIGRATIONS_DIR / name).read_text().lower()
-    ]
-    assert not hybrid_offenders, (
-        f"Migration(s) sorting after 017_rrf_bm25.sql redefine hybrid_search_memories "
-        f"and will overwrite the RRF fix: {hybrid_offenders}"
-    )
+    broken_pattern = "semantic_weight * coalesce(s.similarity"
+
+    for name in later:
+        content = (MIGRATIONS_DIR / name).read_text().lower()
+        if "create or replace function hybrid_search_memories" not in content:
+            continue
+        assert "1.0 / (rrf_k + coalesce(" in content, (
+            f"{name} redefines hybrid_search_memories but does not preserve "
+            "the true Reciprocal Rank Fusion formula"
+        )
+        assert broken_pattern not in content, (
+            f"{name} redefines hybrid_search_memories with the broken raw-score "
+            "fusion pattern"
+        )
 
 
 def test_017_rrf_bm25_is_functional_and_uses_rrf():

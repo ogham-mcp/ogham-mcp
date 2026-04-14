@@ -40,6 +40,7 @@ def mock_db():
         patch("ogham.service.db_store") as store,
         patch("ogham.service.hybrid_search_memories") as search,
         patch("ogham.service.record_access") as rec_access,
+        patch("ogham.tools.memory.record_access", new=rec_access),
         patch("ogham.service.db_get_profile_ttl") as get_ttl,
         patch("ogham.service.db_auto_link") as auto_link,
         patch("ogham.tools.memory.list_recent_memories") as list_recent,
