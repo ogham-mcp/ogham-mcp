@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from ogham.app import mcp
-from ogham.database import get_memory_stats
+from ogham.database import count_decay_eligible, count_expired, get_memory_stats, get_profile_ttl
 from ogham.embeddings import get_cache_stats as _get_cache_stats
 from ogham.tools.memory import get_active_profile
 
@@ -109,9 +109,15 @@ def get_config() -> dict[str, Any]:
 def get_stats() -> dict[str, Any]:
     """Get summary statistics for the active memory profile.
 
-    Returns total count, source breakdown, and top tags.
+    Returns total count, source breakdown, top tags, TTL, expired count,
+    and Hebbian decay eligibility.
     """
-    return get_memory_stats(profile=get_active_profile())
+    profile = get_active_profile()
+    stats = dict(get_memory_stats(profile=profile))
+    stats["ttl_days"] = get_profile_ttl(profile)
+    stats["expired_count"] = count_expired(profile)
+    stats["decay_eligible"] = count_decay_eligible(profile)
+    return stats
 
 
 @mcp.tool

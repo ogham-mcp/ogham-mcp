@@ -152,13 +152,26 @@ def profiles():
 def stats(profile: str = typer.Option(None, help="Profile to show stats for")):
     """Show statistics for a memory profile."""
     from ogham.config import settings
-    from ogham.database import get_memory_stats
+    from ogham.database import (
+        count_decay_eligible,
+        count_expired,
+        get_memory_stats,
+        get_profile_ttl,
+    )
 
     target = profile or settings.default_profile
-    data = get_memory_stats(profile=target)
+    data = dict(get_memory_stats(profile=target))
+    data["ttl_days"] = get_profile_ttl(target)
+    data["expired_count"] = count_expired(target)
+    data["decay_eligible"] = count_decay_eligible(target)
 
     console.print(f"\n[bold]Profile:[/bold] {data.get('profile', target)}")
     console.print(f"[bold]Total memories:[/bold] {data.get('total', 0)}")
+    ttl_days = data.get("ttl_days")
+    ttl_display = "disabled" if ttl_days is None else f"{ttl_days} days"
+    console.print(f"[bold]TTL:[/bold] {ttl_display}")
+    console.print(f"[bold]Expired memories:[/bold] {data.get('expired_count', 0)}")
+    console.print(f"[bold]Decay eligible:[/bold] {data.get('decay_eligible', 0)}")
 
     sources = data.get("sources") or {}
     if sources:

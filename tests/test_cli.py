@@ -50,17 +50,28 @@ def test_cli_stats():
     """ogham stats should show profile stats"""
     from ogham.cli import app
 
-    with patch("ogham.database.get_memory_stats") as mock_stats:
+    with (
+        patch("ogham.database.get_memory_stats") as mock_stats,
+        patch("ogham.database.get_profile_ttl") as mock_ttl,
+        patch("ogham.database.count_expired") as mock_expired,
+        patch("ogham.database.count_decay_eligible") as mock_decay,
+    ):
         mock_stats.return_value = {
             "profile": "default",
             "total": 42,
             "sources": {"claude-code": 30},
             "top_tags": [{"tag": "project:foo", "count": 10}],
         }
+        mock_ttl.return_value = 30
+        mock_expired.return_value = 3
+        mock_decay.return_value = 5
         result = runner.invoke(app, ["stats"])
 
     assert result.exit_code == 0
     assert "42" in result.output
+    assert "30 days" in result.output
+    assert "3" in result.output
+    assert "5" in result.output
 
 
 def test_cli_search():

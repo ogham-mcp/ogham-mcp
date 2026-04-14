@@ -686,6 +686,35 @@ def test_get_cache_stats_tool():
     assert result["hit_rate"] == 0.0
 
 
+def test_get_stats_tool_includes_profile_health():
+    """get_stats should include TTL, expired count, and decay eligibility."""
+    from ogham.tools.stats import get_stats
+
+    with (
+        patch("ogham.tools.stats.get_memory_stats") as mock_stats,
+        patch("ogham.tools.stats.get_profile_ttl") as mock_ttl,
+        patch("ogham.tools.stats.count_expired") as mock_expired,
+        patch("ogham.tools.stats.count_decay_eligible") as mock_decay,
+    ):
+        mock_stats.return_value = {
+            "profile": "default",
+            "total": 42,
+            "sources": {"claude-code": 30},
+            "top_tags": [{"tag": "project:foo", "count": 10}],
+        }
+        mock_ttl.return_value = 90
+        mock_expired.return_value = 2
+        mock_decay.return_value = 7
+
+        result = get_stats()
+
+    assert result["profile"] == "default"
+    assert result["total"] == 42
+    assert result["ttl_days"] == 90
+    assert result["expired_count"] == 2
+    assert result["decay_eligible"] == 7
+
+
 # --- Expiration database tests ---
 
 
