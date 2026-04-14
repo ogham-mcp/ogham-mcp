@@ -379,6 +379,9 @@ class PostgresBackend:
         resource_id: str | None = None,
         outcome: str = "success",
         source: str | None = None,
+        embedding_model: str | None = None,
+        tokens_used: int | None = None,
+        cost_usd: float | None = None,
         result_ids: list[str] | None = None,
         result_count: int | None = None,
         query_hash: str | None = None,
@@ -389,16 +392,20 @@ class PostgresBackend:
             self._execute(
                 """INSERT INTO audit_log
                    (profile, operation, resource_id, outcome, source,
+                    embedding_model, tokens_used, cost_usd,
                     result_ids, result_count, query_hash, metadata)
                    VALUES (%(profile)s, %(operation)s, %(resource_id)s, %(outcome)s,
-                           %(source)s, %(result_ids)s, %(result_count)s,
-                           %(query_hash)s, %(metadata)s)""",
+                           %(source)s, %(embedding_model)s, %(tokens_used)s, %(cost_usd)s,
+                           %(result_ids)s, %(result_count)s, %(query_hash)s, %(metadata)s)""",
                 {
                     "profile": profile,
                     "operation": operation,
                     "resource_id": resource_id,
                     "outcome": outcome,
                     "source": source,
+                    "embedding_model": embedding_model,
+                    "tokens_used": tokens_used,
+                    "cost_usd": cost_usd,
                     "result_ids": result_ids,
                     "result_count": result_count,
                     "query_hash": query_hash,

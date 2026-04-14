@@ -10,6 +10,7 @@ import hashlib
 import logging
 import os
 import re
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -23,7 +24,7 @@ from ogham.database import (
 )
 from ogham.database import get_profile_ttl as db_get_profile_ttl
 from ogham.database import store_memory as db_store
-from ogham.embeddings import generate_embedding
+from ogham.embeddings import EmbeddingUsage, generate_embedding
 from ogham.extraction import (
     compute_importance,
     extract_dates,
@@ -37,8 +38,36 @@ from ogham.extraction import (
     is_ordering_query,
     resolve_temporal_query,
 )
+from ogham.pricing import calculate_embedding_cost
 
 logger = logging.getLogger(__name__)
+
+
+def _merge_embedding_usage(
+    total: EmbeddingUsage | None, current: EmbeddingUsage | None
+) -> EmbeddingUsage | None:
+    if current is None:
+        return total
+    if total is None:
+        return dict(current)
+
+    merged: EmbeddingUsage = dict(total)
+    current_tokens = current.get("input_tokens")
+    if current_tokens is not None:
+        merged["input_tokens"] = merged.get("input_tokens", 0) + current_tokens
+    if not merged.get("model"):
+        merged["model"] = current.get("model", "")
+    return merged
+
+
+def _audit_usage_fields(usage: EmbeddingUsage | None) -> dict[str, Any]:
+    if usage is None:
+        return {}
+    return {
+        "embedding_model": usage.get("model"),
+        "tokens_used": usage.get("input_tokens"),
+        "cost_usd": calculate_embedding_cost(usage),
+    }
 
 
 def store_memory_enriched(
@@ -91,8 +120,10 @@ def store_memory_enriched(
     metadata["original_importance"] = importance
 
     # Generate embedding (skip if pre-computed, e.g. from gateway cache)
+    embedding_usage = None
     if embedding is None:
-        embedding = generate_embedding(content)
+        embedding_usage = {}
+        embedding = generate_embedding(content, usage_out=embedding_usage)
 
     # Compute surprise score + detect conflicts (>75% similarity)
     surprise = 0.5
@@ -174,6 +205,7 @@ def store_memory_enriched(
         resource_id=str(result["id"]),
         source=source,
         metadata={"importance": importance, "surprise": surprise},
+        **_audit_usage_fields(embedding_usage),
     )
 
     return response
@@ -289,6 +321,21 @@ def search_memories_enriched(
             extract query-relevant facts. Returns a single extracted-facts
             result instead of raw memories. Default: False (verbatim results).
     """
+    embedding_usage: EmbeddingUsage | None = None
+
+    if embedding is None:
+        def _generate_embedding_with_usage_tracking(text: str) -> list[float]:
+            nonlocal embedding_usage
+            current_usage: EmbeddingUsage = {}
+            result = generate_embedding(text, usage_out=current_usage)
+            embedding_usage = _merge_embedding_usage(embedding_usage, current_usage or None)
+            return result
+
+        embedding = _generate_embedding_with_usage_tracking(query)
+        embedding_generator = _generate_embedding_with_usage_tracking
+    else:
+        embedding_generator = generate_embedding
+
     results = _search_memories_raw(
         query,
         profile,
@@ -298,6 +345,7 @@ def search_memories_enriched(
         graph_depth,
         embedding,
         profiles,
+        embedding_generator=embedding_generator,
     )
 
     if results:
@@ -313,6 +361,7 @@ def search_memories_enriched(
         result_ids=result_ids or None,
         result_count=len(results),
         query_hash=hashlib.sha256(query.encode()).hexdigest()[:16],
+        **_audit_usage_fields(embedding_usage),
     )
 
     if extract_facts and results:
@@ -485,10 +534,11 @@ def _search_memories_raw(
     graph_depth: int = 0,
     embedding: list[float] | None = None,
     profiles: list[str] | None = None,
+    embedding_generator: Callable[[str], list[float]] = generate_embedding,
 ) -> list[dict[str, Any]]:
     """Retrieve memories via intent-aware search paths. No reranking, no access recording."""
     if embedding is None:
-        embedding = generate_embedding(query)
+        embedding = embedding_generator(query)
 
     # Query reformulation disabled — global application regressed MRR (2026-04-10).
     search_query = query
@@ -533,7 +583,14 @@ def _search_memories_raw(
 
     # Multi-hop temporal: entity-centric bridge retrieval + threading
     if is_multi_hop_temporal(query):
-        bridge_results = _bridge_retrieval(query, profile, elastic_limit, tags, source)
+        bridge_results = _bridge_retrieval(
+            query,
+            profile,
+            elastic_limit,
+            tags,
+            source,
+            embedding_generator,
+        )
         if bridge_results:
             results = _merge_bridge_results(
                 bridge_results,
@@ -652,6 +709,7 @@ def _bridge_retrieval(
     limit: int,
     tags: list[str] | None,
     source: str | None,
+    embedding_generator: Callable[[str], list[float]] = generate_embedding,
 ) -> list[dict[str, Any]]:
     """Entity-centric bridge retrieval for multi-hop temporal queries.
 
@@ -668,7 +726,7 @@ def _bridge_retrieval(
     all_results = []
     for anchor in anchors:
         # Path A: Semantic + keyword hybrid search
-        anchor_embedding = generate_embedding(anchor)
+        anchor_embedding = embedding_generator(anchor)
         results = hybrid_search_memories(
             query_text=anchor,
             query_embedding=anchor_embedding,
