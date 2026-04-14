@@ -153,22 +153,35 @@ def stats(profile: str = typer.Option(None, help="Profile to show stats for")):
     """Show statistics for a memory profile."""
     from ogham.config import settings
     from ogham.database import get_memory_stats
+    from ogham.tools.stats import enrich_stats
 
     target = profile or settings.default_profile
-    data = get_memory_stats(profile=target)
+    data = enrich_stats(target, get_memory_stats(profile=target))
 
     console.print(f"\n[bold]Profile:[/bold] {data.get('profile', target)}")
     console.print(f"[bold]Total memories:[/bold] {data.get('total', 0)}")
+    orphan_count = data.get("orphan_count")
+    orphan_display = "unavailable" if orphan_count is None else str(orphan_count)
+    console.print(f"[bold]Orphan memories:[/bold] {orphan_display}")
+    console.print(f"[bold]Decay eligible:[/bold] {data.get('decay_eligible', 0)}")
 
     sources = data.get("sources") or {}
     if sources:
         source_str = ", ".join(f"{k}: {v}" for k, v in sources.items())
         console.print(f"[bold]Sources:[/bold] {source_str}")
 
-    top_tags = data.get("top_tags") or []
-    if top_tags:
-        tag_str = ", ".join(f"{t['tag']} ({t['count']})" for t in top_tags[:10])
-        console.print(f"[bold]Top tags:[/bold] {tag_str}")
+    tag_distribution = data.get("tag_distribution") or []
+    if tag_distribution:
+        tag_str = ", ".join(
+            f"{item['tag']} ({item['count']}, {item['share']:.0%})"
+            for item in tag_distribution[:10]
+        )
+        console.print(f"[bold]Tag distribution:[/bold] {tag_str}")
+    else:
+        top_tags = data.get("top_tags") or []
+        if top_tags:
+            tag_str = ", ".join(f"{t['tag']} ({t['count']})" for t in top_tags[:10])
+            console.print(f"[bold]Top tags:[/bold] {tag_str}")
 
     console.print()
 

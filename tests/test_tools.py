@@ -686,6 +686,73 @@ def test_get_cache_stats_tool():
     assert result["hit_rate"] == 0.0
 
 
+def test_get_stats_tool_includes_profile_health():
+    """get_stats should include orphan count, tag distribution, and decay eligibility."""
+    from ogham.tools.stats import get_stats
+
+    with (
+        patch("ogham.tools.stats.get_memory_stats") as mock_base_stats,
+        patch("ogham.tools.stats.enrich_stats") as mock_stats,
+    ):
+        mock_base_stats.return_value = {
+            "profile": "default",
+            "total": 42,
+        }
+        mock_stats.return_value = {
+            "profile": "default",
+            "total": 42,
+            "orphan_count": 3,
+            "decay_eligible": 7,
+            "tag_distribution": [{"tag": "project:foo", "count": 10, "share": 10 / 42}],
+        }
+
+        result = get_stats()
+
+    assert result["profile"] == "default"
+    assert result["total"] == 42
+    assert result["orphan_count"] == 3
+    assert result["decay_eligible"] == 7
+    assert result["tag_distribution"][0]["share"] == 10 / 42
+
+
+def test_enrich_stats_adds_warmup_fields():
+    """enrich_stats should enrich stats without changing the base payload."""
+    from ogham.tools.stats import enrich_stats
+
+    with (
+        patch("ogham.tools.stats.get_all_memories_full") as mock_memories,
+        patch("ogham.tools.stats.get_related_memories") as mock_related,
+        patch("ogham.tools.stats.count_decay_eligible") as mock_decay,
+    ):
+        base_stats = {
+            "profile": "default",
+            "total": 20,
+            "sources": {"claude-code": 12},
+            "top_tags": [
+                {"tag": "project:foo", "count": 10},
+                {"tag": "type:decision", "count": 5},
+            ],
+        }
+        mock_memories.return_value = [
+            {"id": "memory-1"},
+            {"id": "memory-2"},
+            {"id": "memory-3"},
+        ]
+        mock_related.side_effect = [[], [{"id": "linked"}], []]
+        mock_decay.return_value = 7
+
+        result = enrich_stats("default", base_stats)
+
+    assert result["profile"] == "default"
+    assert result["orphan_count"] == 2
+    assert result["decay_eligible"] == 7
+    assert result["sources"] == {"claude-code": 12}
+    assert result["tag_distribution"] == [
+        {"tag": "project:foo", "count": 10, "share": 0.5},
+        {"tag": "type:decision", "count": 5, "share": 0.25},
+    ]
+
+
 # --- Expiration database tests ---
 
 

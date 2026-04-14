@@ -50,17 +50,32 @@ def test_cli_stats():
     """ogham stats should show profile stats"""
     from ogham.cli import app
 
-    with patch("ogham.database.get_memory_stats") as mock_stats:
+    with (
+        patch("ogham.database.get_memory_stats") as mock_stats,
+        patch("ogham.tools.stats.enrich_stats") as mock_enrich,
+    ):
         mock_stats.return_value = {
             "profile": "default",
             "total": 42,
             "sources": {"claude-code": 30},
             "top_tags": [{"tag": "project:foo", "count": 10}],
         }
+        mock_enrich.return_value = {
+            "profile": "default",
+            "total": 42,
+            "orphan_count": 4,
+            "decay_eligible": 5,
+            "sources": {"claude-code": 30},
+            "top_tags": [{"tag": "project:foo", "count": 10}],
+            "tag_distribution": [{"tag": "project:foo", "count": 10, "share": 10 / 42}],
+        }
         result = runner.invoke(app, ["stats"])
 
     assert result.exit_code == 0
     assert "42" in result.output
+    assert "4" in result.output
+    assert "5" in result.output
+    assert "project:foo (10, 24%)" in result.output
 
 
 def test_cli_search():

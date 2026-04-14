@@ -3,7 +3,12 @@ from pathlib import Path
 from typing import Any
 
 from ogham.app import mcp
-from ogham.database import get_memory_stats
+from ogham.database import (
+    count_decay_eligible,
+    get_all_memories_full,
+    get_memory_stats,
+    get_related_memories,
+)
 from ogham.embeddings import get_cache_stats as _get_cache_stats
 from ogham.tools.memory import get_active_profile
 
@@ -105,13 +110,53 @@ def get_config() -> dict[str, Any]:
     return get_runtime_config()
 
 
+def _build_tag_distribution(stats: dict[str, Any]) -> list[dict[str, Any]]:
+    total = stats.get("total")
+    if not isinstance(total, int) or total <= 0:
+        return []
+
+    distribution: list[dict[str, Any]] = []
+    for item in stats.get("top_tags") or []:
+        tag = item.get("tag")
+        count = item.get("count")
+        if not tag or not isinstance(count, int):
+            continue
+        distribution.append({"tag": tag, "count": count, "share": count / total})
+    return distribution
+
+
+def _count_orphan_memories(profile: str) -> int | None:
+    try:
+        memories = get_all_memories_full(profile)
+        orphan_count = 0
+        for memory in memories:
+            memory_id = memory.get("id")
+            if not memory_id:
+                continue
+            if not get_related_memories(memory_id=memory_id, limit=1):
+                orphan_count += 1
+        return orphan_count
+    except Exception:
+        return None
+
+
+def enrich_stats(profile: str, stats: dict[str, Any]) -> dict[str, Any]:
+    stats = dict(stats)
+    stats["decay_eligible"] = count_decay_eligible(profile)
+    stats["orphan_count"] = _count_orphan_memories(profile)
+    stats["tag_distribution"] = _build_tag_distribution(stats)
+    return stats
+
+
 @mcp.tool
 def get_stats() -> dict[str, Any]:
     """Get summary statistics for the active memory profile.
 
-    Returns total count, source breakdown, and top tags.
+    Returns total count, source breakdown, top tags, tag distribution,
+    orphan count, and Hebbian decay eligibility.
     """
-    return get_memory_stats(profile=get_active_profile())
+    profile = get_active_profile()
+    return enrich_stats(profile, get_memory_stats(profile=profile))
 
 
 @mcp.tool
