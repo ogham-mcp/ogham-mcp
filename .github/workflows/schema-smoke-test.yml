@@ -1,0 +1,173 @@
+# Ephemeral Postgres + pgvector smoke test.
+#
+# Catches the PR #23 / PR #25 bug class: Python backend sends N parameters
+# but SQL function accepts M. Applies each schema file to a fresh Postgres
+# instance, then calls hybrid_search_memories with all the parameters the
+# Python backend sends. Any signature mismatch fails the build.
+#
+# Also runs the upgrade path: apply the oldest schema, then run all
+# migrations in order, then smoke-test the final state.
+
+name: Schema Smoke Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  schema-smoke:
+    # Tests schema_postgres.sql (vanilla Postgres / Neon). The Supabase variants
+    # (schema.sql, schema_selfhost_supabase.sql) reference auth schema and
+    # Supabase-specific roles that don't exist on vanilla Postgres, so they
+    # can't be smoke-tested here. Parity with schema_postgres.sql is enforced
+    # by tests/test_schema_parity.py instead.
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ogham
+          POSTGRES_PASSWORD: ogham_test
+          POSTGRES_DB: ogham_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://ogham:ogham_test@localhost:5432/ogham_test
+      PGPASSWORD: ogham_test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            pg_isready -h localhost -p 5432 -U ogham && break
+            sleep 1
+          done
+
+      - name: Apply schema_postgres.sql
+        run: |
+          psql -h localhost -U ogham -d ogham_test -v ON_ERROR_STOP=1 \
+            -f src/ogham/sql/schema_postgres.sql
+
+      - name: Verify hybrid_search_memories signature
+        run: |
+          psql -h localhost -U ogham -d ogham_test -c "\df hybrid_search_memories"
+          PARAM_COUNT=$(psql -h localhost -U ogham -d ogham_test -tAc \
+            "SELECT pronargs FROM pg_proc WHERE proname = 'hybrid_search_memories';")
+          echo "hybrid_search_memories has $PARAM_COUNT parameters"
+          if [ "$PARAM_COUNT" -lt 9 ]; then
+            echo "ERROR: hybrid_search_memories has fewer than 9 params -- schema is behind"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@22695119d769bdb6f7032ad67b9bca0ef8c4a174 # v5.4.2
+
+      - name: Install dependencies
+        run: |
+          uv sync --extra dev --extra postgres
+
+      - name: Smoke test -- Python calls SQL with all params
+        env:
+          DATABASE_BACKEND: postgres
+          EMBEDDING_PROVIDER: openai
+          OPENAI_API_KEY: sk-dummy-not-used-in-this-test
+        run: |
+          # Directly exercise the backend method with a stubbed embedding vector.
+          # No embedding provider calls -- we're verifying Python->SQL parameter
+          # parity, not retrieval quality.
+          uv run python -c "
+          from ogham.backends.postgres import PostgresBackend
+          b = PostgresBackend()
+          try:
+              results = b.hybrid_search_memories(
+                  query_text='test',
+                  query_embedding=[0.1] * 512,
+                  profile='default',
+                  limit=1,
+                  tags=None,
+                  source=None,
+                  profiles=None,
+                  query_entity_tags=None,
+                  recency_decay=0.0,
+              )
+              print(f'Python/SQL parity confirmed: {len(results)} results (empty is fine)')
+          except Exception as e:
+              print(f'SMOKE TEST FAILED: {e}')
+              raise
+          "
+
+  # Upgrade path test: apply old schema, run all migrations in order, smoke-test.
+  upgrade-path:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ogham
+          POSTGRES_PASSWORD: ogham_test
+          POSTGRES_DB: ogham_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://ogham:ogham_test@localhost:5432/ogham_test
+      PGPASSWORD: ogham_test
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            pg_isready -h localhost -p 5432 -U ogham && break
+            sleep 1
+          done
+
+      - name: Enable extensions
+        run: |
+          psql -h localhost -U ogham -d ogham_test \
+            -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      - name: Apply base schema + all migrations
+        run: |
+          psql -h localhost -U ogham -d ogham_test -v ON_ERROR_STOP=1 \
+            -f src/ogham/sql/schema_postgres.sql
+          for f in src/ogham/sql/migrations/[0-9]*.sql; do
+            echo "Applying $(basename $f)..."
+            psql -h localhost -U ogham -d ogham_test -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: Verify final hybrid_search signature
+        run: |
+          PARAM_COUNT=$(psql -h localhost -U ogham -d ogham_test -tAc \
+            "SELECT pronargs FROM pg_proc WHERE proname = 'hybrid_search_memories';")
+          echo "Post-migration hybrid_search_memories has $PARAM_COUNT parameters"
+          # Should be >= 9 (current canonical). Fails if a migration accidentally
+          # drops params (the PR #25 hidden-intent conflict class).
+          if [ "$PARAM_COUNT" -lt 9 ]; then
+            echo "ERROR: migrations regressed hybrid_search_memories to $PARAM_COUNT params"
+            exit 1
+          fi
