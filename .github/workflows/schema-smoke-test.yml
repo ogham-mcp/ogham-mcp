@@ -155,10 +155,16 @@ jobs:
         run: |
           psql -h localhost -U ogham -d ogham_test -v ON_ERROR_STOP=1 \
             -f src/ogham/sql/schema_postgres.sql
-          for f in src/ogham/sql/migrations/[0-9]*.sql; do
-            echo "Applying $(basename $f)..."
-            psql -h localhost -U ogham -d ogham_test -v ON_ERROR_STOP=1 -f "$f"
-          done
+          if [ -d src/ogham/sql/migrations ]; then
+            for f in src/ogham/sql/migrations/[0-9]*.sql; do
+              if [ -f "$f" ]; then
+                echo "Applying $(basename $f)..."
+                psql -h localhost -U ogham -d ogham_test -v ON_ERROR_STOP=1 -f "$f"
+              fi
+            done
+          else
+            echo "No migrations directory (fresh-install-only deployment)"
+          fi
 
       - name: Verify final hybrid_search signature
         run: |
