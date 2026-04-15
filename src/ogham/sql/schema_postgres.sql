@@ -554,36 +554,76 @@ as $$
 declare
     result jsonb;
 begin
-    select jsonb_build_object(
+    WITH active_memories AS (
+        SELECT id, source, tags, importance, last_accessed_at
+        FROM memories
+        WHERE profile = filter_profile
+          AND (expires_at IS NULL OR expires_at > now())
+    ),
+    relationship_presence AS (
+        SELECT source_id AS memory_id FROM memory_relationships
+        UNION
+        SELECT target_id AS memory_id FROM memory_relationships
+    ),
+    tag_rows AS (
+        SELECT unnest(tags) AS tag
+        FROM active_memories
+        WHERE tags IS NOT NULL AND cardinality(tags) > 0
+    )
+    SELECT jsonb_build_object(
         'profile', filter_profile,
-        'total', (
-            select count(*) from memories
-            where profile = filter_profile
-              and (expires_at is null or expires_at > now())
-        ),
-        'sources', (
-            select jsonb_object_agg(source, cnt)
-            from (
-                select coalesce(source, 'unknown') as source, count(*) as cnt
-                from memories
-                where profile = filter_profile
-                  and (expires_at is null or expires_at > now())
-                group by source
+        'total', (SELECT count(*) FROM active_memories),
+        'sources', COALESCE((
+            SELECT jsonb_object_agg(source, cnt)
+            FROM (
+                SELECT coalesce(source, 'unknown') AS source, count(*) AS cnt
+                FROM active_memories
+                GROUP BY coalesce(source, 'unknown')
             ) s
-        ),
-        'top_tags', (
-            select jsonb_agg(jsonb_build_object('tag', tag, 'count', cnt))
-            from (
-                select tag, count(*) as cnt
-                from memories, unnest(tags) as tag
-                where profile = filter_profile
-                  and (expires_at is null or expires_at > now())
-                group by tag
-                order by cnt desc
-                limit 20
+        ), '{}'::jsonb),
+        'top_tags', COALESCE((
+            SELECT jsonb_agg(jsonb_build_object('tag', tag, 'count', cnt))
+            FROM (
+                SELECT tag, count(*) AS cnt
+                FROM tag_rows
+                GROUP BY tag
+                ORDER BY cnt DESC, tag
+                LIMIT 20
             ) t
+        ), '[]'::jsonb),
+        'relationships', jsonb_build_object(
+            'orphan_count', (
+                SELECT count(*)
+                FROM active_memories m
+                LEFT JOIN relationship_presence rp ON rp.memory_id = m.id
+                WHERE rp.memory_id IS NULL
+            )
+        ),
+        'tagging', jsonb_build_object(
+            'untagged_count', (
+                SELECT count(*)
+                FROM active_memories
+                WHERE tags IS NULL OR cardinality(tags) = 0
+            ),
+            'distinct_tag_count', (SELECT count(DISTINCT tag) FROM tag_rows)
+        ),
+        'decay', jsonb_build_object(
+            'eligible_count', (
+                SELECT count(*)
+                FROM active_memories
+                WHERE importance > 0.05
+                  AND (
+                      last_accessed_at IS NULL
+                      OR last_accessed_at < now() - interval '7 days'
+                  )
+            ),
+            'floor_count', (
+                SELECT count(*)
+                FROM active_memories
+                WHERE importance <= 0.05
+            )
         )
-    ) into result;
+    ) INTO result;
 
     return result;
 end;
