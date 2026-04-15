@@ -1,9 +1,8 @@
 """
-Tests for Conv 2.41 / KE-028 upstream fix: Annotated[T|None, BeforeValidator(coerce)]
-coercion wrappers on tool parameters in ogham/tools/memory.py.
-
-Drop this into the upstream tests/ directory (or ogham/tests/ — check upstream layout).
-Adjust imports once you've confirmed upstream's exact module path.
+Tests for the BeforeValidator-based list/dict coercion wrappers on tool
+parameters in ogham/tools/memory.py. These wrappers accept both native
+Python lists/dicts and their JSON-string forms, which some FastMCP clients
+emit before the transport layer.
 
 Run: pytest tests/test_list_coercion.py -v
 """
