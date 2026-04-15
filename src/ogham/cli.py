@@ -15,6 +15,11 @@ app = typer.Typer(
 console = Console()
 
 
+def _safe_text(value: object, limit: int | None = None) -> str:
+    text = "" if value is None else str(value)
+    return text[:limit] if limit is not None else text
+
+
 def _run_server(
     transport: str | None = None,
     host: str | None = None,
@@ -74,12 +79,15 @@ def store(
 
     console.print(f"[green]Stored memory {result['id']} in profile '{target}'[/green]")
     if result.get("expires_at"):
-        console.print(f"[dim]Expires: {result['expires_at'][:19]}[/dim]")
+        console.print(f"[dim]Expires: {_safe_text(result['expires_at'], 19)}[/dim]")
     if result.get("conflicts"):
         console.print(f"[yellow]{result['conflict_warning']}[/yellow]")
         for c in result["conflicts"]:
-            preview = c["content_preview"][:80]
-            console.print(f"  [dim]{c['id'][:8]}... ({c['similarity']:.0%}) {preview}[/dim]")
+            preview = _safe_text(c.get("content_preview", ""), 80)
+            similarity = float(c.get("similarity", 0))
+            console.print(
+                f"  [dim]{_safe_text(c.get('id'), 8)}... ({similarity:.0%}) {preview}[/dim]"
+            )
 
 
 @app.command()
@@ -284,11 +292,11 @@ def list_memories(
 
     for r in results:
         table.add_row(
-            str(r.get("id", ""))[:8],
-            r.get("created_at", "")[:19],
-            r["content"][:100],
+            _safe_text(r.get("id", ""), 8),
+            _safe_text(r.get("created_at", ""), 19),
+            _safe_text(r.get("content", ""), 100),
             ", ".join(r.get("tags", [])),
-            r.get("source", ""),
+            _safe_text(r.get("source", "")),
         )
 
     console.print(table)
