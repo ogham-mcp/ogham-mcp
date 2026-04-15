@@ -1,11 +1,13 @@
 import functools
+import json
 import logging
 import re
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Annotated, Any
 
 from fastmcp import Context
+from pydantic import BeforeValidator
 
 from ogham.app import mcp
 from ogham.config import settings
@@ -33,6 +35,49 @@ from ogham.extraction import extract_dates
 from ogham.health import full_health_check
 
 logger = logging.getLogger(__name__)
+
+# === FastMCP list/dict coercion wrappers ===
+# Some FastMCP clients serialise list[str] and dict[str, Any] tool parameters
+# as JSON strings before the transport layer. Pydantic on the server then sees
+# a `str` and fails list_type / dict_type validation, surfacing as
+# JSON-RPC -32602 Invalid params. BeforeValidator-based coercion accepts
+# either the native shape or its JSON-string form and returns the canonical
+# Python shape. Same idiom as fastmcp/utilities/components.py:82.
+
+
+def _coerce_list(v):
+    if v is None or isinstance(v, list):
+        return v
+    if isinstance(v, str):
+        try:
+            parsed = json.loads(v)
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+        # Fallback: a bare string that isn't JSON becomes a 1-element list.
+        # Pragmatic for tag-like fields where a single bare tag is common.
+        return [v]
+    raise TypeError(f"Cannot coerce {type(v).__name__} to list")
+
+
+def _coerce_dict(v):
+    if v is None or isinstance(v, dict):
+        return v
+    if isinstance(v, str):
+        try:
+            parsed = json.loads(v)
+            if isinstance(parsed, dict):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+    raise TypeError(f"Cannot coerce {type(v).__name__} to dict")
+
+
+ListStr = Annotated[list[str] | None, BeforeValidator(_coerce_list)]
+DictAny = Annotated[dict[str, Any] | None, BeforeValidator(_coerce_dict)]
+
+
 
 MAX_CONTENT_LEN = 100_000
 MAX_LIMIT = 1_000
@@ -140,8 +185,8 @@ def list_profiles() -> list[dict[str, Any]]:
 def store_memory(
     content: str,
     source: str | None = None,
-    tags: list[str] | None = None,
-    metadata: dict[str, Any] | None = None,
+    tags: ListStr = None,
+    metadata: DictAny = None,
     auto_link: bool = True,
 ) -> dict[str, Any]:
     """Store a memory in the active profile with automatic embedding generation.
@@ -170,10 +215,10 @@ def store_memory(
 def store_decision(
     decision: str,
     rationale: str,
-    alternatives: list[str] | None = None,
+    alternatives: ListStr = None,
     reasoning_trace: str | None = None,
-    tags: list[str] | None = None,
-    related_memories: list[str] | None = None,
+    tags: ListStr = None,
+    related_memories: ListStr = None,
     source: str | None = None,
 ) -> dict[str, Any]:
     """Store an architectural decision with rationale. Creates a memory with
@@ -241,10 +286,10 @@ def store_decision(
 def hybrid_search(
     query: str,
     limit: int = 10,
-    tags: list[str] | None = None,
+    tags: ListStr = None,
     source: str | None = None,
     graph_depth: int = 0,
-    profiles: list[str] | None = None,
+    profiles: ListStr = None,
     extract_facts: bool = False,
 ) -> list[dict[str, Any]]:
     """Search memories in the active profile by meaning and keywords (hybrid search).
@@ -285,7 +330,7 @@ def hybrid_search(
 def list_recent(
     limit: int = 10,
     source: str | None = None,
-    tags: list[str] | None = None,
+    tags: ListStr = None,
 ) -> list[dict[str, Any]]:
     """List recent memories in the active profile.
 
@@ -323,8 +368,8 @@ def delete_memory(memory_id: str) -> dict[str, Any]:
 def update_memory(
     memory_id: str,
     content: str | None = None,
-    tags: list[str] | None = None,
-    metadata: dict[str, Any] | None = None,
+    tags: ListStr = None,
+    metadata: DictAny = None,
 ) -> dict[str, Any]:
     """Update an existing memory. Re-embeds if content changes.
 
@@ -574,7 +619,7 @@ def explore_knowledge(
     depth: int = 1,
     min_strength: float = 0.5,
     limit: int = 5,
-    tags: list[str] | None = None,
+    tags: ListStr = None,
     source: str | None = None,
 ) -> list[dict[str, Any]]:
     """Explore what you know about a topic. Finds relevant memories then
@@ -612,7 +657,7 @@ def explore_knowledge(
 @log_timing("find_related")
 def find_related(
     memory_id: str,
-    relationship_types: list[str] | None = None,
+    relationship_types: ListStr = None,
     depth: int = 1,
     min_strength: float = 0.5,
     limit: int = 20,
