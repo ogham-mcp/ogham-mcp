@@ -49,9 +49,6 @@ def _get_model(model_path: str | None = None):
         if _session is not None:
             return _tokenizer, _session
 
-        import onnxruntime as ort
-        from tokenizers import Tokenizer
-
         if model_path is None:
             model_path = str(Path.home() / ".cache" / "ogham" / "bge-m3-onnx" / "bge_m3_model.onnx")
 
@@ -60,6 +57,9 @@ def _get_model(model_path: str | None = None):
                 f"ONNX model not found at {model_path}. "
                 "Run 'ogham download-model bge-m3' to download it."
             )
+
+        import onnxruntime as ort
+        from tokenizers import Tokenizer
 
         logger.info("Loading tokenizer for BAAI/bge-m3...")
         _tokenizer = Tokenizer.from_pretrained("BAAI/bge-m3")

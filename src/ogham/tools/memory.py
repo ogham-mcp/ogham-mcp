@@ -142,12 +142,13 @@ def _require_limit(limit: int) -> None:
         raise ValueError(f"limit must be between 1 and {MAX_LIMIT}, got {limit}")
 
 
-# Session-level active profile. Set from config, changeable via switch_profile tool.
-_active_profile: str = settings.default_profile
+# Session-level active profile. Defaults lazily from config on first use so
+# helper imports do not require a fully configured runtime environment.
+_active_profile: str | None = None
 
 
 def get_active_profile() -> str:
-    return _active_profile
+    return _active_profile or settings.default_profile
 
 
 @mcp.tool
@@ -159,7 +160,7 @@ def switch_profile(profile: str) -> dict[str, Any]:
         profile: The profile to switch to (e.g. "work", "personal", "default").
     """
     global _active_profile
-    old = _active_profile
+    old = get_active_profile()
     _active_profile = profile
     return {"status": "switched", "from": old, "to": profile}
 
@@ -167,15 +168,16 @@ def switch_profile(profile: str) -> dict[str, Any]:
 @mcp.tool
 def current_profile() -> dict[str, str]:
     """Show which memory profile is currently active."""
-    return {"profile": _active_profile}
+    return {"profile": get_active_profile()}
 
 
 @mcp.tool
 def list_profiles() -> list[dict[str, Any]]:
     """List all memory profiles and how many memories each has."""
+    active_profile = get_active_profile()
     profiles = db_list_profiles()
     for p in profiles:
-        if p["profile"] == _active_profile:
+        if p["profile"] == active_profile:
             p["active"] = True
     return profiles
 
@@ -200,9 +202,10 @@ def store_memory(
     """
     from ogham.service import store_memory_enriched
 
+    active_profile = get_active_profile()
     return store_memory_enriched(
         content=content,
-        profile=_active_profile,
+        profile=active_profile,
         source=source,
         tags=tags,
         metadata=metadata,
@@ -316,7 +319,7 @@ def hybrid_search(
 
     return search_memories_enriched(
         query=query,
-        profile=_active_profile,
+        profile=get_active_profile(),
         limit=limit,
         tags=tags,
         source=source,
@@ -340,7 +343,12 @@ def list_recent(
         tags: Filter to memories with any of these tags.
     """
     _require_limit(limit)
-    return list_recent_memories(profile=_active_profile, limit=limit, source=source, tags=tags)
+    return list_recent_memories(
+        profile=get_active_profile(),
+        limit=limit,
+        source=source,
+        tags=tags,
+    )
 
 
 @mcp.tool
@@ -352,9 +360,10 @@ def delete_memory(memory_id: str) -> dict[str, Any]:
     """
     from ogham.database import emit_audit_event
 
-    success = db_delete(memory_id, profile=_active_profile)
+    active_profile = get_active_profile()
+    success = db_delete(memory_id, profile=active_profile)
     emit_audit_event(
-        profile=_active_profile,
+        profile=active_profile,
         operation="delete",
         resource_id=memory_id,
         outcome="success" if success else "not_found",
@@ -393,9 +402,10 @@ def update_memory(
 
     from ogham.database import emit_audit_event
 
-    result = db_update(memory_id, updates, profile=_active_profile)
+    active_profile = get_active_profile()
+    result = db_update(memory_id, updates, profile=active_profile)
     emit_audit_event(
-        profile=_active_profile,
+        profile=active_profile,
         operation="update",
         resource_id=memory_id,
         metadata={"fields_updated": list(updates.keys())},
@@ -420,12 +430,13 @@ def reinforce_memory(
     """
     if not 0.0 < strength <= 1.0:
         raise ValueError(f"strength must be between 0.0 (exclusive) and 1.0, got {strength}")
-    new_confidence = db_update_confidence(memory_id, strength, _active_profile)
+    active_profile = get_active_profile()
+    new_confidence = db_update_confidence(memory_id, strength, active_profile)
     return {
         "status": "reinforced",
         "id": memory_id,
         "confidence": new_confidence,
-        "profile": _active_profile,
+        "profile": active_profile,
     }
 
 
@@ -447,12 +458,13 @@ def contradict_memory(
     """
     if not 0.0 <= strength < 1.0:
         raise ValueError(f"strength must be between 0.0 and 1.0 (exclusive), got {strength}")
-    new_confidence = db_update_confidence(memory_id, strength, _active_profile)
+    active_profile = get_active_profile()
+    new_confidence = db_update_confidence(memory_id, strength, active_profile)
     return {
         "status": "contradicted",
         "id": memory_id,
         "confidence": new_confidence,
-        "profile": _active_profile,
+        "profile": active_profile,
     }
 
 
@@ -466,10 +478,11 @@ async def re_embed_all(ctx: Context) -> dict[str, Any]:
 
     Reports progress via MCP progress notifications.
     """
-    memories = get_all_memories_content(profile=_active_profile)
+    active_profile = get_active_profile()
+    memories = get_all_memories_content(profile=active_profile)
     total = len(memories)
     if total == 0:
-        return {"status": "nothing_to_do", "profile": _active_profile, "total": 0}
+        return {"status": "nothing_to_do", "profile": active_profile, "total": 0}
 
     clear_embedding_cache()
     await ctx.info(f"Re-embedding {total} memories...")
@@ -503,7 +516,7 @@ async def re_embed_all(ctx: Context) -> dict[str, Any]:
 
     return {
         "status": "complete",
-        "profile": _active_profile,
+        "profile": active_profile,
         "total": total,
         "succeeded": total - failed,
         "failed": failed,
@@ -551,8 +564,9 @@ def export_profile(format: str = "json") -> dict[str, Any]:
     """
     if format not in ("json", "markdown"):
         raise ValueError("format must be 'json' or 'markdown'")
-    data = _export_memories(_active_profile, format=format)
-    return {"status": "exported", "profile": _active_profile, "format": format, "data": data}
+    active_profile = get_active_profile()
+    data = _export_memories(active_profile, format=format)
+    return {"status": "exported", "profile": active_profile, "format": format, "data": data}
 
 
 @mcp.tool
@@ -564,7 +578,7 @@ def import_memories_tool(data: str, dedup_threshold: float = 0.8) -> dict[str, A
         data: JSON string from a previous export_profile call.
         dedup_threshold: Skip memories with similarity above this (0 to disable dedup).
     """
-    return _import_memories(data, profile=_active_profile, dedup_threshold=dedup_threshold)
+    return _import_memories(data, profile=get_active_profile(), dedup_threshold=dedup_threshold)
 
 
 @mcp.tool
@@ -573,12 +587,13 @@ def cleanup_expired() -> dict[str, Any]:
     """Delete expired memories in the active profile. Expired memories are already
     hidden from searches and listings — this permanently removes them.
     """
-    count = db_count_expired(_active_profile)
+    active_profile = get_active_profile()
+    count = db_count_expired(active_profile)
     if count == 0:
-        return {"status": "nothing_to_clean", "profile": _active_profile, "deleted": 0}
+        return {"status": "nothing_to_clean", "profile": active_profile, "deleted": 0}
 
-    deleted = db_cleanup_expired(_active_profile)
-    return {"status": "cleaned", "profile": _active_profile, "deleted": deleted}
+    deleted = db_cleanup_expired(active_profile)
+    return {"status": "cleaned", "profile": active_profile, "deleted": deleted}
 
 
 @mcp.tool
@@ -599,14 +614,14 @@ def link_unlinked(
         max_links: Maximum links per memory (default 5).
     """
     processed = db_link_unlinked(
-        profile=_active_profile,
+        profile=get_active_profile(),
         threshold=threshold,
         max_links=max_links,
         batch_size=batch_size,
     )
     return {
         "status": "linked" if processed > 0 else "nothing_to_link",
-        "profile": _active_profile,
+        "profile": get_active_profile(),
         "processed": processed,
         "batch_size": batch_size,
     }
@@ -641,7 +656,7 @@ def explore_knowledge(
     results = db_explore_graph(
         query_text=query,
         query_embedding=embedding,
-        profile=_active_profile,
+        profile=get_active_profile(),
         limit=limit,
         depth=depth,
         min_strength=min_strength,
@@ -748,7 +763,7 @@ def suggest_connections(
             """,
             {
                 "memory_id": memory_id,
-                "profile": _active_profile,
+                "profile": get_active_profile(),
                 "min_shared": min_shared_entities,
                 "limit": limit,
             },
@@ -777,7 +792,8 @@ def compress_old_memories() -> dict[str, Any]:
     from ogham.compression import compress_to_gist, compress_to_tags, get_compression_target
     from ogham.database import get_all_memories_full
 
-    memories = get_all_memories_full(profile=_active_profile)
+    active_profile = get_active_profile()
+    memories = get_all_memories_full(profile=active_profile)
     stats = {"compressed_to_gist": 0, "compressed_to_tags": 0, "skipped": 0, "total": len(memories)}
 
     for mem in memories:
@@ -796,7 +812,7 @@ def compress_old_memories() -> dict[str, Any]:
             db_update(
                 mem["id"],
                 content=gist,
-                profile=_active_profile,
+                profile=active_profile,
             )
             # Store original and update compression level via direct update
             _update_compression(mem["id"], compression_level=1, original_content=content)
@@ -810,7 +826,7 @@ def compress_old_memories() -> dict[str, Any]:
             db_update(
                 mem["id"],
                 content=tag_repr,
-                profile=_active_profile,
+                profile=active_profile,
             )
             _update_compression(mem["id"], compression_level=2)
             stats["compressed_to_tags"] += 1

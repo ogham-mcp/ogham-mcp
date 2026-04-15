@@ -23,6 +23,10 @@ class SupabaseBackend:
 
     def _get_client(self) -> SyncPostgrestClient:
         if self._client is None:
+            if not settings.supabase_url:
+                raise RuntimeError("SUPABASE_URL is required for SupabaseBackend")
+            if not settings.supabase_key:
+                raise RuntimeError("SUPABASE_KEY is required for SupabaseBackend")
             if settings.bare_postgrest:
                 base_url = settings.supabase_url
             else:

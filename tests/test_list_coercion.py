@@ -7,16 +7,14 @@ emit before the transport layer.
 Run: pytest tests/test_list_coercion.py -v
 """
 
-import json
 import pytest
-from pydantic import ValidationError, TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
-# Adjust this import after clone + reading upstream layout:
 from ogham.tools.memory import (
-    _coerce_list,
-    _coerce_dict,
-    ListStr,
     DictAny,
+    ListStr,
+    _coerce_dict,
+    _coerce_list,
 )
 
 

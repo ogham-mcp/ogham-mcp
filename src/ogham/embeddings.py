@@ -18,10 +18,18 @@ from ogham.retry import with_retry
 
 logger = logging.getLogger(__name__)
 
-_cache = EmbeddingCache(
-    cache_dir=settings.embedding_cache_dir,
-    max_size=settings.embedding_cache_max_size,
-)
+_cache: EmbeddingCache | None = None
+
+
+def _get_cache() -> EmbeddingCache:
+    """Create the embedding cache on demand to avoid import-time settings validation."""
+    global _cache
+    if _cache is None:
+        _cache = EmbeddingCache(
+            cache_dir=settings.embedding_cache_dir,
+            max_size=settings.embedding_cache_max_size,
+        )
+    return _cache
 
 
 class EmbeddingUsage(TypedDict, total=False):
@@ -34,7 +42,7 @@ class EmbeddingUsage(TypedDict, total=False):
 
 def get_cache_stats() -> dict:
     """Return cache statistics."""
-    return _cache.stats()
+    return _get_cache().stats()
 
 
 def _cache_key(text: str) -> str:
@@ -139,14 +147,18 @@ def generate_embedding(
     """
     cache_key = _cache_key(text)
 
-    cached = _cache.get(cache_key)
+    cache = _get_cache()
+    cached = cache.get(cache_key)
     if cached is not None:
         logger.debug("Embedding cache hit for text hash %s", cache_key[:8])
         _set_usage_out(usage_out, _cached_embedding_usage())
         return cached
 
-    embedding = _generate_uncached(text, usage_out=usage_out)
-    _cache.put(cache_key, embedding)
+    if usage_out is None:
+        embedding = _generate_uncached(text)
+    else:
+        embedding = _generate_uncached(text, usage_out=usage_out)
+    cache.put(cache_key, embedding)
     return embedding
 
 
@@ -379,7 +391,7 @@ def generate_embeddings_batch(
 
     for i, text in enumerate(texts):
         cache_key = _cache_key(text)
-        cached = _cache.get(cache_key)
+        cached = _get_cache().get(cache_key)
         if cached is not None:
             results[i] = cached
         else:
@@ -395,10 +407,13 @@ def generate_embeddings_batch(
         batch = uncached[start : start + batch_size]
         batch_texts = [t for _, _, t in batch]
         batch_usage: EmbeddingUsage = {}
-        embeddings = _generate_batch_uncached(batch_texts, usage_out=batch_usage)
+        if usage_out is None:
+            embeddings = _generate_batch_uncached(batch_texts)
+        else:
+            embeddings = _generate_batch_uncached(batch_texts, usage_out=batch_usage)
         for (idx, cache_key, _), embedding in zip(batch, embeddings):
             results[idx] = embedding
-            _cache.put(cache_key, embedding)
+            _get_cache().put(cache_key, embedding)
         total_usage = _merge_usage(total_usage, batch_usage or None)
         embedded += len(batch)
         if on_progress:
@@ -573,4 +588,4 @@ def _embed_gemini_batch(
 
 def clear_embedding_cache() -> int:
     """Clear the embedding cache. Returns number of entries cleared."""
-    return _cache.clear()
+    return _get_cache().clear()
