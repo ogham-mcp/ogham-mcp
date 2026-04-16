@@ -70,6 +70,7 @@ def test_embedding_generation_retries_on_connection_error():
     with patch("ogham.embeddings.settings") as mock_settings:
         mock_settings.embedding_provider = "ollama"
         mock_settings.embedding_dim = 1024
+        mock_settings.embedding_cache_dir = None
         mock_settings.ollama_url = "http://localhost:11434"
         mock_settings.ollama_embed_model = "mxbai-embed-large"
         mock_settings.embedding_cache_max_size = 1000
