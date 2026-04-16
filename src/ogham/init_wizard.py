@@ -3,7 +3,7 @@
 Walks users through database configuration, embedding provider selection,
 schema migration, and MCP client configuration.
 
-Supports: Claude Desktop, Claude Code, Cursor, VS Code (Copilot), Codex CLI, Kiro, OpenCode.
+Supports: Claude Desktop, Claude Code, Cursor, VS Code (Copilot), Codex CLI, Kiro, Antigravity (Google), OpenCode.
 Platforms: macOS, Linux, Windows.
 Execution modes: uvx (default), Docker (GHCR image).
 """
@@ -95,6 +95,12 @@ def _client_configs() -> list[dict]:
             "path": home / ".kiro" / "settings" / "mcp.json",
             "detect": home / ".kiro",
             "format": "mcp_json",
+        },
+        {
+            "name": "Antigravity (Google)",
+            "path": home / ".gemini" / "antigravity" / "mcp_config.json",
+            "detect": home / ".gemini" / "antigravity",
+            "format": "antigravity",
         },
         {
             "name": "OpenCode",
@@ -498,6 +504,14 @@ def _write_mcp_config(client: dict, mcp_entry: dict):
             "environment": mcp_entry.get("env", {}),
             "enabled": True,
         }
+    elif fmt == "antigravity":
+        # Antigravity uses mcpServers but "serverUrl" instead of "url" for SSE
+        if "mcpServers" not in existing:
+            existing["mcpServers"] = {}
+        entry = dict(mcp_entry)
+        if "url" in entry:
+            entry["serverUrl"] = entry.pop("url")
+        existing["mcpServers"]["ogham"] = entry
     elif fmt == "vscode":
         # VS Code uses "servers" key inside mcp.json
         if "servers" not in existing:
