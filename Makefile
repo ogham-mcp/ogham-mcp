@@ -87,7 +87,29 @@ sync:
 
 # --- Publish to PyPI ---
 
-publish: build
+publish-check:
+	@echo "=== Publish-check: scanning dist/ for secrets ==="
+	@if [ ! -d dist ] || [ -z "$$(ls dist/*.tar.gz 2>/dev/null)" ]; then \
+		echo "  ✗ No sdist in dist/ -- run 'make build' first"; exit 1; fi
+	@TMPDIR=$$(mktemp -d); \
+	SDIST=$$(ls -t dist/*.tar.gz 2>/dev/null | head -1); \
+	echo "  Scanning: $$SDIST"; \
+	tar -xzf "$$SDIST" -C "$$TMPDIR"; \
+	HITS=$$(grep -rIE 'sk_(test|live)_[a-zA-Z0-9]{12,}|pk_(test|live)_[a-zA-Z0-9]{12,}|sbp_[a-zA-Z0-9]{20,}|sb_(secret|publishable)_[a-zA-Z0-9]{20,}|AIza[0-9A-Za-z_-]{30,}|ghp_[a-zA-Z0-9]{30,}|npg_[a-zA-Z0-9]{10,}|postgres(ql)?://[^:@[:space:]]+:[^@[:space:]]+@[^[:space:]/]+' "$$TMPDIR" 2>/dev/null | grep -vE "\.env\.example|user:pass|your_|YOUR_|<password>|REPLACE_|example\.com|@localhost|@127\.0\.0\.1|ABCDEFghij|ogham_test|s3cretP4ss" || true); \
+	rm -rf "$$TMPDIR"; \
+	if [ -n "$$HITS" ]; then \
+		echo ""; \
+		echo "❌ Publish blocked: credential-like strings detected in sdist:"; \
+		echo "$$HITS" | head -10 | sed 's/^/    /'; \
+		echo ""; \
+		echo "   History: v0.10.x series accidentally shipped Neon postgres URLs"; \
+		echo "   via hardcoded Makefile vars. Check Makefile / source for embedded"; \
+		echo "   creds and move them to env vars or 'op read' indirection."; \
+		exit 1; \
+	fi
+	@echo "  ✓ No credential-like strings in dist/"
+
+publish: build publish-check
 	@echo "=== Publishing to PyPI ==="
 	uv publish --token $$(op read "op://Ogham-Gateway/PyPi - Ogham Dev token/api_key")
 	@echo ""
@@ -147,9 +169,14 @@ gateway-push:
 
 # --- Database migrations ---
 
-NEON_US := "postgresql://neondb_owner:npg_2cSLWlVye8Dj@ep-holy-snow-ae0hur3m-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-NEON_EU := "postgresql://neondb_owner:npg_kHJsPtF4i3CR@ep-soft-grass-aln9vxgp-pooler.c-3.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-NEON_AP := "postgresql://neondb_owner:npg_qXLua6z0cRHe@ep-curly-dew-a1uok6f9-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+# Regional database URLs come from the environment -- never hardcoded.
+# Set these before running `make migrate` (e.g. via direnv / 1Password /
+# `op run --env-file=...`). This was where we used to embed live
+# credentials in earlier releases -- removed in v0.11.0 after discovering
+# the leak. See CHANGELOG v0.11.0 release notes for detail.
+NEON_US ?= $(shell op read "op://Ogham-Gateway/supabase-regional-databases/us-direct-url" 2>/dev/null)
+NEON_EU ?= $(shell op read "op://Ogham-Gateway/supabase-regional-databases/eu-direct-url" 2>/dev/null)
+NEON_AP ?= $(shell op read "op://Ogham-Gateway/supabase-regional-databases/ap-pooler-url" 2>/dev/null)
 
 migrate:
 	@echo "=== Applying migrations to all Neon databases ==="

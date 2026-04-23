@@ -17,3 +17,15 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=500]
       - id: detect-private-key
+
+  # Broad-spectrum secret detection. Catches what detect-private-key misses
+  # (connection strings with passwords, cloud API keys, tokens). Gitleaks'
+  # default ruleset covers ~160 patterns: postgres URLs, AWS keys, GitHub
+  # tokens, Supabase sb_secret_, Neon npg_, Stripe sk_, Anthropic sk-ant-,
+  # etc. Added 2026-04-23 after discovering an earlier PyPI release had
+  # embedded Neon postgres URLs in the Makefile (dead creds, but caught
+  # too late -- whole class should have been blocked at commit time).
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
