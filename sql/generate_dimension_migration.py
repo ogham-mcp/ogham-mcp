@@ -126,7 +126,10 @@ def main():
         "--schema",
         choices=["supabase", "selfhost", "postgres"],
         default="postgres",
-        help="Which schema file to use: supabase (cloud), selfhost (Supabase Docker+RLS), postgres (Neon/vanilla PG). Default: postgres",
+        help=(
+            "Which schema file to use: supabase (cloud), selfhost "
+            "(Supabase Docker+RLS), postgres (Neon/vanilla PG). Default: postgres"
+        ),
     )
     args = parser.parse_args()
 

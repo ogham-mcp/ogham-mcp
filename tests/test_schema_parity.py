@@ -98,12 +98,16 @@ def test_sql_functions_present():
 
 
 def test_no_unnumbered_migrations():
-    """Migration files must be numbered (prevents Josh's issue #22)."""
+    """Migration files must be numbered (prevents Josh's issue #22).
+
+    Allows an optional letter suffix (008a, 008b) for historical mid-sequence
+    inserts, but rejects unnumbered files like `update_search_function.sql`.
+    """
     migrations_dir = REPO_ROOT / "sql" / "migrations"
     if not migrations_dir.exists():
         return
     for f in migrations_dir.glob("*.sql"):
-        assert re.match(r"^\d{3}_", f.name), (
+        assert re.match(r"^\d{3}[a-z]?_", f.name), (
             f"{f.name} is not numbered -- will sort wrong in upgrade.sh"
         )
 

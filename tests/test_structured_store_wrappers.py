@@ -132,14 +132,14 @@ def test_store_event_basic():
         mock_store.return_value = {"id": "mem-1", "status": "stored"}
 
         store_event(
-            event="Rackspace internal demo",
+            event="Acme internal demo",
             when="2026-04-21 15:00",
             participants=["Kevin", "Iain", "Cemre"],
             location="Munich office",
         )
 
     kwargs = mock_store.call_args.kwargs
-    assert "Event: Rackspace internal demo" in kwargs["content"]
+    assert "Event: Acme internal demo" in kwargs["content"]
     assert "When: 2026-04-21 15:00" in kwargs["content"]
     assert "Participants: Kevin, Iain, Cemre" in kwargs["content"]
     assert "Location: Munich office" in kwargs["content"]
@@ -163,7 +163,7 @@ def test_store_event_extracts_dates_into_metadata():
         ),
     ):
         mock_store.return_value = {"id": "mem-1", "status": "stored"}
-        store_event(event="Rackspace pitch demo", when="2026-04-21")
+        store_event(event="Acme Q2 pitch demo", when="2026-04-21")
 
     assert mock_store.call_args.kwargs["metadata"]["dates"] == ["2026-04-21"]
 
