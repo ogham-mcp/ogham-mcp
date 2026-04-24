@@ -357,7 +357,7 @@ def test_mask_secrets_key_value():
     assert "***MASKED***" in _mask_secrets("database_url=postgresql://user:pass@host/db")
 
     # Env vars
-    assert "***MASKED***" in _mask_secrets("VOYAGE_API_KEY=pa-TKy5ucfpkIp99_lU1JaxlblJxl7pNTldP")
+    assert "***MASKED***" in _mask_secrets("VOYAGE_API_KEY=pa-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
     assert "***MASKED***" in _mask_secrets("OPENAI_API_KEY=sk-proj-joiu0bp96xKIxxxxxxx")
 
 
