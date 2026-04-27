@@ -34,8 +34,8 @@ MIG_030 = (
     Path(__file__).parent.parent / "src/ogham/sql/migrations/030_topic_summaries_dim_agnostic.sql"
 )
 MIG_031 = Path(__file__).parent.parent / "src/ogham/sql/migrations/031_wiki_rpc_functions.sql"
-ROLLBACK_028 = (
-    Path(__file__).parent.parent / "src/ogham/sql/migrations/028_topic_summaries_rollback.sql"
+DANGER_028 = (
+    Path(__file__).parent.parent / "src/ogham/sql/migrations/DANGER_028_topic_summaries.sql"
 )
 
 
@@ -63,13 +63,19 @@ pytestmark = [
 def _apply_028(pg_fresh_db):
     """Apply lifecycle + summaries + wiki RPC migrations idempotently on the scratch DB.
 
-    The rollback now drops migration 031's wiki_* functions before
-    dropping topic_summaries (they hard-depend on the table). 030 + 031
-    must therefore be re-applied each test run alongside 028.
+    DANGER_028 is the canonical rollback; it has the session-variable
+    guard, so we have to set ``ogham.confirm_rollback`` and run the
+    rollback in the same _execute call (one connection) before applying
+    028 fresh. 030 + 031 follow because the rollback's `wiki_*` function
+    drops + topic_summaries drop wipe everything they install.
     """
     pg_fresh_db.apply_sql(MIG_025)
     pg_fresh_db.apply_sql(MIG_026)
-    pg_fresh_db.apply_sql(ROLLBACK_028)
+    rollback_sql = DANGER_028.read_text()
+    pg_fresh_db.be._execute(
+        "SET ogham.confirm_rollback = 'I-KNOW-WHAT-I-AM-DOING';\n" + rollback_sql,
+        fetch="none",
+    )
     pg_fresh_db.apply_sql(MIG_028)
     pg_fresh_db.apply_sql(MIG_030)
     pg_fresh_db.apply_sql(MIG_031)
