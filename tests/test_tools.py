@@ -41,6 +41,7 @@ def reset_profile(monkeypatch):
 def mock_embedding():
     with (
         patch("ogham.tools.memory.generate_embedding") as mock,
+        patch("ogham.embeddings.generate_embedding", mock),
         patch("ogham.service.generate_embedding", mock),
     ):
         mock.return_value = [0.1] * 1024
@@ -504,6 +505,7 @@ def test_check_database_failure():
 
         assert result["status"] == "error"
         assert result["connected"] is False
+        assert isinstance(result["error"], str)
         assert "Connection refused" in result["error"]
 
 
@@ -567,6 +569,7 @@ def test_check_embedding_provider_openai_no_key():
         result = check_embedding_provider()
 
         assert result["status"] == "error"
+        assert isinstance(result["error"], str)
         assert "OPENAI_API_KEY not set" in result["error"]
 
 
@@ -597,6 +600,7 @@ def test_check_config_missing_url():
         result = check_config()
 
         assert result["status"] == "warning"
+        assert isinstance(result["issues"], list)
         assert "SUPABASE_URL not set" in result["issues"]
 
 
@@ -612,6 +616,7 @@ def test_check_config_unusual_embedding_dim():
         result = check_config()
 
         assert result["status"] == "warning"
+        assert isinstance(result["issues"], list)
         assert any("Unusual embedding_dim" in issue for issue in result["issues"])
 
 

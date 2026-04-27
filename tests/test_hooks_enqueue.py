@@ -7,6 +7,7 @@ patched so we can assert enqueue calls without running LLM / embedding.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -101,7 +102,8 @@ def test_delete_memory_enqueues_pre_delete_tags(_hooks_env):
 
     # Seed directly so we don't chain through store_memory (which would
     # also enqueue and confuse the test).
-    row = get_backend()._execute(
+    backend = cast(Any, get_backend())
+    row = backend._execute(
         """INSERT INTO memories (content, profile, source, tags)
            VALUES ('body to delete', 'test-025', 't', ARRAY['alpha', 'beta'])
            RETURNING id::text AS id""",
@@ -123,7 +125,8 @@ def test_update_memory_enqueues_union_of_old_and_new_tags(_hooks_env):
     from ogham.database import get_backend
     from ogham.tools.memory import update_memory
 
-    row = get_backend()._execute(
+    backend = cast(Any, get_backend())
+    row = backend._execute(
         """INSERT INTO memories (content, profile, source, tags)
            VALUES ('body to edit', 'test-025', 't', ARRAY['alpha', 'beta'])
            RETURNING id::text AS id""",
@@ -148,7 +151,8 @@ def test_reinforce_memory_enqueues_current_tags(_hooks_env):
     from ogham.database import get_backend
     from ogham.tools.memory import reinforce_memory
 
-    row = get_backend()._execute(
+    backend = cast(Any, get_backend())
+    row = backend._execute(
         """INSERT INTO memories (content, profile, source, tags, confidence)
            VALUES ('reinforce me', 'test-025', 't', ARRAY['x', 'y'], 0.5)
            RETURNING id::text AS id""",
@@ -168,7 +172,8 @@ def test_contradict_memory_enqueues_current_tags(_hooks_env):
     from ogham.database import get_backend
     from ogham.tools.memory import contradict_memory
 
-    row = get_backend()._execute(
+    backend = cast(Any, get_backend())
+    row = backend._execute(
         """INSERT INTO memories (content, profile, source, tags, confidence)
            VALUES ('contradict me', 'test-025', 't', ARRAY['m', 'n'], 0.9)
            RETURNING id::text AS id""",

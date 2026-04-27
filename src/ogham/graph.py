@@ -25,11 +25,22 @@ parallel arrays), replacing the previous C(n, 2) per-pair ON CONFLICT loop.
 from __future__ import annotations
 
 from itertools import combinations
+from typing import Any, Protocol, cast
 
 from ogham.database import get_backend
 
 HEBBIAN_RATE = 0.01
 BOOTSTRAP_STRENGTH = 0.1
+
+
+class _SqlExecutor(Protocol):
+    def _execute(
+        self,
+        query: str,
+        params: dict[str, Any] | None = None,
+        *,
+        fetch: str = "all",
+    ) -> Any: ...
 
 
 def strengthen_edges(memory_ids: list[str]) -> int:
@@ -49,7 +60,7 @@ def strengthen_edges(memory_ids: list[str]) -> int:
     sources = [p[0] for p in pairs]
     targets = [p[1] for p in pairs]
 
-    backend = get_backend()
+    backend = cast(_SqlExecutor, get_backend())
     result = backend._execute(
         """INSERT INTO memory_relationships
                (source_id, target_id, relationship, strength, created_by)

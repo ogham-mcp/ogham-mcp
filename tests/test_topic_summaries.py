@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -69,7 +70,7 @@ def _seed_memories(n: int = 3, profile: str = "test-025") -> list[str]:
     """
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(Any, get_backend())
     rows = backend._execute(
         """INSERT INTO memories (content, profile, source, tags)
            SELECT 'seed content row ' || i::text, %(profile)s, 't', ARRAY['ogham-memory']
@@ -176,7 +177,8 @@ def test_upsert_summary_updates_existing_row_and_replaces_sources(pg_fresh_db, p
     # Junction rows are replaced, not appended -- only v2 sources survive.
     from ogham.database import get_backend
 
-    rows = get_backend()._execute(
+    backend = cast(Any, get_backend())
+    rows = backend._execute(
         "SELECT memory_id::text AS mid FROM topic_summary_sources WHERE summary_id = %(id)s::uuid",
         {"id": str(s2["id"])},
         fetch="all",

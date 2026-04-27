@@ -1,0 +1,18 @@
+{
+    "include": ["src", "tests"],
+    "exclude": [
+        "benchmarks",
+        "dist",
+        ".venv",
+        "src/ogham/exporters/obsidian.py",
+        "src/ogham/recompute.py",
+        "src/ogham/topic_summaries.py",
+        "src/ogham/wiki_lint.py",
+    ],
+    "pythonVersion": "3.13",
+    "typeCheckingMode": "standard",
+    "venvPath": ".",
+    "venv": ".venv",
+    "reportMissingImports": "warning",
+    "reportMissingModuleSource": "warning",
+}

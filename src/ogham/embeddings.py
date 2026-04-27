@@ -11,7 +11,8 @@ such as `model`, `input_tokens`, and `cache_hit`.
 import hashlib
 import logging
 import math
-from typing import TypedDict
+from collections.abc import Callable
+from typing import Any, cast
 
 from ogham.config import settings
 from ogham.embedding_cache import EmbeddingCache
@@ -33,12 +34,7 @@ def _get_cache() -> EmbeddingCache:
     return _cache
 
 
-class EmbeddingUsage(TypedDict, total=False):
-    """Best-effort provider usage captured alongside an embedding request."""
-
-    model: str
-    input_tokens: int
-    cache_hit: bool
+EmbeddingUsage = dict[str, Any]
 
 
 def get_cache_stats() -> dict:
@@ -326,7 +322,7 @@ _gemini_client = None
 def _get_gemini_client():
     global _gemini_client
     if _gemini_client is None:
-        from google import genai
+        from google import genai  # pyright: ignore[reportAttributeAccessIssue]
 
         _gemini_client = genai.Client(api_key=settings.gemini_api_key)
     return _gemini_client
@@ -388,7 +384,7 @@ def _l2_normalize(embedding: list[float]) -> list[float]:
 def generate_embeddings_batch(
     texts: list[str],
     batch_size: int | None = None,
-    on_progress: callable = None,
+    on_progress: Callable[[int, int], None] | None = None,
     usage_out: EmbeddingUsage | None = None,
 ) -> list[list[float]]:
     """Generate embeddings for multiple texts, batched for efficiency.
@@ -402,8 +398,9 @@ def generate_embeddings_batch(
         usage_out: Optional dict mutated in place with aggregated usage for
             uncached provider calls only. Cache-hit items contribute zero spend.
     """
-    if batch_size is None:
-        batch_size = settings.embedding_batch_size
+    effective_batch_size = (
+        batch_size if batch_size is not None else settings.embedding_batch_size or 32
+    )
     total = len(texts)
     results: list[list[float] | None] = [None] * total
     uncached: list[tuple[int, str, str]] = []  # (index, cache_key, text)
@@ -423,8 +420,8 @@ def generate_embeddings_batch(
         on_progress(embedded, total)
 
     # Batch embed uncached texts
-    for start in range(0, len(uncached), batch_size):
-        batch = uncached[start : start + batch_size]
+    for start in range(0, len(uncached), effective_batch_size):
+        batch = uncached[start : start + effective_batch_size]
         batch_texts = [t for _, _, t in batch]
         batch_usage: EmbeddingUsage = {}
         if usage_out is None:
@@ -440,7 +437,9 @@ def generate_embeddings_batch(
             on_progress(embedded, total)
 
     _set_usage_out(usage_out, total_usage)
-    return results
+    if any(result is None for result in results):
+        raise RuntimeError("Embedding batch completed with missing results")
+    return cast(list[list[float]], results)
 
 
 @with_retry(max_attempts=3, base_delay=0.5, exceptions=(ConnectionError, OSError))

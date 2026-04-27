@@ -1,4 +1,5 @@
 import logging
+from typing import Any, cast
 
 from ogham.config import settings
 from ogham.database import get_backend
@@ -9,7 +10,7 @@ logger = logging.getLogger(__name__)
 def check_database() -> dict[str, str | bool]:
     """Check database connectivity with a lightweight query."""
     try:
-        backend = get_backend()
+        backend = cast(Any, get_backend())
         if hasattr(backend, "_get_client"):
             # Supabase backend
             client = backend._get_client()
@@ -109,7 +110,7 @@ def check_embedding_provider() -> dict[str, str | bool]:
 
     elif provider == "gemini":
         try:
-            from google import genai  # noqa: F401
+            from google import genai  # pyright: ignore[reportAttributeAccessIssue]  # noqa: F401
         except ImportError:
             return {
                 "status": "error",

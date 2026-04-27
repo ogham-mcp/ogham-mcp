@@ -126,11 +126,15 @@ def test_store_memory_audit_includes_embedding_usage():
         patch(
             "ogham.service.generate_embedding",
             side_effect=lambda text, usage_out=None: (
-                usage_out.update({"model": "openai:text-embedding-3-small", "input_tokens": 250})
-                if usage_out is not None
-                else None
-            )
-            or FAKE_EMBEDDING,
+                (
+                    usage_out.update(
+                        {"model": "openai:text-embedding-3-small", "input_tokens": 250}
+                    )
+                    if usage_out is not None
+                    else None
+                )
+                or FAKE_EMBEDDING
+            ),
         ),
         patch("ogham.service.hybrid_search_memories", return_value=[]),
         patch("ogham.service.db_get_profile_ttl", return_value=None),
@@ -205,9 +209,9 @@ def test_search_audit_accumulates_full_embedding_usage():
         patch(
             "ogham.service.generate_embedding",
             side_effect=lambda text, usage_out=None: (
-                usage_out.update(usage_calls.pop(0)[1]) if usage_out is not None else None
-            )
-            or FAKE_EMBEDDING,
+                (usage_out.update(usage_calls.pop(0)[1]) if usage_out is not None else None)
+                or FAKE_EMBEDDING
+            ),
         ),
         patch("ogham.service.is_ordering_query", return_value=False),
         patch("ogham.service.is_multi_hop_temporal", return_value=True),

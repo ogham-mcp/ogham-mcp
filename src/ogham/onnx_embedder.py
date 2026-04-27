@@ -13,6 +13,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,8 @@ class OnnxResult:
 
 # ── Singleton model holder ────────────────────────────────────────────
 
-_tokenizer = None
-_session = None
+_tokenizer: Any | None = None
+_session: Any | None = None
 _model_lock = threading.Lock()
 
 
@@ -42,11 +43,15 @@ def _get_model(model_path: str | None = None):
     """Lazy-load the ONNX session and tokenizer (singleton, thread-safe)."""
     global _tokenizer, _session
     if _session is not None:
+        if _tokenizer is None:
+            raise RuntimeError("ONNX session loaded without tokenizer")
         return _tokenizer, _session
 
     with _model_lock:
         # Double-check after acquiring lock
         if _session is not None:
+            if _tokenizer is None:
+                raise RuntimeError("ONNX session loaded without tokenizer")
             return _tokenizer, _session
 
         if model_path is None:
@@ -62,9 +67,10 @@ def _get_model(model_path: str | None = None):
         from tokenizers import Tokenizer
 
         logger.info("Loading tokenizer for BAAI/bge-m3...")
-        _tokenizer = Tokenizer.from_pretrained("BAAI/bge-m3")
-        _tokenizer.enable_truncation(max_length=8192)
-        _tokenizer.no_padding()
+        tokenizer = cast(Any, Tokenizer.from_pretrained("BAAI/bge-m3"))
+        tokenizer.enable_truncation(max_length=8192)
+        tokenizer.no_padding()
+        _tokenizer = tokenizer
 
         logger.info("Loading ONNX model from %s...", model_path)
         options = ort.SessionOptions()
@@ -73,13 +79,17 @@ def _get_model(model_path: str | None = None):
         options.log_severity_level = 2  # WARNING
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
 
-        _session = ort.InferenceSession(
-            model_path,
-            sess_options=options,
-            providers=["CPUExecutionProvider"],
+        session = cast(
+            Any,
+            ort.InferenceSession(
+                model_path,
+                sess_options=options,
+                providers=["CPUExecutionProvider"],
+            ),
         )
+        _session = session
         logger.info("ONNX BGE-M3 model loaded.")
-        return _tokenizer, _session
+        return tokenizer, session
 
 
 # ── Encoding ──────────────────────────────────────────────────────────

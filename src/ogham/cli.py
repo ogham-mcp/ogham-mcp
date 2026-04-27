@@ -643,11 +643,10 @@ def dashboard(
     # from env / config.env, which is surprising and broke the Go CLI's
     # profile handoff -- see
     # docs/plans/2026-04-16-go-cli-enterprise.md for the diagnosis.
-    if not profile:
-        profile = settings.default_profile
+    active_profile = profile or settings.default_profile
 
-    dashboard_app = create_app(profile=profile)
-    console.print(f"[green]Ogham dashboard ({profile}) → http://{host}:{port}[/green]")
+    dashboard_app = create_app(profile=active_profile)
+    console.print(f"[green]Ogham dashboard ({active_profile}) → http://{host}:{port}[/green]")
     uvicorn.run(dashboard_app, host=host, port=port, log_level="warning")
 
 

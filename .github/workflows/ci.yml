@@ -1,0 +1,46 @@
+name: Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-type-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@22695119d769bdb6f7032ad67b9bca0ef8c4a174 # v5.4.2
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra postgres
+
+      - name: Ruff
+        run: |
+          uv run ruff check src/ tests/
+          uv run ruff format --check src/ tests/
+
+      - name: Pyright
+        run: uv run pyright
+
+      - name: Tests
+        env:
+          DATABASE_BACKEND: supabase
+          SUPABASE_URL: https://fake.supabase.co
+          SUPABASE_KEY: fake-key
+          EMBEDDING_PROVIDER: ollama
+          DEFAULT_PROFILE: default
+        run: uv run pytest tests/ -m "not integration and not postgres_integration"

@@ -23,6 +23,7 @@ SQL surface is fully exercised.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -71,11 +72,7 @@ def _apply_028(pg_fresh_db):
     """
     pg_fresh_db.apply_sql(MIG_025)
     pg_fresh_db.apply_sql(MIG_026)
-    rollback_sql = DANGER_028.read_text()
-    pg_fresh_db.be._execute(
-        "SET ogham.confirm_rollback = 'I-KNOW-WHAT-I-AM-DOING';\n" + rollback_sql,
-        fetch="none",
-    )
+    pg_fresh_db.apply_rollback(DANGER_028)
     pg_fresh_db.apply_sql(MIG_028)
     pg_fresh_db.apply_sql(MIG_030)
     pg_fresh_db.apply_sql(MIG_031)
@@ -89,7 +86,7 @@ def _seed_memories_with_tag(
 ) -> list[str]:
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(Any, get_backend())
     rows = backend._execute(
         """INSERT INTO memories (content, profile, source, tags)
            SELECT %(prefix)s || ' ' || i::text, %(profile)s, 't', ARRAY[%(tag)s]
@@ -104,7 +101,7 @@ def _seed_memories_with_tag(
 def _add_relationship(source_id: str, target_id: str, rel: str, strength: float = 0.9):
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(Any, get_backend())
     backend._execute(
         """INSERT INTO memory_relationships
               (source_id, target_id, relationship, strength, created_by)
@@ -308,7 +305,7 @@ def test_find_orphans_surfaces_old_unlinked_memory(pg_fresh_db):
     # Backdate one row past the 5-min grace; leave the other inside it.
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(Any, get_backend())
     backend._execute(
         "UPDATE memories SET created_at = now() - interval '10 minutes' WHERE id = %(id)s::uuid",
         {"id": ids[0]},

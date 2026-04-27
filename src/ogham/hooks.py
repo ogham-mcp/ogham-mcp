@@ -13,6 +13,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 # Lifecycle: advance_stages is scheduled to run off the hot path when a
 # session starts. Imports hoisted to module top so tests can patch
@@ -57,10 +58,10 @@ _ALWAYS_SKIP_TOOLS = frozenset(
 )
 
 # --- Config loading ---
-_config_cache: dict | None = None
+_config_cache: dict[str, Any] | None = None
 
 
-def _load_config() -> dict:
+def _load_config() -> dict[str, Any]:
     """Load hooks config from YAML file, with caching.
 
     Looks for hooks_config.yaml next to this module, then falls back
@@ -76,7 +77,8 @@ def _load_config() -> dict:
             import yaml
 
             with open(config_path) as f:
-                _config_cache = yaml.safe_load(f)
+                loaded = yaml.safe_load(f)
+                _config_cache = loaded if isinstance(loaded, dict) else {}
                 logger.debug("Loaded hooks config from %s", config_path)
                 return _config_cache
         except ImportError:
@@ -441,7 +443,19 @@ def _mask_secrets(text: str) -> str:
     return masked
 
 
-def session_start(cwd: str, profile: str = "work", limit: int = 8) -> str:
+def _type_tags(memory: dict[str, Any]) -> list[str]:
+    """Return display-safe type tags from a memory row."""
+    raw_tags = memory.get("tags", [])
+    if not isinstance(raw_tags, list):
+        return []
+    return [tag for tag in raw_tags if isinstance(tag, str) and tag.startswith("type:")]
+
+
+def session_start(
+    cwd: str,
+    profile: str = "work",
+    limit: int = 8,
+) -> str:
     """Return markdown context for session injection.
 
     Searches for memories relevant to the current working directory and
@@ -491,8 +505,8 @@ def session_start(cwd: str, profile: str = "work", limit: int = 8) -> str:
 
     lines = ["## Session Context", ""]
     for r in results:
-        content = r.get("content", "")[:200]
-        tags = [t for t in r.get("tags", []) if t.startswith("type:")]
+        content = str(r.get("content", ""))[:200]
+        tags = _type_tags(r)
         tag_str = f" ({', '.join(tags)})" if tags else ""
         lines.append(f"- {content}{tag_str}")
 
@@ -501,12 +515,12 @@ def session_start(cwd: str, profile: str = "work", limit: int = 8) -> str:
     return "\n".join(lines)
 
 
-def post_tool(hook_input: dict, profile: str = "work") -> None:
+def post_tool(hook_input: dict[str, Any], profile: str = "work") -> None:
     """Capture a tool execution as a memory.
 
     Skips Ogham's own tools to prevent infinite loops.
     """
-    tool_name = hook_input.get("tool_name", "")
+    tool_name = str(hook_input.get("tool_name", ""))
 
     # Skip Ogham's own tools (infinite loop prevention)
     if any(tool_name.startswith(p) for p in _SKIP_PREFIXES):
@@ -517,8 +531,8 @@ def post_tool(hook_input: dict, profile: str = "work") -> None:
         return
 
     tool_input = hook_input.get("tool_input", {})
-    cwd = hook_input.get("cwd", "")
-    session_id = hook_input.get("session_id", "")
+    cwd = str(hook_input.get("cwd", ""))
+    session_id = str(hook_input.get("session_id", ""))
 
     # Extract summary from tool input
     summary = ""
@@ -590,7 +604,11 @@ def post_tool(hook_input: dict, profile: str = "work") -> None:
         logger.debug("post_tool: store failed, ignoring")
 
 
-def pre_compact(session_id: str, cwd: str, profile: str = "work") -> None:
+def pre_compact(
+    session_id: str,
+    cwd: str,
+    profile: str = "work",
+) -> None:
     """Drain session context to Ogham before compaction."""
     project_name = os.path.basename(cwd)
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -616,7 +634,11 @@ def pre_compact(session_id: str, cwd: str, profile: str = "work") -> None:
         logger.debug("pre_compact: store failed, ignoring")
 
 
-def post_compact(cwd: str, profile: str = "work", limit: int = 10) -> str:
+def post_compact(
+    cwd: str,
+    profile: str = "work",
+    limit: int = 10,
+) -> str:
     """Rehydrate context after compaction.
 
     Returns markdown with the most relevant memories for the project.
@@ -644,8 +666,8 @@ def post_compact(cwd: str, profile: str = "work", limit: int = 10) -> str:
 
     lines = ["## Restored Context", ""]
     for r in results:
-        content = r.get("content", "")[:300]
-        tags = [t for t in r.get("tags", []) if t.startswith("type:")]
+        content = str(r.get("content", ""))[:300]
+        tags = _type_tags(r)
         tag_str = f" ({', '.join(tags)})" if tags else ""
         lines.append(f"- {content}{tag_str}")
 

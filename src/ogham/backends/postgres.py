@@ -5,9 +5,11 @@ from __future__ import annotations
 import contextvars
 import logging
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Literal, LiteralString, overload
 
+from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
@@ -95,9 +97,9 @@ class PostgresBackend:
     """DatabaseBackend implementation using psycopg + connection pool."""
 
     def __init__(self) -> None:
-        self._pool: ConnectionPool | None = None
+        self._pool: ConnectionPool[Connection[Any]] | None = None
 
-    def _get_pool(self) -> ConnectionPool:
+    def _get_pool(self) -> ConnectionPool[Connection[Any]]:
         if self._pool is None:
             if not settings.database_url:
                 raise RuntimeError("DATABASE_URL is required for PostgresBackend")
@@ -116,7 +118,7 @@ class PostgresBackend:
         Runs on first connection so upgraders don't need manual migrations.
         All statements use IF NOT EXISTS -- safe to run repeatedly.
         """
-        migrations = [
+        migrations: list[LiteralString] = [
             # v0.7.0: importance, surprise, compression
             "ALTER TABLE memories ADD COLUMN IF NOT EXISTS importance real DEFAULT 0.5",
             "ALTER TABLE memories ADD COLUMN IF NOT EXISTS surprise real DEFAULT 0.5",
@@ -127,7 +129,10 @@ class PostgresBackend:
             "ALTER TABLE memories ADD COLUMN IF NOT EXISTS recurrence_days integer[]",
         ]
         try:
-            with self._pool.connection() as conn:  # type: ignore[union-attr]
+            pool = self._pool
+            if pool is None:
+                return
+            with pool.connection() as conn:
                 for sql in migrations:
                     conn.execute(sql)
                 conn.commit()
@@ -139,7 +144,7 @@ class PostgresBackend:
     # ── Helper ────────────────────────────────────────────────────────
 
     @contextmanager
-    def _checkout(self):
+    def _checkout(self) -> Iterator[Connection[Any]]:
         """Check out a connection from the pool with tenant context applied.
 
         If `set_tenant_context()` has been called on the current task /
@@ -161,6 +166,42 @@ class PostgresBackend:
                 )
             yield conn
 
+    @overload
+    def _execute(
+        self,
+        query: str,
+        params: dict[str, Any] | None = None,
+        *,
+        fetch: Literal["all"] = "all",
+    ) -> list[dict[str, Any]]: ...
+
+    @overload
+    def _execute(
+        self,
+        query: str,
+        params: dict[str, Any] | None = None,
+        *,
+        fetch: Literal["one"],
+    ) -> dict[str, Any] | None: ...
+
+    @overload
+    def _execute(
+        self,
+        query: str,
+        params: dict[str, Any] | None = None,
+        *,
+        fetch: Literal["scalar"],
+    ) -> Any: ...
+
+    @overload
+    def _execute(
+        self,
+        query: str,
+        params: dict[str, Any] | None = None,
+        *,
+        fetch: Literal["none"],
+    ) -> None: ...
+
     def _execute(
         self,
         query: str,
@@ -175,7 +216,7 @@ class PostgresBackend:
         """
         with self._checkout() as conn:
             with conn.cursor() as cur:
-                cur.execute(query, params)
+                cur.execute(query.encode(), params)
                 if fetch == "none":
                     return None
                 if fetch == "scalar":
@@ -309,7 +350,7 @@ class PostgresBackend:
         results: list[dict[str, Any]] = []
         with self._checkout() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, params)
+                cur.execute(sql.encode(), params)
                 for result in cur.fetchall():
                     result.pop("embedding", None)
                     result.pop("fts", None)
@@ -690,6 +731,8 @@ class PostgresBackend:
             {"profile": profile, "ttl_days": ttl_days},
             fetch="one",
         )
+        if row is None:
+            raise RuntimeError("UPSERT returned no data for profile_settings")
         return row
 
     def cleanup_expired(self, profile: str) -> int:

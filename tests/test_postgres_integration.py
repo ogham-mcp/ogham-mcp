@@ -8,8 +8,11 @@ Skip with: uv run pytest -m 'not postgres_integration'
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import cast
 
 import pytest
+
+from ogham.backends.postgres import PostgresBackend
 
 TEST_PROFILE = "_test_postgres"
 OTHER_PROFILE = "_test_postgres_other"
@@ -22,8 +25,6 @@ def _can_connect() -> bool:
 
         if settings.database_backend != "postgres":
             return False
-        from ogham.backends.postgres import PostgresBackend
-
         backend = PostgresBackend()
         backend._execute("SELECT 1", fetch="scalar")
         return True
@@ -33,7 +34,6 @@ def _can_connect() -> bool:
 
 pytestmark = [
     pytest.mark.postgres_integration,
-    pytest.mark.skipif(not _can_connect(), reason="Postgres backend not configured or unreachable"),
 ]
 
 
@@ -44,13 +44,20 @@ def _fake_embedding(value: float = 0.1) -> list[float]:
     return [value] * settings.embedding_dim
 
 
+@pytest.fixture
+def postgres_available():
+    """Skip selected Postgres integration tests unless Postgres is reachable."""
+    if not _can_connect():
+        pytest.skip("Postgres backend not configured or unreachable")
+
+
 @pytest.fixture(autouse=True)
-def cleanup():
+def cleanup(postgres_available):
     """Delete all test data after each test."""
     yield
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(PostgresBackend, get_backend())
     backend._execute(
         "DELETE FROM memories WHERE profile = %(p)s",
         {"p": TEST_PROFILE},
@@ -80,7 +87,7 @@ def test_store_and_retrieve():
     """Store a memory and retrieve it via list_recent."""
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(PostgresBackend, get_backend())
     fake_emb = _fake_embedding()
     result = backend.store_memory(
         content="test memory for postgres",
@@ -100,7 +107,7 @@ def test_search_memories():
     """Store and search via match_memories RPC."""
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(PostgresBackend, get_backend())
     fake_emb = _fake_embedding()
     backend.store_memory(
         content="searchable postgres memory",
@@ -121,7 +128,7 @@ def test_hybrid_search():
     """Store and search via hybrid_search_memories RPC."""
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(PostgresBackend, get_backend())
     fake_emb = _fake_embedding()
     backend.store_memory(
         content="hybrid search postgres test",
@@ -141,7 +148,7 @@ def test_delete_memory():
     """Store and delete a memory."""
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(PostgresBackend, get_backend())
     fake_emb = _fake_embedding()
     mem = backend.store_memory(
         content="to be deleted",
@@ -158,7 +165,7 @@ def test_profile_stats():
     """get_memory_stats works via RPC."""
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(PostgresBackend, get_backend())
     fake_emb = _fake_embedding()
     backend.store_memory(
         content="stats test",
@@ -174,7 +181,7 @@ def test_profile_stats_health_counters():
     """get_memory_stats should return the additive health counters."""
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(PostgresBackend, get_backend())
     fake_emb = _fake_embedding()
 
     linked_a = backend.store_memory(
@@ -227,15 +234,15 @@ def test_profile_stats_health_counters():
 
     # The decay metric counts any active memory with importance > 0.05 that has
     # never been accessed or was last accessed more than 7 days ago. Seed the
-    # linked fixtures as recently accessed so only the explicit decay fixture is
-    # eligible.
+    # non-decay fixtures as recently accessed so only the explicit decay fixture
+    # is eligible.
     backend._execute(
         """UPDATE memories
            SET last_accessed_at = %(last_accessed_at)s
            WHERE id = ANY(%(ids)s::uuid[]) AND profile = %(profile)s""",
         {
             "last_accessed_at": datetime.now(timezone.utc),
-            "ids": [linked_a["id"], linked_b["id"]],
+            "ids": [linked_a["id"], linked_b["id"], cross_profile_only["id"]],
             "profile": TEST_PROFILE,
         },
         fetch="none",

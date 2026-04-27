@@ -10,6 +10,7 @@ leaves-existing-row-intact (Letta #3270 guard).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -61,7 +62,7 @@ def _seed_memories_with_tag(
 ) -> list[str]:
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(Any, get_backend())
     rows = backend._execute(
         """INSERT INTO memories (content, profile, source, tags)
            SELECT 'seed ' || i::text || ' content body for recompute tests',
@@ -161,6 +162,7 @@ def test_recompute_triggers_on_source_change(pg_fresh_db):
             profile="test-025", topic_key="quantum", provider="openai", model="gpt-4o"
         )
     v1 = get_summary_by_topic("test-025", "quantum")
+    assert v1 is not None
     assert v1["version"] == 1
 
     # Add one more source memory with the same tag.
@@ -178,6 +180,7 @@ def test_recompute_triggers_on_source_change(pg_fresh_db):
     assert out["source_count"] == 3
     assert syn.call_count == 1
     v2 = get_summary_by_topic("test-025", "quantum")
+    assert v2 is not None
     assert v2["version"] == 2
     assert v2["content"] == "v2"
 
@@ -203,6 +206,7 @@ def test_recompute_failure_leaves_existing_row_untouched(pg_fresh_db):
             profile="test-025", topic_key="quantum", provider="openai", model="gpt-4o"
         )
     before = get_summary_by_topic("test-025", "quantum")
+    assert before is not None
 
     # Add a new source so hash differs, forcing a recompile attempt.
     _seed_memories_with_tag(1, tag="quantum")
@@ -221,6 +225,7 @@ def test_recompute_failure_leaves_existing_row_untouched(pg_fresh_db):
             )
 
     after = get_summary_by_topic("test-025", "quantum")
+    assert after is not None
     assert after["id"] == before["id"]
     assert after["version"] == before["version"]
     assert after["content"] == before["content"]
@@ -262,7 +267,8 @@ def test_prompt_tokens_over_threshold_logs_warning(caplog, pg_fresh_db):
     # Create one big memory -- 45K chars -> ~11K tokens estimate.
     from ogham.database import get_backend
 
-    get_backend()._execute(
+    backend = cast(Any, get_backend())
+    backend._execute(
         """INSERT INTO memories (content, profile, source, tags)
            VALUES (%(c)s, 'test-025', 't', ARRAY['big'])""",
         {"c": "x" * 45000},

@@ -23,6 +23,8 @@ class DatabaseBackend(Protocol):
         source: str | None = None,
         tags: list[str] | None = None,
         expires_at: str | None = None,
+        importance: float = 0.5,
+        surprise: float = 0.5,
         recurrence_days: list[int] | None = None,
     ) -> dict[str, Any]: ...
 
@@ -209,7 +211,21 @@ class DatabaseBackend(Protocol):
 
     # ── Audit ────────────────────────────────────────────────────────
 
-    def emit_audit_event(self, **kwargs: Any) -> None: ...
+    def emit_audit_event(
+        self,
+        profile: str,
+        operation: str,
+        resource_id: str | None = None,
+        outcome: str = "success",
+        source: str | None = None,
+        embedding_model: str | None = None,
+        tokens_used: int | None = None,
+        cost_usd: float | None = None,
+        result_ids: list[str] | None = None,
+        result_count: int | None = None,
+        query_hash: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None: ...
 
     def query_audit_log(
         self,

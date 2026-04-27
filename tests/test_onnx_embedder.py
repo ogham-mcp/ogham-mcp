@@ -1,5 +1,6 @@
 """Tests for the ONNX BGE-M3 embedding provider."""
 
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -178,8 +179,9 @@ class TestEncode:
 
         self._run_encode(token_ids, weights)
 
-        mod._session.run.assert_called_once()
-        output_names = mod._session.run.call_args[0][0]
+        session = cast(Any, mod._session)
+        session.run.assert_called_once()
+        output_names = session.run.call_args[0][0]
         assert output_names == ["dense_embeddings", "sparse_weights"]
 
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any, Protocol, cast
 
 from ogham.database import get_backend
 
@@ -25,6 +26,16 @@ DEFAULT_DWELL_HOURS = 1.0
 DEFAULT_SURPRISE_GATE = 0.3
 DEFAULT_IMPORTANCE_GATE = 0.5
 DEFAULT_EDITING_WINDOW_MINUTES = 30
+
+
+class _SqlExecutor(Protocol):
+    def _execute(
+        self,
+        query: str,
+        params: dict[str, Any] | None = None,
+        *,
+        fetch: str = "all",
+    ) -> Any: ...
 
 
 @dataclass
@@ -45,7 +56,7 @@ def advance_stages(profile: str) -> StageReport:
     HNSW index on memories is not disturbed. The gates still come from
     memories, via a PK join -- see migration 026 for the rationale.
     """
-    backend = get_backend()
+    backend = cast(_SqlExecutor, get_backend())
     report = StageReport()
 
     cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=DEFAULT_DWELL_HOURS)
@@ -76,7 +87,7 @@ def advance_stages(profile: str) -> StageReport:
 
 def close_editing_windows(profile: str) -> int:
     """Close EDITING windows older than DEFAULT_EDITING_WINDOW_MINUTES."""
-    backend = get_backend()
+    backend = cast(_SqlExecutor, get_backend())
     cutoff = datetime.now(tz=timezone.utc) - timedelta(minutes=DEFAULT_EDITING_WINDOW_MINUTES)
     result = backend._execute(
         """UPDATE memory_lifecycle
@@ -103,7 +114,7 @@ def open_editing_window(memory_ids: list[str]) -> None:
     """
     if not memory_ids:
         return
-    backend = get_backend()
+    backend = cast(_SqlExecutor, get_backend())
     backend._execute(
         """UPDATE memory_lifecycle
               SET stage = 'editing',
@@ -118,7 +129,7 @@ def open_editing_window(memory_ids: list[str]) -> None:
 
 def lifecycle_pipeline_counts(profile: str) -> dict[str, int]:
     """Return {stage: count} for the dashboard pipeline card."""
-    backend = get_backend()
+    backend = cast(_SqlExecutor, get_backend())
     rows = backend._execute(
         """SELECT stage, count(*) AS n
              FROM memory_lifecycle

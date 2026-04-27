@@ -12,7 +12,7 @@ import os
 import re
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
 from ogham.data.loader import get_direction_words
 from ogham.database import auto_link_memory as db_auto_link
@@ -191,7 +191,7 @@ def store_memory_enriched(
     metadata["original_importance"] = importance
 
     # Generate embedding (skip if pre-computed, e.g. from gateway cache)
-    embedding_usage = None
+    embedding_usage: EmbeddingUsage | None = None
     if embedding is None:
         embedding_usage = {}
         embedding = generate_embedding(content, usage_out=embedding_usage)
@@ -390,7 +390,7 @@ def _read_time_extract(query: str, results: list[dict[str, Any]]) -> list[dict[s
             )
             facts = response.choices[0].message.content or ""
         else:
-            from google import genai
+            from google import genai  # pyright: ignore[reportAttributeAccessIssue]
 
             api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
             client = genai.Client(api_key=api_key)
@@ -984,7 +984,7 @@ def _exact_content_search(anchor: str, profile: str, limit: int) -> list[dict[st
     """
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(Any, get_backend())
 
     # Extract the most specific word from the anchor (longest, likely a name)
     words = [w for w in anchor.split() if len(w) > 2]
@@ -1025,7 +1025,7 @@ def _exact_content_search(anchor: str, profile: str, limit: int) -> list[dict[st
                 .limit(limit)
                 .execute()
             )
-            return result.data if result.data else []
+            return cast(list[dict[str, Any]], result.data) if result.data else []
     except Exception as e:
         logger.debug("Exact content search failed for '%s': %s", search_term, e)
 
@@ -1733,7 +1733,7 @@ def _profile_graph_density(profile: str) -> float:
     try:
         from ogham.database import get_backend
 
-        backend = get_backend()
+        backend = cast(Any, get_backend())
         rows = backend._execute(
             """SELECT
                  count(distinct entity_id)::float as entities,

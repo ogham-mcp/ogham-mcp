@@ -7,11 +7,13 @@ based on ``settings.database_backend`` (defaults to ``"supabase"``).
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
+
+from ogham.backends.protocol import DatabaseBackend
 
 logger = logging.getLogger(__name__)
 
-_backend = None
+_backend: DatabaseBackend | None = None
 
 
 def set_tenant_context(tenant_id: str | None) -> None:
@@ -45,7 +47,7 @@ def _reset_backend() -> None:
     _backend = None
 
 
-def get_backend():
+def get_backend() -> DatabaseBackend:
     """Return (and lazily create) the singleton backend instance."""
     global _backend
     if _backend is None:
@@ -75,7 +77,7 @@ def get_client():
     backend = get_backend()
     if not hasattr(backend, "_get_client"):
         raise RuntimeError(f"Backend {type(backend).__name__!r} does not expose a raw client")
-    return backend._get_client()
+    return cast(Any, backend)._get_client()
 
 
 # ── Thin delegates — one per public function ────────────────────────────
@@ -257,7 +259,8 @@ def count_decay_eligible(profile: str) -> int:
 
 
 def emit_audit_event(**kwargs: Any) -> None:
-    get_backend().emit_audit_event(**kwargs)
+    backend = cast(Any, get_backend())
+    backend.emit_audit_event(**kwargs)
 
 
 def query_audit_log(
@@ -274,8 +277,17 @@ def spread_entity_activation(
     min_activation: float = 0.05,
     max_results: int = 50,
 ) -> list[dict[str, Any]]:
-    return get_backend().spread_entity_activation(
-        entity_tags, profile, max_depth, decay, min_activation, max_results
+    backend = cast(Any, get_backend())
+    return cast(
+        list[dict[str, Any]],
+        backend.spread_entity_activation(
+            entity_tags,
+            profile,
+            max_depth,
+            decay,
+            min_activation,
+            max_results,
+        ),
     )
 
 
@@ -365,11 +377,15 @@ def walk_memory_graph(
     if depth > 5:
         raise ValueError("depth must be <= 5; use explore_knowledge for broader walks")
 
-    return get_backend().wiki_walk_graph(
-        start_id=start_id,
-        max_depth=depth,
-        direction=direction,
-        min_strength=min_strength,
-        relationship_types=relationship_types,
-        result_limit=limit,
+    backend = cast(Any, get_backend())
+    return cast(
+        list[dict[str, Any]],
+        backend.wiki_walk_graph(
+            start_id=start_id,
+            max_depth=depth,
+            direction=direction,
+            min_strength=min_strength,
+            relationship_types=relationship_types,
+            result_limit=limit,
+        ),
     )

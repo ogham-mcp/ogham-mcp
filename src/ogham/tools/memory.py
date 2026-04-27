@@ -4,7 +4,7 @@ import logging
 import re
 import time
 from datetime import datetime, timezone
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastmcp import Context
 from pydantic import BeforeValidator
@@ -984,7 +984,7 @@ def suggest_connections(
     """
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(Any, get_backend())
     try:
         rows = backend._execute(
             """
@@ -1075,11 +1075,7 @@ def compress_old_memories() -> dict[str, Any]:
 
         if target == 1 and current == 0:
             gist = compress_to_gist(content)
-            db_update(
-                mem["id"],
-                content=gist,
-                profile=active_profile,
-            )
+            db_update(mem["id"], {"content": gist}, profile=active_profile)
             # Store original and update compression level via direct update
             _update_compression(mem["id"], compression_level=1, original_content=content)
             stats["compressed_to_gist"] += 1
@@ -1089,11 +1085,7 @@ def compress_old_memories() -> dict[str, Any]:
                 # Save original before any compression
                 _update_compression(mem["id"], original_content=content)
             tag_repr = compress_to_tags(content, tags)
-            db_update(
-                mem["id"],
-                content=tag_repr,
-                profile=active_profile,
-            )
+            db_update(mem["id"], {"content": tag_repr}, profile=active_profile)
             _update_compression(mem["id"], compression_level=2)
             stats["compressed_to_tags"] += 1
 
@@ -1108,7 +1100,7 @@ def _update_compression(
     """Update compression columns directly via backend."""
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(Any, get_backend())
     updates = {}
     if compression_level is not None:
         updates["compression_level"] = compression_level

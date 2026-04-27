@@ -89,7 +89,7 @@ def test_post_tool_skips_ogham_tools():
                 {"tool_name": tool_name, "tool_input": {"query": "test"}},
                 profile="work",
             )
-        mock_store.assert_not_called(), f"{tool_name} should be skipped"
+        assert mock_store.call_count == 0, f"{tool_name} should be skipped"
 
 
 def test_post_tool_skips_always_skip_tools():
@@ -117,7 +117,7 @@ def test_post_tool_skips_always_skip_tools():
                 },
                 profile="work",
             )
-        mock_store.assert_not_called(), f"{tool_name} should be always-skipped"
+        assert mock_store.call_count == 0, f"{tool_name} should be always-skipped"
 
 
 def test_post_tool_skips_edit_write_tools():
@@ -135,7 +135,7 @@ def test_post_tool_skips_edit_write_tools():
                 },
                 profile="work",
             )
-        mock_store.assert_not_called(), f"{tool_name} should be skipped"
+        assert mock_store.call_count == 0, f"{tool_name} should be skipped"
 
 
 def test_post_tool_skips_noise_bash():
@@ -153,7 +153,7 @@ def test_post_tool_skips_noise_bash():
                 },
                 profile="work",
             )
-        mock_store.assert_not_called(), f"'{cmd}' should be skipped as noise"
+        assert mock_store.call_count == 0, f"'{cmd}' should be skipped as noise"
 
 
 def test_post_tool_captures_signal_bash():

@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.9"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.9", "pyright>=1.1.409"]
 postgres = [
     "psycopg-pool>=3.1",
     "psycopg[binary]>=3.1",
@@ -69,4 +69,5 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "matplotlib>=3.10.8",
+    "pyright>=1.1.409",
 ]

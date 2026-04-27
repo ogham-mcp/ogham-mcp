@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -27,13 +28,27 @@ def _destructive_db_safe() -> tuple[bool, str]:
 
 
 @pytest.fixture(autouse=True)
-def _reset_db_backend():
-    """Reset the database backend singleton between tests."""
+def _isolated_unit_environment(monkeypatch, request):
+    """Keep unit tests independent from a developer's local Ogham env."""
+    is_external_integration = request.node.get_closest_marker(
+        "integration"
+    ) or request.node.get_closest_marker("postgres_integration")
+
+    if not is_external_integration:
+        monkeypatch.setenv("DATABASE_BACKEND", "supabase")
+        monkeypatch.setenv("SUPABASE_URL", "https://fake.supabase.co")
+        monkeypatch.setenv("SUPABASE_KEY", "fake-key")
+        monkeypatch.setenv("EMBEDDING_PROVIDER", "ollama")
+        monkeypatch.setenv("DEFAULT_PROFILE", "default")
+
+    from ogham.config import settings
     from ogham.database import _reset_backend
 
+    settings._reset()
     _reset_backend()
     yield
     _reset_backend()
+    settings._reset()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -79,7 +94,7 @@ def _apply_lifecycle_migrations():
             "SELECT column_name FROM information_schema.columns WHERE table_name = 'memories'",
             fetch="all",
         )
-        col_names = {r[0] if isinstance(r, tuple) else r["column_name"] for r in cols}
+        col_names = {str(r["column_name"]) for r in cols}
         if "stage" not in col_names:
             mig_025 = (
                 Path(__file__).parent.parent / "src/ogham/sql/migrations/025_memory_lifecycle.sql"
@@ -138,7 +153,7 @@ def pg_test_profile():
     from ogham.database import get_backend
 
     profile = "test-lifecycle-parity"
-    backend = get_backend()
+    backend = cast(Any, get_backend())
 
     def _table_exists(name):
         rows = backend._execute(
@@ -155,7 +170,7 @@ def pg_test_profile():
             {"t": table},
             fetch="all",
         )
-        return {r[0] if isinstance(r, tuple) else r["column_name"] for r in rows}
+        return {str(r["column_name"]) for r in rows}
 
     # If memory_lifecycle isn't there yet, apply 025 (if needed) then 026.
     if not _table_exists("memory_lifecycle"):
@@ -201,7 +216,7 @@ def pg_fresh_db():
 
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(Any, get_backend())
     profile = "test-025"
 
     class _Harness:
@@ -232,14 +247,14 @@ def pg_fresh_db():
                 {"t": table},
                 fetch="all",
             )
-            return [r[0] if isinstance(r, tuple) else r["column_name"] for r in rows]
+            return [str(r["column_name"]) for r in rows]
 
         def tables(self):
             rows = self.be._execute(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
                 fetch="all",
             )
-            return [r[0] if isinstance(r, tuple) else r["table_name"] for r in rows]
+            return [str(r["table_name"]) for r in rows]
 
     def _cleanup():
         # Row-level cleanup for test-025 profile (shared by 025 + 026 tests).

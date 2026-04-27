@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -61,7 +62,7 @@ def _seed_summary_with_age(
     """
     from ogham.database import get_backend
 
-    backend = get_backend()
+    backend = cast(Any, get_backend())
     row = backend._execute(
         """INSERT INTO topic_summaries
              (topic_key, profile_id, content, source_count, source_hash, model_used)
@@ -105,7 +106,8 @@ def test_sweep_flips_old_fresh_to_stale(pg_fresh_db):
 
     from ogham.database import get_backend
 
-    row = get_backend()._execute(
+    backend = cast(Any, get_backend())
+    row = backend._execute(
         "SELECT status, stale_reason FROM topic_summaries WHERE id = %(id)s::uuid",
         {"id": sid},
         fetch="one",
@@ -125,7 +127,8 @@ def test_sweep_leaves_young_rows_alone(pg_fresh_db):
 
     from ogham.database import get_backend
 
-    row = get_backend()._execute(
+    backend = cast(Any, get_backend())
+    row = backend._execute(
         "SELECT status FROM topic_summaries WHERE id = %(id)s::uuid",
         {"id": sid},
         fetch="one",
@@ -144,12 +147,13 @@ def test_sweep_is_profile_scoped(pg_fresh_db):
 
     assert sweep_stale_summaries("test-025", older_than_days=30) == 1
 
-    status_a = get_backend()._execute(
+    backend = cast(Any, get_backend())
+    status_a = backend._execute(
         "SELECT status FROM topic_summaries WHERE id = %(id)s::uuid",
         {"id": sa},
         fetch="one",
     )
-    status_b = get_backend()._execute(
+    status_b = backend._execute(
         "SELECT status FROM topic_summaries WHERE id = %(id)s::uuid",
         {"id": sb},
         fetch="one",
@@ -158,7 +162,7 @@ def test_sweep_is_profile_scoped(pg_fresh_db):
     assert status_b["status"] == "fresh", "other profile must be untouched"
 
     # Cleanup -- test-025b leaks outside pg_fresh_db scope.
-    get_backend()._execute(
+    backend._execute(
         "DELETE FROM topic_summaries WHERE id = %(id)s::uuid",
         {"id": sb},
         fetch="none",
@@ -202,7 +206,8 @@ def test_session_start_hook_schedules_sweep(pg_fresh_db):
 
     from ogham.database import get_backend
 
-    row = get_backend()._execute(
+    backend = cast(Any, get_backend())
+    row = backend._execute(
         "SELECT status FROM topic_summaries "
         "WHERE topic_key = 'old-topic' AND profile_id = 'test-025'",
         {},

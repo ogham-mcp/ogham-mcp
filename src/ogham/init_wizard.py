@@ -15,6 +15,7 @@ import platform
 import shutil
 from importlib.metadata import version as pkg_version
 from pathlib import Path
+from typing import Any, cast
 
 from rich.console import Console
 from rich.panel import Panel
@@ -176,8 +177,8 @@ def _prompt_database() -> dict:
             "   Supabase secret key (formerly service_role)",
             default=default_key or None,
         )
-        env_vars["SUPABASE_URL"] = url
-        env_vars["SUPABASE_KEY"] = key
+        env_vars["SUPABASE_URL"] = url or ""
+        env_vars["SUPABASE_KEY"] = key or ""
     else:
         console.print("\n   Great. Paste your PostgreSQL connection string.")
         console.print("   [cyan]Neon: Dashboard -> Connection Details -> Connection string[/cyan]")
@@ -190,7 +191,7 @@ def _prompt_database() -> dict:
         if default_url:
             console.print("   [cyan]Found DATABASE_URL in environment.[/cyan]")
         url = Prompt.ask("   Database URL", default=default_url or None)
-        env_vars["DATABASE_URL"] = url
+        env_vars["DATABASE_URL"] = url or ""
 
     return env_vars
 
@@ -242,25 +243,25 @@ def _prompt_embeddings() -> dict:
         if default_key:
             console.print("   [cyan]Found OPENAI_API_KEY in environment.[/cyan]")
         key = Prompt.ask("   OpenAI API key", default=default_key or None)
-        env_vars["OPENAI_API_KEY"] = key
+        env_vars["OPENAI_API_KEY"] = key or ""
     elif provider == "gemini":
         default_key = os.environ.get("GEMINI_API_KEY", "")
         if default_key:
             console.print("   [cyan]Found GEMINI_API_KEY in environment.[/cyan]")
         key = Prompt.ask("   Gemini API key", default=default_key or None)
-        env_vars["GEMINI_API_KEY"] = key
+        env_vars["GEMINI_API_KEY"] = key or ""
     elif provider == "voyage":
         default_key = os.environ.get("VOYAGE_API_KEY", "")
         if default_key:
             console.print("   [cyan]Found VOYAGE_API_KEY in environment.[/cyan]")
         key = Prompt.ask("   Voyage AI API key", default=default_key or None)
-        env_vars["VOYAGE_API_KEY"] = key
+        env_vars["VOYAGE_API_KEY"] = key or ""
     elif provider == "mistral":
         default_key = os.environ.get("MISTRAL_API_KEY", "")
         if default_key:
             console.print("   [cyan]Found MISTRAL_API_KEY in environment.[/cyan]")
         key = Prompt.ask("   Mistral API key", default=default_key or None)
-        env_vars["MISTRAL_API_KEY"] = key
+        env_vars["MISTRAL_API_KEY"] = key or ""
     elif provider == "ollama":
         default_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
         url = Prompt.ask("   Ollama URL", default=default_url)
@@ -449,7 +450,7 @@ def _run_schema(env_vars: dict) -> bool:
             with console.status("   Running schema migration..."):
                 conn = psycopg.connect(db_url)
                 conn.autocommit = True
-                conn.execute(schema_sql)
+                cast(Any, conn).execute(schema_sql)
                 conn.close()
             console.print("   [green]Schema migration complete.[/green]")
             return True
@@ -601,6 +602,7 @@ def _configure_clients(
 def _test_connection(env_vars: dict) -> bool:
     """Validate database and embedding connectivity."""
     console.print("\n[bold]6. Let's check everything works[/bold]")
+    settings_obj: Any | None = None
 
     # Temporarily set env vars for the health check
     original_env = {}
@@ -612,7 +614,8 @@ def _test_connection(env_vars: dict) -> bool:
         # Force fresh settings instance from the temp env vars
         from ogham.config import settings
 
-        settings._force()
+        settings_obj = settings
+        settings_obj._force()
 
         # Check database
         with console.status("   Checking database..."):
@@ -651,7 +654,8 @@ def _test_connection(env_vars: dict) -> bool:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = original
-        settings._reset()
+        if settings_obj is not None:
+            settings_obj._reset()
 
 
 # ---------------------------------------------------------------------------

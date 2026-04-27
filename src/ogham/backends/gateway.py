@@ -275,7 +275,7 @@ class GatewayBackend:
     def count_decay_eligible(self, profile: str) -> int:
         return 0
 
-    def emit_audit_event(self, **kwargs: Any) -> None:
+    def emit_audit_event(self, *args: Any, **kwargs: Any) -> None:
         pass  # Gateway handles its own audit server-side
 
     def query_audit_log(
