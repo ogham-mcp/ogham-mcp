@@ -1,8 +1,17 @@
-"""Tests for Prefab dashboard MCP tools and standalone server."""
+"""Tests for Prefab dashboard MCP tools and standalone server.
+
+Skipped when the optional `prefab_ui` extra isn't installed -- those tests
+exercise dashboard rendering that requires the FastMCP Prefab UI components.
+The CLI still runs without it; the dashboard is opt-in.
+"""
 
 from unittest.mock import patch
 
 import pytest
+
+# pytest.importorskip raises Skip if the module isn't importable. Module-level
+# skip means the whole file is skipped; we don't pretend the tests pass.
+pytest.importorskip("prefab_ui", reason="dashboard tests require the [dashboard] extra")
 
 MOCK_STATS = {
     "total": 100,

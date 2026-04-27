@@ -1,21 +1,24 @@
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
-import sys
 
 from typer.testing import CliRunner
 
 from ogham import cli
-
 
 runner = CliRunner()
 
 
 def test_store_rich_output_handles_uuid_conflicts_and_datetime_expiry(monkeypatch) -> None:
     monkeypatch.setattr(cli, "console", cli.Console(record=True))
-    monkeypatch.setitem(sys.modules, "ogham.config", SimpleNamespace(settings=SimpleNamespace(default_profile="default")))
+    monkeypatch.setitem(
+        sys.modules,
+        "ogham.config",
+        SimpleNamespace(settings=SimpleNamespace(default_profile="default")),
+    )
     monkeypatch.setitem(
         sys.modules,
         "ogham.service",
@@ -46,7 +49,11 @@ def test_store_rich_output_handles_uuid_conflicts_and_datetime_expiry(monkeypatc
 
 def test_list_rich_output_handles_datetime_created_at(monkeypatch) -> None:
     monkeypatch.setattr(cli, "console", cli.Console(record=True))
-    monkeypatch.setitem(sys.modules, "ogham.config", SimpleNamespace(settings=SimpleNamespace(default_profile="default")))
+    monkeypatch.setitem(
+        sys.modules,
+        "ogham.config",
+        SimpleNamespace(settings=SimpleNamespace(default_profile="default")),
+    )
     monkeypatch.setitem(
         sys.modules,
         "ogham.database",
@@ -71,7 +78,11 @@ def test_list_rich_output_handles_datetime_created_at(monkeypatch) -> None:
 
 
 def test_store_json_output_remains_structured(monkeypatch) -> None:
-    monkeypatch.setitem(sys.modules, "ogham.config", SimpleNamespace(settings=SimpleNamespace(default_profile="default")))
+    monkeypatch.setitem(
+        sys.modules,
+        "ogham.config",
+        SimpleNamespace(settings=SimpleNamespace(default_profile="default")),
+    )
     monkeypatch.setitem(
         sys.modules,
         "ogham.service",

@@ -157,14 +157,21 @@ def test_post_tool_skips_noise_bash():
 
 
 def test_post_tool_captures_signal_bash():
-    """Bash commands with signal keywords should be captured."""
+    """Bash commands matching the verb-based YAML signal lists should be captured.
+
+    The YAML config was tightened on 2026-04-22 to drop noun-heavy
+    categories (docker/pytest/railway/etc.) because they fired on every
+    daily infra command. Signal capture is now verbs-only: errors,
+    decisions (past-tense), architecture verbs, git_signal subcommands,
+    and explicit annotations. Test commands updated to match.
+    """
     from ogham.hooks import post_tool
 
     for cmd in [
-        "git commit -m 'fix bug'",
-        "docker build -t myapp .",
-        "pytest tests/ -v",
-        "railway deploy",
+        "git commit -m 'fix bug'",  # git_signal=commit
+        "git push origin main",  # git_signal=push
+        "git merge --no-ff feature/wiki",  # git_signal=merge
+        "git revert HEAD",  # git_signal=revert
     ]:
         with patch("ogham.service.store_memory_enriched") as mock_store:
             post_tool(
@@ -176,7 +183,7 @@ def test_post_tool_captures_signal_bash():
                 },
                 profile="work",
             )
-        mock_store.assert_called_once(), f"'{cmd}' should be captured as signal"
+        assert mock_store.call_count == 1, f"{cmd!r} should be captured as signal"
 
 
 def test_post_tool_tags_include_tool_name():

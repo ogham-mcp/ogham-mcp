@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.12.1] - 2026-04-27 -- hybrid_search shape + Supabase fix
+
+### Fixed
+
+- **`delete_memory`, `update_memory`, `reinforce_memory`, `contradict_memory`
+  crashed on Supabase.** All four called a Postgres-only internal method
+  to look up a memory's tags before mutating it, so Supabase users hit
+  `AttributeError` on every delete / update / confidence operation in
+  v0.12.0. Now uses the backend facade and works on every backend.
+
+### Changed
+
+- **`hybrid_search` returns `{"results": [...], "wiki_preamble": [...]}`**
+  instead of a single mixed list. MCP clients render `wiki_preamble`
+  separately as compiled topic context; benchmark scorers and downstream
+  pipelines consume only `results` and see deterministic retrieval hits.
+  `wiki_preamble` is always present (empty list when wiki injection is
+  off, no summary clears the threshold, or `extract_facts=True`).
+
+  **Breaking only for v0.12.0 callers who explicitly enabled
+  `wiki_injection_enabled`** and consumed the mixed list directly.
+  Everyone else was already getting a plain memory list which is now
+  reachable via `result["results"]`. Update consumers accordingly.
+
 ## [0.12.0] - 2026-04-27 -- Wiki Tier 1 + Obsidian export
 
 Compile your memory into synthesized wiki pages, then export them as

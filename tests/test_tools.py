@@ -12,13 +12,26 @@ def mock_settings(monkeypatch):
     monkeypatch.setenv("SUPABASE_KEY", "fake-key")
     monkeypatch.setenv("EMBEDDING_PROVIDER", "ollama")
     monkeypatch.setenv("DEFAULT_PROFILE", "default")
+    # Tests assume the resolution order falls through to settings.default_profile
+    # = "default". The OGHAM_PROFILE env var would short-circuit that.
+    monkeypatch.delenv("OGHAM_PROFILE", raising=False)
 
 
 @pytest.fixture(autouse=True)
-def reset_profile():
-    """Reset profile to default between tests."""
+def reset_profile(monkeypatch):
+    """Reset profile to default between tests.
+
+    get_active_profile() reads four sources in order:
+      OGHAM_PROFILE env > ~/.ogham/active_profile sentinel > in-memory > settings
+    Tests want the in-memory branch to win, so we both reset the in-memory
+    flag AND stub the sentinel file reader (so Kevin's actual ~/.ogham
+    state, which says "work", doesn't bleed into tests). settings is also
+    pinned to "default" because it can drift with config.env.
+    """
     import ogham.tools.memory as mem
 
+    monkeypatch.setattr(mem, "_read_active_profile_sentinel", lambda: None)
+    monkeypatch.setattr("ogham.config.settings.default_profile", "default")
     mem._active_profile = "default"
     yield
     mem._active_profile = "default"
@@ -36,6 +49,14 @@ def mock_embedding():
 
 @pytest.fixture
 def mock_db():
+    # delete/update/reinforce/contradict pre-fetch tags via get_memory_by_id
+    # (the backend facade) before mutating. The pre-fetch needs a fixture
+    # answer; otherwise the tools crash on get_memory_by_id returning None.
+    # Patch targets follow the actual import locations:
+    #   - get_memory_by_id, emit_audit_event: imported inline from ogham.database,
+    #     so the module-level name to patch is `ogham.database.<name>`.
+    #   - enqueue_for_tags: imported inline from ogham.recompute_executor.
+    #   - db_update_confidence: imported at the top of tools/memory.py.
     with (
         patch("ogham.service.db_store") as store,
         patch("ogham.service.hybrid_search_memories") as search,
@@ -46,6 +67,10 @@ def mock_db():
         patch("ogham.tools.memory.list_recent_memories") as list_recent,
         patch("ogham.tools.memory.db_delete") as delete,
         patch("ogham.tools.memory.db_update") as update,
+        patch("ogham.database.get_memory_by_id") as get_by_id,
+        patch("ogham.database.emit_audit_event"),
+        patch("ogham.recompute_executor.enqueue_for_tags") as enqueue,
+        patch("ogham.tools.memory.db_update_confidence") as update_conf,
     ):
         store.return_value = {
             "id": FAKE_ID,
@@ -82,6 +107,8 @@ def mock_db():
         }
         get_ttl.return_value = None
         auto_link.return_value = 0
+        get_by_id.return_value = {"id": FAKE_ID, "tags": [], "profile": "default"}
+        update_conf.return_value = 0.85
         yield {
             "store": store,
             "search": search,
@@ -91,6 +118,9 @@ def mock_db():
             "get_ttl": get_ttl,
             "record_access": rec_access,
             "auto_link": auto_link,
+            "get_by_id": get_by_id,
+            "enqueue": enqueue,
+            "update_conf": update_conf,
         }
 
 
@@ -147,9 +177,15 @@ def test_store_memory_uses_active_profile(mock_embedding, mock_db):
 
 
 def test_hybrid_search(mock_embedding, mock_db):
+    """v0.12.1 split shape: hybrid_search returns dict with results +
+    wiki_preamble keys. wiki_preamble defaults to [] when injection is
+    off (which it is here, since the fixture doesn't enable it)."""
     from ogham.tools.memory import hybrid_search
 
-    results = hybrid_search(query="test query")
+    out = hybrid_search(query="test query")
+    assert isinstance(out, dict)
+    results = out["results"]
+    assert out["wiki_preamble"] == []
     assert len(results) == 1
     assert results[0]["similarity"] == 0.95
     assert results[0]["keyword_rank"] == 0.3

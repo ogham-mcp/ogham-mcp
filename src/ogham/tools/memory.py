@@ -501,12 +501,19 @@ def hybrid_search(
     graph_depth: int = 0,
     profiles: ListStr = None,
     extract_facts: bool = False,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Search memories in the active profile by meaning and keywords (hybrid search).
 
     Combines semantic similarity (embeddings) with keyword matching (full-text search)
     using Reciprocal Rank Fusion. Finds both conceptually similar memories and exact
     keyword matches.
+
+    Returns ``{"results": [...memory rows...], "wiki_preamble": [...wiki summaries...]}``.
+    The split (new in v0.12.1) keeps benchmark scorers and downstream pipelines clean:
+    they see a deterministic list of retrieval hits in ``results``, and a separate
+    optional list of compiled topic summaries in ``wiki_preamble``. ``wiki_preamble``
+    is always present; it's an empty list when wiki injection is off, the embedding
+    can't be generated, or no summary clears the similarity threshold.
 
     Args:
         query: Natural language search query. Also used for keyword matching.
@@ -519,7 +526,8 @@ def hybrid_search(
         extract_facts: When True, runs an LLM over retrieved memories to extract
                   query-relevant facts. Returns focused facts instead of raw
                   memories. Requires OGHAM_EXTRACT_PROVIDER and API key.
-                  Default: False (returns verbatim memories).
+                  Default: False (returns verbatim memories). Bypasses wiki
+                  injection entirely so the extractor sees raw memories only.
     """
     _require_limit(limit)
     from ogham.embeddings import generate_embedding
@@ -537,19 +545,12 @@ def hybrid_search(
         extract_facts=extract_facts,
     )
 
-    # Wiki Tier 1 preamble (v0.12.1). Prepended at the MCP-tool layer so
-    # MCP clients (Claude / Cursor / OpenCode) receive a single list with
-    # synthesized topic context first, raw memories after. Service-layer
-    # callers (benchmarks, gateway, internal Python) get clean retrieval
-    # via search_memories_enriched directly. extract_facts mode bypasses
-    # injection -- the LLM extractor sees raw memories only.
+    wiki_preamble: list[dict[str, Any]] = []
     if not extract_facts and getattr(settings, "wiki_injection_enabled", False):
         embedding = generate_embedding(query)
-        preamble = _wiki_injection_results(profile, embedding)
-        if preamble:
-            return preamble + results
+        wiki_preamble = _wiki_injection_results(profile, embedding)
 
-    return results
+    return {"results": results, "wiki_preamble": wiki_preamble}
 
 
 @mcp.tool
@@ -581,18 +582,16 @@ def delete_memory(memory_id: str) -> dict[str, Any]:
     Args:
         memory_id: The UUID of the memory to delete.
     """
-    from ogham.database import emit_audit_event, get_backend
+    from ogham.database import emit_audit_event, get_memory_by_id
     from ogham.recompute_executor import enqueue_for_tags
 
     active_profile = get_active_profile()
     # Fetch tags BEFORE the delete -- after the row is gone we can't
     # recover which summaries cited it. Summaries that referenced this
     # memory need recompute so the next compile drops the source.
-    pre_row = get_backend()._execute(
-        "SELECT tags FROM memories WHERE id = %(id)s::uuid AND profile = %(p)s",
-        {"id": memory_id, "p": active_profile},
-        fetch="one",
-    )
+    # Use the backend facade (get_memory_by_id) rather than raw _execute
+    # so this works on SupabaseBackend (PostgREST) too, not just psycopg.
+    pre_row = get_memory_by_id(memory_id, active_profile)
     pre_tags = list(pre_row["tags"]) if pre_row and pre_row.get("tags") else []
 
     success = db_delete(memory_id, profile=active_profile)
@@ -635,18 +634,16 @@ def update_memory(
     if not updates:
         return {"status": "no_changes", "id": memory_id}
 
-    from ogham.database import emit_audit_event, get_backend
+    from ogham.database import emit_audit_event, get_memory_by_id
     from ogham.recompute_executor import enqueue_for_tags
 
     active_profile = get_active_profile()
     # Fetch old tags FIRST so a tag-replace update (e.g. [a,b] -> [b,c])
     # enqueues for the dropped tag `a` too. The `a` summary needs to
-    # recompile to drop this memory as a source.
-    pre_row = get_backend()._execute(
-        "SELECT tags FROM memories WHERE id = %(id)s::uuid AND profile = %(p)s",
-        {"id": memory_id, "p": active_profile},
-        fetch="one",
-    )
+    # recompile to drop this memory as a source. Use the backend facade
+    # so this works on both PostgresBackend (psycopg) and SupabaseBackend
+    # (PostgREST) -- raw _execute only exists on PostgresBackend.
+    pre_row = get_memory_by_id(memory_id, active_profile)
     pre_tags = list(pre_row["tags"]) if pre_row and pre_row.get("tags") else []
 
     result = db_update(memory_id, updates, profile=active_profile)
@@ -680,19 +677,16 @@ def reinforce_memory(
     """
     if not 0.0 < strength <= 1.0:
         raise ValueError(f"strength must be between 0.0 (exclusive) and 1.0, got {strength}")
-    from ogham.database import get_backend
+    from ogham.database import get_memory_by_id
     from ogham.recompute_executor import enqueue_for_tags
 
     active_profile = get_active_profile()
     new_confidence = db_update_confidence(memory_id, strength, active_profile)
     # Confidence shifts feed importance ranking inside future summaries.
     # Enqueue; the hash-match short-circuit will skip the LLM call when
-    # the source set is unchanged (common case).
-    row = get_backend()._execute(
-        "SELECT tags FROM memories WHERE id = %(id)s::uuid AND profile = %(p)s",
-        {"id": memory_id, "p": active_profile},
-        fetch="one",
-    )
+    # the source set is unchanged (common case). Backend facade so this
+    # works on Supabase (PostgREST) as well as psycopg.
+    row = get_memory_by_id(memory_id, active_profile)
     tags = list(row["tags"]) if row and row.get("tags") else []
     enqueue_for_tags(active_profile, tags)
     return {
@@ -721,18 +715,15 @@ def contradict_memory(
     """
     if not 0.0 <= strength < 1.0:
         raise ValueError(f"strength must be between 0.0 and 1.0 (exclusive), got {strength}")
-    from ogham.database import get_backend
+    from ogham.database import get_memory_by_id
     from ogham.recompute_executor import enqueue_for_tags
 
     active_profile = get_active_profile()
     new_confidence = db_update_confidence(memory_id, strength, active_profile)
     # Same rationale as reinforce_memory: contradiction flips confidence,
-    # cited summaries may rank differently. Cheap via hash-match.
-    row = get_backend()._execute(
-        "SELECT tags FROM memories WHERE id = %(id)s::uuid AND profile = %(p)s",
-        {"id": memory_id, "p": active_profile},
-        fetch="one",
-    )
+    # cited summaries may rank differently. Cheap via hash-match. Backend
+    # facade so this works on Supabase (PostgREST) as well as psycopg.
+    row = get_memory_by_id(memory_id, active_profile)
     tags = list(row["tags"]) if row and row.get("tags") else []
     enqueue_for_tags(active_profile, tags)
     return {

@@ -12,7 +12,12 @@ from ogham.hooks import session_start
 
 
 def test_session_start_triggers_advance_stages():
-    """Session start schedules advance_stages(profile) on the lifecycle executor."""
+    """Session start schedules advance_stages(profile) on the lifecycle executor.
+
+    Also schedules the wiki stale-summary sweep (added in v0.12). Both run
+    fire-and-forget on the same executor; this test only locks down the
+    advance_stages submission, by callable identity rather than position.
+    """
     with (
         patch("ogham.embeddings.generate_embedding", return_value=[0.0] * 512),
         patch("ogham.database.hybrid_search_memories", return_value=[]),
@@ -21,11 +26,13 @@ def test_session_start_triggers_advance_stages():
     ):
         session_start(cwd="/tmp/somewhere", profile="work", limit=4)
 
-    # Exactly one submit, of advance_stages with profile='work'
-    assert submit_mock.call_count == 1
-    submitted_fn, submitted_profile = submit_mock.call_args[0]
-    assert submitted_fn is advance_mock  # same callable was passed
-    assert submitted_profile == "work"
+    # advance_stages must have been submitted with profile='work'.
+    # The wiki stale-summary sweep also lands on lifecycle_submit; we don't
+    # care here whether it's first or second, only that advance is among the
+    # submissions.
+    advance_calls = [call for call in submit_mock.call_args_list if call.args[0] is advance_mock]
+    assert len(advance_calls) == 1
+    assert advance_calls[0].args[1] == "work"
 
 
 def test_session_start_survives_advance_failure():

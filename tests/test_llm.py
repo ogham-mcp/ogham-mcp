@@ -205,8 +205,15 @@ def test_synthesize_unknown_provider_raises():
 
 
 def test_synthesize_missing_api_key_raises(monkeypatch):
-    """Provider that requires a key but the env var is unset."""
+    """Provider that requires a key but neither the env var nor settings has one.
+
+    v0.12.0 added a settings fallback to llm.py so the MCP server reads
+    keys from ~/.ogham/config.env even when the launching client doesn't
+    propagate the user's shell env. Both lookup paths have to be empty
+    for the missing-key error to fire -- so the test patches both.
+    """
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("ogham.config.settings.openai_api_key", None)
 
     from ogham.llm import synthesize
 

@@ -101,9 +101,7 @@ def test_generate_embeddings_batch_usage_out_counts_uncached_only(isolated_cache
 def test_calculate_embedding_cost_uses_repo_model_rate():
     from ogham.pricing import calculate_embedding_cost
 
-    cost = calculate_embedding_cost(
-        {"model": "openai:text-embedding-3-small", "input_tokens": 250}
-    )
+    cost = calculate_embedding_cost({"model": "openai:text-embedding-3-small", "input_tokens": 250})
 
     assert cost == pytest.approx(0.000005)
 

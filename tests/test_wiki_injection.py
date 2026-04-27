@@ -240,8 +240,10 @@ def test_service_search_memories_enriched_does_not_inject():
     assert [r["id"] for r in out] == ["mem-1", "mem-2"]
 
 
-def test_hybrid_search_tool_prepends_preamble_when_flag_on():
-    """The MCP tool layer is where preamble gets attached."""
+def test_hybrid_search_tool_returns_split_response_with_preamble_when_flag_on():
+    """v0.12.1 split shape: results + wiki_preamble are sibling fields,
+    not a single mixed list. MCP clients render preamble in context;
+    benchmark scorers consume only `results`."""
     from ogham.tools import memory as memory_tools
 
     fake_results = [
@@ -259,13 +261,16 @@ def test_hybrid_search_tool_prepends_preamble_when_flag_on():
     ):
         out = memory_tools.hybrid_search(query="quantum", limit=10)
 
-    assert len(out) == 2
-    assert out[0]["result_type"] == "wiki_summary"  # preamble first
-    assert out[1]["result_type"] == "memory"
+    assert isinstance(out, dict)
+    assert set(out.keys()) == {"results", "wiki_preamble"}
+    assert out["results"] == fake_results
+    assert out["wiki_preamble"] == fake_preamble
 
 
-def test_hybrid_search_tool_does_not_inject_when_flag_off():
-    """Default behaviour: tool-layer mirrors service-layer (clean retrieval)."""
+def test_hybrid_search_tool_returns_empty_preamble_when_flag_off():
+    """wiki_preamble is always present (split-shape invariant). When the
+    feature flag is off, it's just empty -- still a sibling field, not
+    absent."""
     from ogham.tools import memory as memory_tools
 
     fake_results = [{"id": "mem-1", "content": "real", "result_type": "memory"}]
@@ -278,12 +283,14 @@ def test_hybrid_search_tool_does_not_inject_when_flag_off():
         out = memory_tools.hybrid_search(query="quantum", limit=10)
 
     mock_inject.assert_not_called()
-    assert out == fake_results
+    assert out == {"results": fake_results, "wiki_preamble": []}
 
 
-def test_hybrid_search_tool_skips_injection_under_extract_facts():
+def test_hybrid_search_tool_extract_facts_skips_injection_and_keeps_split():
     """extract_facts mode pipes raw memories to an LLM extractor; preamble
-    would confuse the extractor. The tool layer must skip injection."""
+    would confuse the extractor. wiki_preamble stays empty list (the split
+    shape is invariant -- callers should never have to defensively check
+    for missing keys)."""
     from ogham.tools import memory as memory_tools
 
     fake_results = [{"id": "mem-1", "content": "fact", "result_type": "memory"}]
@@ -296,7 +303,7 @@ def test_hybrid_search_tool_skips_injection_under_extract_facts():
         out = memory_tools.hybrid_search(query="quantum", limit=10, extract_facts=True)
 
     mock_inject.assert_not_called()
-    assert out == fake_results
+    assert out == {"results": fake_results, "wiki_preamble": []}
 
 
 if __name__ == "__main__":  # pragma: no cover
