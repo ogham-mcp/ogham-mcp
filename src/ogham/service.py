@@ -45,8 +45,73 @@ from ogham.graph import strengthen_edges
 from ogham.lifecycle import open_editing_window
 from ogham.lifecycle_executor import submit as _lifecycle_submit
 from ogham.pricing import calculate_embedding_cost
+from ogham.topic_summaries import search_summaries
 
 logger = logging.getLogger(__name__)
+
+
+def _wiki_injection_results(profile: str, query_embedding: list[float]) -> list[dict[str, Any]]:
+    """Top-K topic summaries to prepend to search results.
+
+    Returns an empty list when the feature flag is off, the embedding
+    is missing, or no fresh summary clears the similarity threshold.
+    Each result is shaped to look enough like a memory row that
+    downstream code (rerank, reorder, audit) doesn't crash on missing
+    fields, but is tagged `result_type="wiki_summary"` so callers can
+    render it as preamble rather than as a regular memory hit.
+
+    The injection is *additive* -- summaries don't count against the
+    caller's `limit`. Rationale: callers who say "give me 10 memories"
+    want 10 memories, plus whatever compiled context is relevant. If
+    a customer hits cost or token issues we can revisit by capping
+    total result size, but the cleaner default is "context preamble
+    on top of the asked-for results."
+    """
+    from ogham.config import settings
+
+    if not settings.wiki_injection_enabled:
+        return []
+    if not query_embedding:
+        return []
+
+    try:
+        rows = search_summaries(
+            profile=profile,
+            query_embedding=query_embedding,
+            top_k=settings.wiki_injection_top_k,
+            min_similarity=settings.wiki_injection_min_similarity,
+        )
+    except Exception:
+        # Don't take the search path down if the wiki layer is unhealthy.
+        # Logged here, not raised -- BEAM/LME regression check pre-launch
+        # is when we want this signal to be loud, not at runtime.
+        logger.exception("wiki injection: search_summaries failed")
+        return []
+
+    if not rows:
+        return []
+
+    injected: list[dict[str, Any]] = []
+    for row in rows:
+        injected.append(
+            {
+                "id": str(row["id"]),
+                "result_type": "wiki_summary",
+                "topic_key": row["topic_key"],
+                "content": row.get("content") or "",
+                "source_count": row.get("source_count"),
+                "model_used": row.get("model_used"),
+                "version": row.get("version"),
+                "similarity": row.get("similarity"),
+                "tags": [f"wiki:{row['topic_key']}"],
+                "metadata": {
+                    "wiki_summary_id": str(row["id"]),
+                    "topic_key": row["topic_key"],
+                    "version": row.get("version"),
+                },
+            }
+        )
+    return injected
 
 
 def _merge_embedding_usage(
@@ -405,6 +470,14 @@ def search_memories_enriched(
         results = _maybe_rerank(query, results, limit)
         results = _reorder_for_attention(results)
         record_access([r["id"] for r in results])
+
+    # Wiki Tier 1 context injection lives at the MCP-tool layer
+    # (tools/memory.py::hybrid_search), not here. Keeping
+    # search_memories_enriched as a pure retrieval engine means
+    # benchmarks (BEAM/LME) and other callers that want raw retrieval
+    # are not measurement-polluted by preamble rows. _wiki_injection_results
+    # remains exported from this module so the tool layer can call it
+    # without redundant embedding generation.
 
     # Audit trail
     result_ids = [str(r["id"]) for r in results] if results else []

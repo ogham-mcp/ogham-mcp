@@ -486,3 +486,264 @@ class SupabaseBackend:
         self, profile: str, limit: int = 50, operation: str | None = None
     ) -> list[dict[str, Any]]:
         return []  # Supabase audit: add when RPC function exists
+
+    # ========================================================================
+    # Wiki Tier 1 (v0.12) — RPC-backed methods that mirror migration 031
+    # functions. All dispatch through PostgREST rpc() against pre-registered
+    # functions so PostgREST's no-arbitrary-SQL constraint is respected.
+    # ========================================================================
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_topic_search(
+        self,
+        profile: str,
+        query_embedding: list[float],
+        top_k: int = 3,
+        min_similarity: float = 0.0,
+    ) -> list[dict[str, Any]]:
+        result = (
+            self._get_client()
+            .rpc(
+                "wiki_topic_search",
+                {
+                    "p_profile": profile,
+                    "p_query_embedding": query_embedding,
+                    "p_top_k": top_k,
+                    "p_min_similarity": min_similarity,
+                },
+            )
+            .execute()
+        )
+        return result.data or []
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_topic_upsert(
+        self,
+        profile: str,
+        topic_key: str,
+        content: str,
+        embedding: list[float],
+        source_memory_ids: list[str],
+        model_used: str,
+        source_cursor: str | None,
+        source_hash: bytes,
+        token_count: int | None = None,
+        importance: float = 0.5,
+    ) -> dict[str, Any]:
+        # PostgREST returns bytea as a hex string by default; the migration's
+        # function takes bytea. Pass as hex-encoded \x-prefixed string.
+        params = {
+            "p_profile": profile,
+            "p_topic_key": topic_key,
+            "p_content": content,
+            "p_embedding": embedding,
+            "p_source_memory_ids": source_memory_ids,
+            "p_model_used": model_used,
+            "p_source_cursor": source_cursor,
+            "p_source_hash": "\\x" + source_hash.hex(),
+            "p_token_count": token_count,
+            "p_importance": importance,
+        }
+        result = self._get_client().rpc("wiki_topic_upsert", params).execute()
+        # Function returns a single row (RETURNS topic_summaries).
+        if isinstance(result.data, list):
+            return result.data[0] if result.data else {}
+        return result.data or {}
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_topic_get_by_key(self, profile: str, topic_key: str) -> dict[str, Any] | None:
+        result = (
+            self._get_client()
+            .rpc(
+                "wiki_topic_get_by_key",
+                {"p_profile": profile, "p_topic_key": topic_key},
+            )
+            .execute()
+        )
+        if not result.data:
+            return None
+        return result.data[0] if isinstance(result.data, list) else result.data
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_topic_get_affected(self, memory_id: str) -> list[dict[str, Any]]:
+        result = (
+            self._get_client().rpc("wiki_topic_get_affected", {"p_memory_id": memory_id}).execute()
+        )
+        return result.data or []
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_topic_mark_stale(self, summary_id: str, reason: str | None = None) -> None:
+        self._get_client().rpc(
+            "wiki_topic_mark_stale",
+            {"p_summary_id": summary_id, "p_reason": reason},
+        ).execute()
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_topic_sweep_stale(self, profile: str, older_than_days: int = 30) -> int:
+        result = (
+            self._get_client()
+            .rpc(
+                "wiki_topic_sweep_stale",
+                {"p_profile": profile, "p_older_than_days": older_than_days},
+            )
+            .execute()
+        )
+        if isinstance(result.data, list) and result.data:
+            return int(result.data[0]) if not isinstance(result.data[0], dict) else 0
+        return int(result.data) if result.data is not None else 0
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_topic_list_stale(
+        self, profile: str | None = None, older_than_days: int | None = None
+    ) -> list[dict[str, Any]]:
+        result = (
+            self._get_client()
+            .rpc(
+                "wiki_topic_list_stale",
+                {"p_profile": profile, "p_older_than_days": older_than_days},
+            )
+            .execute()
+        )
+        return result.data or []
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_topic_list_fresh_for_drift(self, profile: str) -> list[dict[str, Any]]:
+        result = (
+            self._get_client()
+            .rpc("wiki_topic_list_fresh_for_drift", {"p_profile": profile})
+            .execute()
+        )
+        return result.data or []
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_topic_list_all(self, profile: str) -> list[dict[str, Any]]:
+        # Direct PostgREST table read -- the exporter wants the full row,
+        # which neither list_stale nor list_fresh_for_drift returns.
+        result = (
+            self._get_client()
+            .table("topic_summaries")
+            .select(
+                "id,profile_id,topic_key,content,source_count,model_used,"
+                "version,status,source_hash,updated_at"
+            )
+            .eq("profile_id", profile)
+            .order("topic_key")
+            .execute()
+        )
+        return result.data or []
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_recompute_get_source_ids(self, profile: str, tag: str) -> list[str]:
+        result = (
+            self._get_client()
+            .rpc(
+                "wiki_recompute_get_source_ids",
+                {"p_profile": profile, "p_tag": tag},
+            )
+            .execute()
+        )
+        rows = result.data or []
+        return [r["id"] if isinstance(r, dict) else r for r in rows]
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_recompute_get_source_content(self, memory_ids: list[str]) -> list[dict[str, Any]]:
+        if not memory_ids:
+            return []
+        result = (
+            self._get_client()
+            .rpc(
+                "wiki_recompute_get_source_content",
+                {"p_memory_ids": memory_ids},
+            )
+            .execute()
+        )
+        return result.data or []
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_walk_graph(
+        self,
+        start_id: str,
+        max_depth: int = 1,
+        direction: str = "both",
+        min_strength: float = 0.0,
+        relationship_types: list[str] | None = None,
+        result_limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        result = (
+            self._get_client()
+            .rpc(
+                "wiki_walk_graph",
+                {
+                    "p_start_id": start_id,
+                    "p_max_depth": max_depth,
+                    "p_direction": direction,
+                    "p_min_strength": min_strength,
+                    "p_relationship_types": relationship_types,
+                    "p_result_limit": result_limit,
+                },
+            )
+            .execute()
+        )
+        return result.data or []
+
+    def _split_count_sample(self, rows: list[dict[str, Any]]) -> tuple[int, list[dict[str, Any]]]:
+        """Lint RPCs return total_count column on every row; split it out."""
+        if not rows:
+            return 0, []
+        total = int(rows[0].get("total_count") or 0)
+        sample = [{k: v for k, v in r.items() if k != "total_count"} for r in rows]
+        return total, sample
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_lint_contradictions(self, profile: str, sample_size: int = 10) -> dict[str, Any]:
+        result = (
+            self._get_client()
+            .rpc(
+                "wiki_lint_contradictions",
+                {"p_profile": profile, "p_sample_size": sample_size},
+            )
+            .execute()
+        )
+        count, sample = self._split_count_sample(result.data or [])
+        return {"count": count, "sample": sample}
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_lint_orphans(
+        self, profile: str, sample_size: int = 10, grace_minutes: int = 5
+    ) -> dict[str, Any]:
+        result = (
+            self._get_client()
+            .rpc(
+                "wiki_lint_orphans",
+                {
+                    "p_profile": profile,
+                    "p_sample_size": sample_size,
+                    "p_grace_minutes": grace_minutes,
+                },
+            )
+            .execute()
+        )
+        count, sample = self._split_count_sample(result.data or [])
+        return {"count": count, "sample": sample}
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def wiki_lint_stale_lifecycle(
+        self,
+        profile: str,
+        older_than_days: int = 90,
+        sample_size: int = 10,
+    ) -> dict[str, Any]:
+        result = (
+            self._get_client()
+            .rpc(
+                "wiki_lint_stale_lifecycle",
+                {
+                    "p_profile": profile,
+                    "p_older_than_days": older_than_days,
+                    "p_sample_size": sample_size,
+                },
+            )
+            .execute()
+        )
+        count, sample = self._split_count_sample(result.data or [])
+        return {"count": count, "sample": sample, "older_than_days": older_than_days}

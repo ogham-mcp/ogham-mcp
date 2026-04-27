@@ -230,10 +230,11 @@ def store_memory(
         metadata: Additional structured data to store alongside the memory.
         auto_link: Automatically link to similar existing memories (default True).
     """
+    from ogham.recompute_executor import enqueue_for_tags
     from ogham.service import store_memory_enriched
 
     active_profile = get_active_profile()
-    return store_memory_enriched(
+    result = store_memory_enriched(
         content=content,
         profile=active_profile,
         source=source,
@@ -241,6 +242,9 @@ def store_memory(
         metadata=metadata,
         auto_link=auto_link,
     )
+    # Debounced topic-summary recompute per tag (T1.4 Phase 6 hook).
+    enqueue_for_tags(active_profile, tags)
+    return result
 
 
 @mcp.tool
@@ -518,11 +522,13 @@ def hybrid_search(
                   Default: False (returns verbatim memories).
     """
     _require_limit(limit)
-    from ogham.service import search_memories_enriched
+    from ogham.embeddings import generate_embedding
+    from ogham.service import _wiki_injection_results, search_memories_enriched
 
-    return search_memories_enriched(
+    profile = get_active_profile()
+    results = search_memories_enriched(
         query=query,
-        profile=get_active_profile(),
+        profile=profile,
         limit=limit,
         tags=tags,
         source=source,
@@ -530,6 +536,20 @@ def hybrid_search(
         profiles=profiles,
         extract_facts=extract_facts,
     )
+
+    # Wiki Tier 1 preamble (v0.12.1). Prepended at the MCP-tool layer so
+    # MCP clients (Claude / Cursor / OpenCode) receive a single list with
+    # synthesized topic context first, raw memories after. Service-layer
+    # callers (benchmarks, gateway, internal Python) get clean retrieval
+    # via search_memories_enriched directly. extract_facts mode bypasses
+    # injection -- the LLM extractor sees raw memories only.
+    if not extract_facts and getattr(settings, "wiki_injection_enabled", False):
+        embedding = generate_embedding(query)
+        preamble = _wiki_injection_results(profile, embedding)
+        if preamble:
+            return preamble + results
+
+    return results
 
 
 @mcp.tool
@@ -561,9 +581,20 @@ def delete_memory(memory_id: str) -> dict[str, Any]:
     Args:
         memory_id: The UUID of the memory to delete.
     """
-    from ogham.database import emit_audit_event
+    from ogham.database import emit_audit_event, get_backend
+    from ogham.recompute_executor import enqueue_for_tags
 
     active_profile = get_active_profile()
+    # Fetch tags BEFORE the delete -- after the row is gone we can't
+    # recover which summaries cited it. Summaries that referenced this
+    # memory need recompute so the next compile drops the source.
+    pre_row = get_backend()._execute(
+        "SELECT tags FROM memories WHERE id = %(id)s::uuid AND profile = %(p)s",
+        {"id": memory_id, "p": active_profile},
+        fetch="one",
+    )
+    pre_tags = list(pre_row["tags"]) if pre_row and pre_row.get("tags") else []
+
     success = db_delete(memory_id, profile=active_profile)
     emit_audit_event(
         profile=active_profile,
@@ -572,6 +603,7 @@ def delete_memory(memory_id: str) -> dict[str, Any]:
         outcome="success" if success else "not_found",
     )
     if success:
+        enqueue_for_tags(active_profile, pre_tags)
         return {"status": "deleted", "id": memory_id}
     return {"status": "not_found", "id": memory_id}
 
@@ -603,9 +635,20 @@ def update_memory(
     if not updates:
         return {"status": "no_changes", "id": memory_id}
 
-    from ogham.database import emit_audit_event
+    from ogham.database import emit_audit_event, get_backend
+    from ogham.recompute_executor import enqueue_for_tags
 
     active_profile = get_active_profile()
+    # Fetch old tags FIRST so a tag-replace update (e.g. [a,b] -> [b,c])
+    # enqueues for the dropped tag `a` too. The `a` summary needs to
+    # recompile to drop this memory as a source.
+    pre_row = get_backend()._execute(
+        "SELECT tags FROM memories WHERE id = %(id)s::uuid AND profile = %(p)s",
+        {"id": memory_id, "p": active_profile},
+        fetch="one",
+    )
+    pre_tags = list(pre_row["tags"]) if pre_row and pre_row.get("tags") else []
+
     result = db_update(memory_id, updates, profile=active_profile)
     emit_audit_event(
         profile=active_profile,
@@ -613,6 +656,10 @@ def update_memory(
         resource_id=memory_id,
         metadata={"fields_updated": list(updates.keys())},
     )
+
+    post_tags = tags if tags is not None else pre_tags
+    affected = set(pre_tags) | set(post_tags or [])
+    enqueue_for_tags(active_profile, list(affected))
     return {"status": "updated", "id": result["id"], "updated_at": result["updated_at"]}
 
 
@@ -633,8 +680,21 @@ def reinforce_memory(
     """
     if not 0.0 < strength <= 1.0:
         raise ValueError(f"strength must be between 0.0 (exclusive) and 1.0, got {strength}")
+    from ogham.database import get_backend
+    from ogham.recompute_executor import enqueue_for_tags
+
     active_profile = get_active_profile()
     new_confidence = db_update_confidence(memory_id, strength, active_profile)
+    # Confidence shifts feed importance ranking inside future summaries.
+    # Enqueue; the hash-match short-circuit will skip the LLM call when
+    # the source set is unchanged (common case).
+    row = get_backend()._execute(
+        "SELECT tags FROM memories WHERE id = %(id)s::uuid AND profile = %(p)s",
+        {"id": memory_id, "p": active_profile},
+        fetch="one",
+    )
+    tags = list(row["tags"]) if row and row.get("tags") else []
+    enqueue_for_tags(active_profile, tags)
     return {
         "status": "reinforced",
         "id": memory_id,
@@ -661,8 +721,20 @@ def contradict_memory(
     """
     if not 0.0 <= strength < 1.0:
         raise ValueError(f"strength must be between 0.0 and 1.0 (exclusive), got {strength}")
+    from ogham.database import get_backend
+    from ogham.recompute_executor import enqueue_for_tags
+
     active_profile = get_active_profile()
     new_confidence = db_update_confidence(memory_id, strength, active_profile)
+    # Same rationale as reinforce_memory: contradiction flips confidence,
+    # cited summaries may rank differently. Cheap via hash-match.
+    row = get_backend()._execute(
+        "SELECT tags FROM memories WHERE id = %(id)s::uuid AND profile = %(p)s",
+        {"id": memory_id, "p": active_profile},
+        fetch="one",
+    )
+    tags = list(row["tags"]) if row and row.get("tags") else []
+    enqueue_for_tags(active_profile, tags)
     return {
         "status": "contradicted",
         "id": memory_id,

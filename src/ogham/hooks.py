@@ -462,6 +462,18 @@ def session_start(cwd: str, profile: str = "work", limit: int = 8) -> str:
     except Exception:
         logger.warning("lifecycle: failed to schedule advance_stages sweep", exc_info=True)
 
+    # Topic-summary stale sweep (T1.4 Phase 7). 30-day idle threshold
+    # catches summaries the Phase 6 mutation hooks missed: raw SQL edits,
+    # bulk imports, or the all-sources-deleted edge case. Runs on the
+    # same lifecycle executor -- fire-and-forget, session proceeds
+    # even if it fails.
+    try:
+        from ogham.topic_summaries import sweep_stale_summaries
+
+        lifecycle_submit(sweep_stale_summaries, profile)
+    except Exception:
+        logger.warning("topic_summaries: failed to schedule nightly stale sweep", exc_info=True)
+
     try:
         embedding = generate_embedding(query)
         results = hybrid_search_memories(

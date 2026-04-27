@@ -17,6 +17,7 @@ import ogham.prompts  # noqa: F401, E402
 import ogham.tools.dashboard  # noqa: F401, E402
 import ogham.tools.memory  # noqa: F401, E402
 import ogham.tools.stats  # noqa: F401, E402
+import ogham.tools.wiki  # noqa: F401, E402
 
 
 def validate_startup() -> None:

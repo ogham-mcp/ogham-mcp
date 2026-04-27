@@ -277,6 +277,35 @@ def get_all_query_filler() -> set[str]:
     return merged
 
 
+def get_wiki_compile(key: str, lang: str = "en") -> str:
+    """Return a wiki-compile prompt fragment for a language.
+
+    `key` is one of the keys under the `wiki_compile` section in the
+    language YAML (e.g. 'system_prompt', 'prompt_template'). Falls back
+    to the English value if the requested language doesn't override it,
+    so partial localisations don't break the compile pipeline.
+    """
+    data = _load_language_file(lang).get("wiki_compile", {})
+    value = data.get(key)
+    if value is None and lang != "en":
+        value = _load_language_file("en").get("wiki_compile", {}).get(key)
+    return value or ""
+
+
+def get_wiki_message(key: str, lang: str = "en") -> str:
+    """Return a wiki-tool user-facing message template for a language.
+
+    `key` is one of the keys under `wiki_messages` (e.g. 'no_sources',
+    'not_cached'). Falls back to English on miss. Returned strings are
+    Python format-strings; callers fill placeholders via .format(...).
+    """
+    data = _load_language_file(lang).get("wiki_messages", {})
+    value = data.get(key)
+    if value is None and lang != "en":
+        value = _load_language_file("en").get("wiki_messages", {}).get(key)
+    return value or ""
+
+
 def invalidate_cache() -> None:
     """Clear the language file LRU cache."""
     _load_language_file.cache_clear()

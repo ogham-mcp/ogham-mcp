@@ -282,3 +282,75 @@ class GatewayBackend:
         self, profile: str, limit: int = 50, operation: str | None = None
     ) -> list[dict[str, Any]]:
         return []  # Gateway audit: query via gateway API when available
+
+    # ========================================================================
+    # Wiki Tier 1 (v0.12) — gateway-backed implementations are stubbed.
+    # The managed-cloud product is parked; wiki tools require self-hosted
+    # backends (postgres or supabase) for v0.12. Will land alongside the
+    # gateway rehome (#90) when managed product comes back.
+    # ========================================================================
+
+    def _wiki_unsupported(self, op: str) -> None:
+        raise NotImplementedError(
+            f"GatewayBackend does not support wiki Tier 1 op {op!r}. "
+            "Use DATABASE_BACKEND=postgres or DATABASE_BACKEND=supabase."
+        )
+
+    def wiki_topic_search(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        self._wiki_unsupported("wiki_topic_search")
+        return []
+
+    def wiki_topic_upsert(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        self._wiki_unsupported("wiki_topic_upsert")
+        return {}
+
+    def wiki_topic_get_by_key(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        self._wiki_unsupported("wiki_topic_get_by_key")
+        return None
+
+    def wiki_topic_get_affected(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        self._wiki_unsupported("wiki_topic_get_affected")
+        return []
+
+    def wiki_topic_mark_stale(self, *args: Any, **kwargs: Any) -> None:
+        self._wiki_unsupported("wiki_topic_mark_stale")
+
+    def wiki_topic_sweep_stale(self, *args: Any, **kwargs: Any) -> int:
+        self._wiki_unsupported("wiki_topic_sweep_stale")
+        return 0
+
+    def wiki_topic_list_stale(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        self._wiki_unsupported("wiki_topic_list_stale")
+        return []
+
+    def wiki_topic_list_fresh_for_drift(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        self._wiki_unsupported("wiki_topic_list_fresh_for_drift")
+        return []
+
+    def wiki_topic_list_all(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        self._wiki_unsupported("wiki_topic_list_all")
+        return []
+
+    def wiki_recompute_get_source_ids(self, *args: Any, **kwargs: Any) -> list[str]:
+        self._wiki_unsupported("wiki_recompute_get_source_ids")
+        return []
+
+    def wiki_recompute_get_source_content(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        self._wiki_unsupported("wiki_recompute_get_source_content")
+        return []
+
+    def wiki_walk_graph(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        self._wiki_unsupported("wiki_walk_graph")
+        return []
+
+    def wiki_lint_contradictions(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        self._wiki_unsupported("wiki_lint_contradictions")
+        return {"count": 0, "sample": []}
+
+    def wiki_lint_orphans(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        self._wiki_unsupported("wiki_lint_orphans")
+        return {"count": 0, "sample": []}
+
+    def wiki_lint_stale_lifecycle(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        self._wiki_unsupported("wiki_lint_stale_lifecycle")
+        return {"count": 0, "sample": []}

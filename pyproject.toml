@@ -1,6 +1,6 @@
 [project]
 name = "ogham-mcp"
-version = "0.11.1"
+version = "0.12.0"
 description = "Shared memory MCP server — persistent, searchable, cross-client"
 requires-python = ">=3.13"
 dependencies = [

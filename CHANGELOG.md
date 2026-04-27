@@ -4,6 +4,71 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.12.0] - 2026-04-27 -- Wiki Tier 1 + Obsidian export
+
+Compile your memory into synthesized wiki pages, then export them as
+Obsidian-compatible markdown.
+
+### New: wiki layer
+
+Four new MCP tools turn your memory into a navigable wiki:
+
+- **`compile_wiki(topic)`** -- LLM-synthesizes all memories carrying a tag
+  into one markdown page. Cached so repeat calls are free until sources
+  change. Pass `provider="gemini"` / `model="gemini-2.5-flash"` (or
+  `provider="ollama"`, `provider="openai"`, etc.) to override the default
+  LLM. `force=True` re-compiles against a different model on the same
+  source set.
+- **`query_topic_summary(topic)`** -- read the cached page. No LLM cost.
+- **`walk_knowledge(start_id, depth, direction)`** -- direction-aware
+  graph walk along memory relationships (`outgoing`, `incoming`, or
+  `both`). Cycle-safe.
+- **`lint_wiki()`** -- maintenance health report covering five
+  categories: contradictions, orphans, stale lifecycle, stale summaries,
+  summary drift.
+
+The wiki layer needs an LLM. You can run that locally (Ollama with
+`llama3.2`, vLLM) or in the cloud (Gemini, OpenAI, Anthropic, Mistral,
+Groq, OpenRouter). Set `LLM_PROVIDER` and `LLM_MODEL` in
+`~/.ogham/config.env`.
+
+### New: Obsidian export
+
+```bash
+ogham export-obsidian /path/to/vault
+```
+
+Snapshots your wiki layer to a folder of plain markdown files with full
+YAML frontmatter, auto-detected wikilinks, and a README index. Open it
+in Obsidian -- or any text editor. Read-only: edits in Obsidian stay in
+Obsidian; re-run to refresh.
+
+### Migrations
+
+Four new migrations. Apply in order via Supabase SQL Editor (or psql for
+self-hosters):
+
+1. `src/ogham/sql/migrations/028_topic_summaries.sql` -- new
+   `topic_summaries` table for compiled wiki pages.
+2. `src/ogham/sql/migrations/030_topic_summaries_dim_agnostic.sql` --
+   aligns the embedding column dimension to `memories.embedding`.
+   Required for non-512-dim deployments.
+3. `src/ogham/sql/migrations/031_wiki_rpc_functions.sql` -- 14 RPC
+   functions powering the wiki tools on Supabase. SQL hardened against
+   HNSW planner pessimisation, recursive-CTE cycle blow-up, and concurrent-write
+   races on the upsert path.
+4. `src/ogham/sql/migrations/032_topic_summaries_rls_policy.sql` --
+   `Deny anon access` RLS policy on the two new tables, mirrors the
+   pattern on `memories` / `memory_relationships`. Idempotent;
+   non-Supabase self-hosters skip cleanly.
+
+### Fixed
+
+- LLM provider keys (Gemini, OpenAI, Anthropic, etc.) now read from
+  `~/.ogham/config.env` correctly when launched as an MCP server.
+  Previously required exporting them in the parent shell.
+- `source_hash` field in wiki responses no longer null on Supabase.
+
 ## [0.11.1] - 2026-04-24 -- Security + performance patch
 
 ### Security

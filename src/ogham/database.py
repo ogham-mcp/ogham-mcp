@@ -336,3 +336,40 @@ def get_related_memories(
     return get_backend().get_related_memories(
         memory_id, depth, min_strength, relationship_types, limit
     )
+
+
+def walk_memory_graph(
+    start_id: str,
+    depth: int = 1,
+    direction: str = "both",
+    min_strength: float = 0.0,
+    relationship_types: list[str] | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Direction-aware graph walk from a known memory id.
+
+    Thin facade over backend.wiki_walk_graph (migration 031 function
+    `wiki_walk_graph`). PostgresBackend dispatches via psycopg;
+    SupabaseBackend via PostgREST rpc(). Direction validation +
+    depth bounds checked client-side here so callers get a clean
+    error before the round-trip; the SQL function also enforces.
+
+      * 'outgoing' -- edges where memory_id is source (this -> other)
+      * 'incoming' -- edges where memory_id is target (other -> this)
+      * 'both' -- traditional bidirectional traversal
+    """
+    if direction not in ("outgoing", "incoming", "both"):
+        raise ValueError(f"direction must be 'outgoing', 'incoming', or 'both'; got {direction!r}")
+    if depth < 0:
+        raise ValueError("depth must be >= 0")
+    if depth > 5:
+        raise ValueError("depth must be <= 5; use explore_knowledge for broader walks")
+
+    return get_backend().wiki_walk_graph(
+        start_id=start_id,
+        max_depth=depth,
+        direction=direction,
+        min_strength=min_strength,
+        relationship_types=relationship_types,
+        result_limit=limit,
+    )

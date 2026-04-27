@@ -404,6 +404,40 @@ def export_cmd(
         console.print(data)
 
 
+@app.command(name="export-obsidian")
+def export_obsidian_cmd(
+    vault: str = typer.Argument(help="Path to the Obsidian vault directory"),
+    profile: Optional[str] = typer.Option(None, help="Profile to export (default: active)"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite a vault directory that already contains non-export files",
+    ),
+):
+    """Export wiki topic summaries to an Obsidian-compatible vault.
+
+    Writes one markdown file per topic_summary (with YAML frontmatter
+    and Obsidian wikilinks) plus a README.md index. Read-only -- the
+    vault is a snapshot, not a sync target.
+    """
+    from pathlib import Path
+
+    from ogham.config import settings
+    from ogham.exporters.obsidian import export_to_vault
+
+    target = profile or settings.default_profile
+    result = export_to_vault(Path(vault), target, force=force)
+
+    if result.errors:
+        for err in result.errors:
+            console.print(f"[red]{err}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"[green]Wrote {result.topics_written} topic(s) to {result.vault_path}[/green]")
+    if result.skipped:
+        console.print(f"[yellow]Skipped: {', '.join(result.skipped)}[/yellow]")
+
+
 @app.command(name="import")
 def import_cmd(
     file: str = typer.Argument(help="JSON file to import"),

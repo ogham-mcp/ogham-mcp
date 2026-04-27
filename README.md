@@ -17,6 +17,8 @@
 - [CLI](#cli) -- command-line interface
 - [Configuration](#configuration) -- env vars, embedding providers, temporal search, lifecycle hooks
 - [MCP tools](#mcp-tools) -- memory, search, graph, profiles, import/export
+- [Wiki layer](#wiki-layer) -- synthesize topics, walk the graph, lint health
+- [Obsidian export](#obsidian-export) -- snapshot your wiki to a vault of plain markdown
 - [Skills](#skills) -- ogham-research, ogham-recall, ogham-maintain
 - [Scoring and condensing](#scoring-and-condensing)
 - [Cross-encoder reranking](#cross-encoder-reranking) -- optional FlashRank for self-hosters
@@ -392,6 +394,38 @@ ogham hooks install
 | `get_config` | Show runtime configuration with masked secrets | -- |
 | `get_stats` | Memory counts, sources, tags, and profile health (orphans, decay, tagging) | -- |
 | `get_cache_stats` | Embedding cache hit rates | -- |
+
+## Wiki layer
+
+The wiki layer turns a tag full of related memories into a synthesized markdown page. Run `compile_wiki` on a tag, get back a summarized topic; the cache invalidates automatically when underlying memories change. Four MCP tools cover the lifecycle:
+
+| Tool | Description | Key parameters |
+|------|-------------|----------------|
+| `compile_wiki` | Compile a tag's memories into a synthesized markdown page (LLM call, cached) | `topic`, `provider`, `model`, `force` |
+| `query_topic_summary` | Read the cached page for a topic without recomputing | `topic` |
+| `walk_knowledge` | Direction-aware graph walk from a known memory along relationship edges | `start_id`, `depth`, `direction` (`outgoing`, `incoming`, `both`), `min_strength`, `relationship_types` |
+| `lint_wiki` | Health report: contradictions, orphans, stale lifecycle, stale summaries, summary drift | `stable_days`, `sample_size`, `include_drift` |
+
+**The wiki layer needs an LLM.** Synthesis is the LLM step that turns a list of memories into a coherent page; embeddings alone aren't enough. You can run that LLM **locally** (Ollama with `llama3.2`, vLLM, or any OpenAI-compatible local server) or **in the cloud** (Gemini, OpenAI, Anthropic, Mistral, Groq, OpenRouter). Local keeps everything private and free; cloud generally writes more polished prose at the cost of a few cents per compile.
+
+Set the default with `LLM_PROVIDER` and `LLM_MODEL` in your environment (e.g. `LLM_PROVIDER=gemini` + `LLM_MODEL=gemini-2.5-flash`, or `LLM_PROVIDER=ollama` + `LLM_MODEL=llama3.2`). Override per call with `compile_wiki(topic=..., provider=..., model=...)`. The provider/model is stamped into the resulting page's frontmatter, so you can re-compile the same topic with a different LLM and see how the synthesis changes.
+
+`compile_wiki` short-circuits when the source memories haven't changed since the last compile -- the call is effectively free if nothing has moved. Pass `force=True` to bypass that check (useful for re-compiling with a different model on the same source set).
+
+The wiki layer requires migrations 028, 030, and 031 applied to your database. See [Database setup](#database-setup) for details.
+
+## Obsidian export
+
+Snapshot your wiki layer to a folder of Obsidian-compatible markdown files. One `.md` per topic with full YAML frontmatter, plus a `README.md` index. Wikilinks between topics are auto-detected and wrapped in `[[brackets]]` for Obsidian's graph view.
+
+```bash
+ogham export-obsidian /path/to/vault
+ogham export-obsidian /path/to/vault --profile work --force
+```
+
+The export is read-only -- it writes files but never reads them back. Edits in Obsidian stay in Obsidian; re-run the export to refresh the snapshot. By design the exporter refuses to write into a directory that already contains files it didn't create; pass `--force` to override that guardrail.
+
+Full guide with frontmatter reference, troubleshooting, and screenshots: [obsidian export docs](https://ogham-mcp.dev/docs/obsidian-export/).
 
 ## Skills
 

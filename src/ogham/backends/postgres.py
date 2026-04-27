@@ -872,3 +872,227 @@ class PostgresBackend:
                 "limit": limit,
             },
         )
+
+    # ========================================================================
+    # Wiki Tier 1 (v0.12) — call into the migration 031 functions via psycopg
+    # so the SQL is in one place (server-side) and both backends share it.
+    # SupabaseBackend mirrors these via PostgREST rpc() in supabase.py.
+    # ========================================================================
+
+    def wiki_topic_search(
+        self,
+        profile: str,
+        query_embedding: list[float],
+        top_k: int = 3,
+        min_similarity: float = 0.0,
+    ) -> list[dict[str, Any]]:
+        return (
+            self._execute(
+                "SELECT * FROM wiki_topic_search("
+                "  %(profile)s, %(emb)s::vector, %(top_k)s, %(min_sim)s"
+                ")",
+                {
+                    "profile": profile,
+                    "emb": query_embedding,
+                    "top_k": top_k,
+                    "min_sim": min_similarity,
+                },
+                fetch="all",
+            )
+            or []
+        )
+
+    def wiki_topic_upsert(
+        self,
+        profile: str,
+        topic_key: str,
+        content: str,
+        embedding: list[float],
+        source_memory_ids: list[str],
+        model_used: str,
+        source_cursor: str | None,
+        source_hash: bytes,
+        token_count: int | None = None,
+        importance: float = 0.5,
+    ) -> dict[str, Any]:
+        row = self._execute(
+            "SELECT * FROM wiki_topic_upsert("
+            "  %(profile)s, %(topic_key)s, %(content)s, %(embedding)s::vector,"
+            "  %(memory_ids)s::uuid[], %(model_used)s,"
+            "  %(source_cursor)s::uuid, %(source_hash)s,"
+            "  %(token_count)s, %(importance)s"
+            ")",
+            {
+                "profile": profile,
+                "topic_key": topic_key,
+                "content": content,
+                "embedding": embedding,
+                "memory_ids": source_memory_ids,
+                "model_used": model_used,
+                "source_cursor": source_cursor,
+                "source_hash": source_hash,
+                "token_count": token_count,
+                "importance": importance,
+            },
+            fetch="one",
+        )
+        return dict(row) if row else {}
+
+    def wiki_topic_get_by_key(self, profile: str, topic_key: str) -> dict[str, Any] | None:
+        row = self._execute(
+            "SELECT * FROM wiki_topic_get_by_key(%(profile)s, %(topic_key)s)",
+            {"profile": profile, "topic_key": topic_key},
+            fetch="one",
+        )
+        return dict(row) if row else None
+
+    def wiki_topic_get_affected(self, memory_id: str) -> list[dict[str, Any]]:
+        rows = self._execute(
+            "SELECT * FROM wiki_topic_get_affected(%(id)s::uuid)",
+            {"id": memory_id},
+            fetch="all",
+        )
+        return [dict(r) for r in rows or []]
+
+    def wiki_topic_mark_stale(self, summary_id: str, reason: str | None = None) -> None:
+        self._execute(
+            "SELECT wiki_topic_mark_stale(%(id)s::uuid, %(reason)s)",
+            {"id": summary_id, "reason": reason},
+            fetch="none",
+        )
+
+    def wiki_topic_sweep_stale(self, profile: str, older_than_days: int = 30) -> int:
+        n = self._execute(
+            "SELECT wiki_topic_sweep_stale(%(profile)s, %(days)s)",
+            {"profile": profile, "days": older_than_days},
+            fetch="scalar",
+        )
+        return int(n or 0)
+
+    def wiki_topic_list_stale(
+        self, profile: str | None = None, older_than_days: int | None = None
+    ) -> list[dict[str, Any]]:
+        rows = self._execute(
+            "SELECT * FROM wiki_topic_list_stale(%(profile)s, %(days)s)",
+            {"profile": profile, "days": older_than_days},
+            fetch="all",
+        )
+        return [dict(r) for r in rows or []]
+
+    def wiki_topic_list_fresh_for_drift(self, profile: str) -> list[dict[str, Any]]:
+        rows = self._execute(
+            "SELECT * FROM wiki_topic_list_fresh_for_drift(%(profile)s)",
+            {"profile": profile},
+            fetch="all",
+        )
+        return [dict(r) for r in rows or []]
+
+    def wiki_topic_list_all(self, profile: str) -> list[dict[str, Any]]:
+        # Direct table read -- the export path needs every column for
+        # frontmatter (content, model_used, version, status, source_count,
+        # updated_at, source_hash). The existing list functions either
+        # filter by status or return a column subset, neither of which
+        # fits the exporter's needs.
+        rows = self._execute(
+            "SELECT id, profile_id, topic_key, content, source_count, model_used, "
+            "version, status, source_hash, updated_at "
+            "FROM topic_summaries WHERE profile_id = %(profile)s "
+            "ORDER BY topic_key",
+            {"profile": profile},
+            fetch="all",
+        )
+        return [dict(r) for r in rows or []]
+
+    def wiki_recompute_get_source_ids(self, profile: str, tag: str) -> list[str]:
+        rows = self._execute(
+            "SELECT id FROM wiki_recompute_get_source_ids(%(profile)s, %(tag)s)",
+            {"profile": profile, "tag": tag},
+            fetch="all",
+        )
+        return [r["id"] for r in rows or []]
+
+    def wiki_recompute_get_source_content(self, memory_ids: list[str]) -> list[dict[str, Any]]:
+        if not memory_ids:
+            return []
+        rows = self._execute(
+            "SELECT id, content FROM wiki_recompute_get_source_content(%(ids)s::uuid[])",
+            {"ids": memory_ids},
+            fetch="all",
+        )
+        return [dict(r) for r in rows or []]
+
+    def wiki_walk_graph(
+        self,
+        start_id: str,
+        max_depth: int = 1,
+        direction: str = "both",
+        min_strength: float = 0.0,
+        relationship_types: list[str] | None = None,
+        result_limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        rows = self._execute(
+            "SELECT * FROM wiki_walk_graph("
+            "  %(start_id)s::uuid, %(max_depth)s, %(direction)s,"
+            "  %(min_strength)s, %(types)s::text[], %(result_limit)s"
+            ")",
+            {
+                "start_id": start_id,
+                "max_depth": max_depth,
+                "direction": direction,
+                "min_strength": min_strength,
+                "types": relationship_types,
+                "result_limit": result_limit,
+            },
+            fetch="all",
+        )
+        return [dict(r) for r in rows or []]
+
+    @staticmethod
+    def _split_count_sample(rows: list[Any]) -> tuple[int, list[dict[str, Any]]]:
+        if not rows:
+            return 0, []
+        first = dict(rows[0]) if not isinstance(rows[0], dict) else rows[0]
+        total = int(first.get("total_count") or 0)
+        sample = [
+            {
+                k: v
+                for k, v in (dict(r) if not isinstance(r, dict) else r).items()
+                if k != "total_count"
+            }
+            for r in rows
+        ]
+        return total, sample
+
+    def wiki_lint_contradictions(self, profile: str, sample_size: int = 10) -> dict[str, Any]:
+        rows = self._execute(
+            "SELECT * FROM wiki_lint_contradictions(%(profile)s, %(n)s)",
+            {"profile": profile, "n": sample_size},
+            fetch="all",
+        )
+        count, sample = self._split_count_sample(rows or [])
+        return {"count": count, "sample": sample}
+
+    def wiki_lint_orphans(
+        self, profile: str, sample_size: int = 10, grace_minutes: int = 5
+    ) -> dict[str, Any]:
+        rows = self._execute(
+            "SELECT * FROM wiki_lint_orphans(%(profile)s, %(n)s, %(grace)s)",
+            {"profile": profile, "n": sample_size, "grace": grace_minutes},
+            fetch="all",
+        )
+        count, sample = self._split_count_sample(rows or [])
+        return {"count": count, "sample": sample}
+
+    def wiki_lint_stale_lifecycle(
+        self,
+        profile: str,
+        older_than_days: int = 90,
+        sample_size: int = 10,
+    ) -> dict[str, Any]:
+        rows = self._execute(
+            "SELECT * FROM wiki_lint_stale_lifecycle(%(profile)s, %(days)s, %(n)s)",
+            {"profile": profile, "days": older_than_days, "n": sample_size},
+            fetch="all",
+        )
+        count, sample = self._split_count_sample(rows or [])
+        return {"count": count, "sample": sample, "older_than_days": older_than_days}

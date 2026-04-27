@@ -77,7 +77,11 @@ class Settings(BaseSettings):
     ollama_timeout: int = 60
     embedding_batch_size: int | None = None
 
-    embedding_cache_max_size: int = 10000
+    # Persistent SQLite embedding cache at ~/.cache/ogham/embeddings.db by
+    # default. 100K entries covers normal daily use (~300 MB at 768 dim).
+    # For a full 500q LongMemEval clean-re-run (~260K memories), bump to
+    # 500000 via EMBEDDING_CACHE_MAX_SIZE so the second run is cache-hit.
+    embedding_cache_max_size: int = 100000
     embedding_cache_dir: str | None = None
 
     # Temporal LLM fallback: model for resolving complex date expressions.
@@ -89,6 +93,24 @@ class Settings(BaseSettings):
     rerank_enabled: bool = False
     rerank_model: str = "flashrank"  # "flashrank" or "bge"
     rerank_alpha: float = 0.55
+
+    # Wiki Tier 1 (v0.12.1) -- prepend top-K matching topic_summaries to
+    # the MCP `hybrid_search` tool's results as a context-injection layer.
+    # Default True since v0.12.1: the injection happens at the tool layer
+    # (tools/memory.py::hybrid_search), not in service.search_memories_enriched,
+    # so benchmarks calling the service directly never see preamble
+    # pollution. MCP clients (Claude / Cursor / OpenCode) get the
+    # synthesized topic context as preamble before raw memories.
+    wiki_injection_enabled: bool = True
+    wiki_injection_top_k: int = 3
+    wiki_injection_min_similarity: float = 0.4
+
+    # Locale for wiki-layer prompt templates and user-facing messages.
+    # Two-letter language code matching a file under src/ogham/data/languages/
+    # (en, de, fr, ja, ...). Falls back to English when a key is missing
+    # in the requested locale, so partial localisations don't break the
+    # compile pipeline.
+    locale: str = "en"
 
     bare_postgrest: bool = False
 
