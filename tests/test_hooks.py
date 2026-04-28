@@ -8,10 +8,13 @@ import pytest
 @pytest.fixture(autouse=True)
 def _clear_dedup_cache():
     """Clear the dedup cache between tests."""
+    from ogham.flow_control import clear_flow_overrides
     from ogham.hooks import _recent_actions
 
+    clear_flow_overrides()
     _recent_actions.clear()
     yield
+    clear_flow_overrides()
     _recent_actions.clear()
 
 
@@ -56,6 +59,24 @@ def test_session_start_empty_db():
     assert result == ""
 
 
+def test_session_start_disabled_skips_recall_side_effects():
+    from ogham.flow_control import temporary_flow_overrides
+    from ogham.hooks import session_start
+
+    with temporary_flow_overrides(recall=False):
+        with (
+            patch("ogham.database.hybrid_search_memories") as search,
+            patch("ogham.embeddings.generate_embedding") as embed,
+            patch("ogham.hooks.lifecycle_submit") as lifecycle,
+        ):
+            result = session_start(cwd="/Users/dev/myproject", profile="work")
+
+    assert result == ""
+    search.assert_not_called()
+    embed.assert_not_called()
+    lifecycle.assert_not_called()
+
+
 def test_post_tool_stores_action():
     from ogham.hooks import post_tool
 
@@ -72,6 +93,23 @@ def test_post_tool_stores_action():
     content = mock_store.call_args.kwargs["content"]
     assert "Bash" in content
     assert "git commit" in content
+
+
+def test_post_tool_disabled_skips_store():
+    from ogham.flow_control import temporary_flow_overrides
+    from ogham.hooks import post_tool
+
+    hook_input = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "git commit -m 'fix: update config'"},
+        "session_id": "abc123",
+        "cwd": "/Users/dev/myproject",
+    }
+    with temporary_flow_overrides(inscribe=False):
+        with patch("ogham.service.store_memory_enriched") as mock_store:
+            post_tool(hook_input, profile="work")
+
+    mock_store.assert_not_called()
 
 
 def test_post_tool_skips_ogham_tools():
@@ -306,6 +344,17 @@ def test_pre_compact_stores_summary():
     assert "compaction:drain" in tags
 
 
+def test_pre_compact_disabled_skips_store():
+    from ogham.flow_control import temporary_flow_overrides
+    from ogham.hooks import pre_compact
+
+    with temporary_flow_overrides(inscribe=False):
+        with patch("ogham.service.store_memory_enriched") as mock_store:
+            pre_compact(session_id="abc", cwd="/Users/dev/myproject", profile="work")
+
+    mock_store.assert_not_called()
+
+
 def test_post_compact_returns_context():
     from ogham.hooks import post_compact
 
@@ -338,6 +387,22 @@ def test_post_compact_empty_db():
         result = post_compact(cwd="/tmp/empty", profile="work")
 
     assert result == ""
+
+
+def test_post_compact_disabled_skips_recall():
+    from ogham.flow_control import temporary_flow_overrides
+    from ogham.hooks import post_compact
+
+    with temporary_flow_overrides(recall=False):
+        with (
+            patch("ogham.database.hybrid_search_memories") as search,
+            patch("ogham.embeddings.generate_embedding") as embed,
+        ):
+            result = post_compact(cwd="/Users/dev/myproject", profile="work")
+
+    assert result == ""
+    search.assert_not_called()
+    embed.assert_not_called()
 
 
 def test_session_start_handles_errors():

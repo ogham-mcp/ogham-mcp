@@ -462,6 +462,11 @@ def session_start(
     schedules a lifecycle advancement sweep on the background executor.
     The sweep is fire-and-forget -- session starts even if it fails.
     """
+    from ogham.flow_control import recall_enabled
+
+    if not recall_enabled():
+        return ""
+
     from ogham.database import hybrid_search_memories
     from ogham.embeddings import generate_embedding
 
@@ -520,6 +525,11 @@ def post_tool(hook_input: dict[str, Any], profile: str = "work") -> None:
 
     Skips Ogham's own tools to prevent infinite loops.
     """
+    from ogham.flow_control import inscribe_enabled
+
+    if not inscribe_enabled():
+        return
+
     tool_name = str(hook_input.get("tool_name", ""))
 
     # Skip Ogham's own tools (infinite loop prevention)
@@ -610,6 +620,11 @@ def pre_compact(
     profile: str = "work",
 ) -> None:
     """Drain session context to Ogham before compaction."""
+    from ogham.flow_control import inscribe_enabled
+
+    if not inscribe_enabled():
+        return
+
     project_name = os.path.basename(cwd)
     timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -643,6 +658,11 @@ def post_compact(
 
     Returns markdown with the most relevant memories for the project.
     """
+    from ogham.flow_control import recall_enabled
+
+    if not recall_enabled():
+        return ""
+
     from ogham.database import hybrid_search_memories
     from ogham.embeddings import generate_embedding
 

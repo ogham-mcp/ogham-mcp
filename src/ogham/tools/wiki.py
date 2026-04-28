@@ -156,7 +156,11 @@ def compile_wiki(
         memories carry this tag in the active profile, returns
         `{"status": "no_sources", ...}` without writing anything.
     """
+    from ogham.flow_control import disabled_payload, inscribe_enabled
+
     profile = get_active_profile()
+    if not inscribe_enabled():
+        return disabled_payload("inscribe", topic_key=topic, profile=profile)
 
     # `force=True` is implemented by marking the existing summary stale
     # before recompute. The recompute pipeline's short-circuit checks
@@ -241,6 +245,18 @@ def walk_knowledge(
         edge_strength, connected_from (parent in the path), and the
         direction the edge was followed.
     """
+    from ogham.flow_control import disabled_payload, recall_enabled
+
+    if not recall_enabled():
+        return disabled_payload(
+            "recall",
+            start_id=start_id,
+            depth=depth,
+            direction=direction,
+            node_count=0,
+            nodes=[],
+        )
+
     if direction not in _VALID_DIRECTIONS:
         return {
             "status": "error",
@@ -317,7 +333,13 @@ def query_topic_summary(topic: str, level: LevelType = "body") -> dict[str, Any]
     """
     if level not in _LEVEL_TO_COLUMN:
         raise ValueError(f"unknown level {level!r}; expected one of {sorted(_LEVEL_TO_COLUMN)}")
+
+    from ogham.flow_control import disabled_payload, recall_enabled
+
     profile = get_active_profile()
+    if not recall_enabled():
+        return disabled_payload("recall", topic_key=topic, profile=profile)
+
     summary = get_summary_by_topic(profile, topic)
     if summary is None:
         return {

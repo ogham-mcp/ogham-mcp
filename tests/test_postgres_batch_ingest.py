@@ -93,47 +93,15 @@ def test_store_memories_batch_does_one_execute_not_n(pg_fresh_db):
 
     insert_calls: list[str] = []
 
-    class CountingCursor:
-        """Wraps a real cursor; records any execute whose SQL inserts into memories.
+    real_execute = PostgresBackend._execute
 
-        Pool checkout runs SET search_path / housekeeping SELECTs -- those
-        don't count toward the N+1 contract. Only INSERTs into the memories
-        table do.
-        """
+    def wrapped_execute(self, sql, *a, **kw):
+        sql_str = str(sql).strip().upper()
+        if sql_str.startswith("INSERT INTO MEMORIES"):
+            insert_calls.append(str(sql))
+        return real_execute(self, sql, *a, **kw)
 
-        def __init__(self, inner):
-            self._inner = inner
-
-        def __enter__(self):
-            self._inner.__enter__()
-            return self
-
-        def __exit__(self, *a):
-            return self._inner.__exit__(*a)
-
-        def execute(self, sql, *a, **kw):
-            sql_str = str(sql).strip().upper()
-            if sql_str.startswith("INSERT INTO MEMORIES"):
-                insert_calls.append(str(sql))
-            return self._inner.execute(sql, *a, **kw)
-
-        def fetchone(self):
-            return self._inner.fetchone()
-
-        def fetchall(self):
-            return self._inner.fetchall()
-
-        def __getattr__(self, name):
-            return getattr(self._inner, name)
-
-    import psycopg
-
-    real_connect_cursor = psycopg.Connection.cursor
-
-    def wrapped_cursor(self, *a, **kw):
-        return CountingCursor(real_connect_cursor(self, *a, **kw))
-
-    with patch.object(psycopg.Connection, "cursor", wrapped_cursor):
+    with patch.object(PostgresBackend, "_execute", wrapped_execute):
         backend.store_memories_batch(rows)
 
     assert len(insert_calls) == 1, (

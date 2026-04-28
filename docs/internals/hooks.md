@@ -8,20 +8,24 @@
 - Searches ogham for memories relevant to the current project directory
 - Returns markdown with top matches for context injection
 - Used to prime the AI with project-specific knowledge at session start
+- Returns nothing when recall is disabled
 
 ### `post_tool(hook_input, profile)`
 - Called after every tool execution in a Claude Code session
 - Decides whether the tool execution is worth storing as a memory
 - Implements multi-layer filtering to avoid noise
+- No-ops when inscribe is disabled
 
 ### `pre_compact(session_id, cwd, profile)`
 - Drains session context to ogham before Claude Code compacts conversation
 - Stores a timestamped "session drain" marker
+- No-ops when inscribe is disabled
 
 ### `post_compact(cwd, profile, limit)`
 - Rehydrates context after compaction
 - Searches for recent decisions and work related to the project
 - Returns markdown for re-injection
+- Returns nothing when recall is disabled
 
 ## Filtering Pipeline (post_tool)
 
@@ -74,3 +78,14 @@ Hooks config is loaded from `hooks_config.yaml` (YAML file adjacent to `hooks.py
 - Git signal/noise subcommands
 - Secret detection patterns
 - Env secret key names
+
+Runtime flow controls are separate from the YAML signal filters:
+
+```bash
+OGHAM_RECALL_ENABLED=false ogham hooks recall
+OGHAM_INSCRIBE_ENABLED=false ogham hooks inscribe
+ogham hooks recall --no-recall
+ogham hooks inscribe --no-inscribe
+```
+
+Use `OGHAM_RECALL_ENABLED=false` in an MCP client config to prevent memory-derived context from reaching the LLM. Use `OGHAM_INSCRIBE_ENABLED=false` to prevent hook capture and content writes to Ogham. Admin commands remain available for inspection and cleanup.

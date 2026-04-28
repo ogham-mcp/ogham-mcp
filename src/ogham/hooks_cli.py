@@ -60,54 +60,74 @@ def _should_recall() -> bool:
 def recall_cmd(
     profile: str = typer.Option("work", help="Memory profile"),
     force: bool = typer.Option(False, help="Skip debounce, always recall"),
+    recall: bool | None = typer.Option(
+        None,
+        "--recall/--no-recall",
+        help="Enable or disable recall for this hook invocation",
+    ),
 ):
     """Read from the stone. Load relevant memories for the current project."""
+    from ogham.flow_control import recall_enabled, temporary_flow_overrides
     from ogham.hooks import post_compact, session_start
 
-    # Debounce: only recall once per 30 min (Kiro fires on every prompt)
-    if not force and not _should_recall():
-        return
+    with temporary_flow_overrides(recall=recall):
+        if not recall_enabled():
+            return
 
-    data = _read_stdin()
-    cwd = data.get("cwd", ".")
+        # Debounce: only recall once per 30 min (Kiro fires on every prompt)
+        if not force and not _should_recall():
+            return
 
-    output = session_start(cwd=cwd, profile=profile)
-    if not output:
-        output = post_compact(cwd=cwd, profile=profile)
-    if output:
-        typer.echo(output)
+        data = _read_stdin()
+        cwd = data.get("cwd", ".")
+
+        output = session_start(cwd=cwd, profile=profile)
+        if not output:
+            output = post_compact(cwd=cwd, profile=profile)
+        if output:
+            typer.echo(output)
 
 
 @hooks_app.command(name="inscribe")
 def inscribe_cmd(
     profile: str = typer.Option("work", help="Memory profile"),
+    inscribe: bool | None = typer.Option(
+        None,
+        "--inscribe/--no-inscribe",
+        help="Enable or disable inscribe for this hook invocation",
+    ),
 ):
     """Carve into the stone. Capture activity or drain session before compaction."""
+    from ogham.flow_control import inscribe_enabled, temporary_flow_overrides
     from ogham.hooks import post_tool, pre_compact
 
-    data = _read_stdin()
+    with temporary_flow_overrides(inscribe=inscribe):
+        if not inscribe_enabled():
+            return
 
-    if not data:
-        # Kiro Agent Stop or no stdin -- create a minimal marker
-        import os
+        data = _read_stdin()
 
-        data = {
-            "tool_name": "AgentStop",
-            "tool_input": {"summary": "Agent turn completed"},
-            "cwd": os.getcwd(),
-            "session_id": "kiro",
-        }
+        if not data:
+            # Kiro Agent Stop or no stdin -- create a minimal marker
+            import os
 
-    # If it looks like a tool call, capture as post_tool
-    if "tool_name" in data:
-        post_tool(data, profile=profile)
-    else:
-        # Otherwise treat as compaction drain
-        pre_compact(
-            session_id=data.get("session_id", "unknown"),
-            cwd=data.get("cwd", "."),
-            profile=profile,
-        )
+            data = {
+                "tool_name": "AgentStop",
+                "tool_input": {"summary": "Agent turn completed"},
+                "cwd": os.getcwd(),
+                "session_id": "kiro",
+            }
+
+        # If it looks like a tool call, capture as post_tool
+        if "tool_name" in data:
+            post_tool(data, profile=profile)
+        else:
+            # Otherwise treat as compaction drain
+            pre_compact(
+                session_id=data.get("session_id", "unknown"),
+                cwd=data.get("cwd", "."),
+                profile=profile,
+            )
 
 
 @hooks_app.command(name="install")

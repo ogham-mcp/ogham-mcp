@@ -63,6 +63,10 @@ def get_runtime_config() -> dict[str, Any]:
         },
     }
 
+    from ogham.flow_control import flow_status
+
+    config["memory_flows"] = flow_status()
+
     # Database-specific fields
     if settings.database_backend == "supabase":
         config["database"]["supabase_url"] = settings.supabase_url

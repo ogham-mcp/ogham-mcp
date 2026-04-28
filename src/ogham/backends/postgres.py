@@ -352,14 +352,10 @@ class PostgresBackend:
             f"VALUES {', '.join(values_clauses)} RETURNING *"
         )
 
-        results: list[dict[str, Any]] = []
-        with self._checkout() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql.encode(), params)
-                for result in cur.fetchall():
-                    result.pop("embedding", None)
-                    result.pop("fts", None)
-                    results.append(result)
+        results = self._execute(sql, params, fetch="all")
+        for result in results:
+            result.pop("embedding", None)
+            result.pop("fts", None)
         return results
 
     def update_memory(

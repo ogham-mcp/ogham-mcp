@@ -16,6 +16,11 @@ from ogham.tools.memory import get_active_profile
 @mcp.prompt()
 def summarize_recent(limit: int = 10) -> str:
     """Summarize recent memories in the active profile."""
+    from ogham.flow_control import disabled_message, recall_enabled
+
+    if not recall_enabled():
+        return disabled_message("recall")
+
     profile = get_active_profile()
     memories = list_recent_memories(profile=profile, limit=limit)
 
@@ -35,6 +40,11 @@ def summarize_recent(limit: int = 10) -> str:
 @mcp.prompt()
 def find_decisions(topic: str) -> str:
     """Find decisions made about a specific topic."""
+    from ogham.flow_control import disabled_message, recall_enabled
+
+    if not recall_enabled():
+        return disabled_message("recall")
+
     profile = get_active_profile()
     query = f"decision about {topic}"
     embedding = generate_embedding(query)
@@ -60,6 +70,11 @@ def find_decisions(topic: str) -> str:
 @mcp.prompt()
 def profile_overview() -> str:
     """Show an overview of the active memory profile."""
+    from ogham.flow_control import disabled_message, recall_enabled
+
+    if not recall_enabled():
+        return disabled_message("recall")
+
     profile = get_active_profile()
     stats = get_memory_stats(profile=profile)
     recent = list_recent_memories(profile=profile, limit=5)
