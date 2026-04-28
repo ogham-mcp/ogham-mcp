@@ -15,8 +15,7 @@ import pytest
 MIG_025 = Path(__file__).parent.parent / "src/ogham/sql/migrations/025_memory_lifecycle.sql"
 MIG_026 = Path(__file__).parent.parent / "src/ogham/sql/migrations/026_memory_lifecycle_split.sql"
 ROLLBACK_026 = (
-    Path(__file__).parent.parent
-    / "src/ogham/sql/migrations/026_memory_lifecycle_split_rollback.sql"
+    Path(__file__).parent.parent / "src/ogham/sql/migrations/DANGER_026_memory_lifecycle_split.sql"
 )
 
 
@@ -114,7 +113,7 @@ def test_migration_026_rollback_restores_columns(pg_fresh_db):
         store_memory_enriched(content=content, profile="test-025", source="t", tags=[])
 
     # Rollback 026.
-    pg_fresh_db.apply_sql(ROLLBACK_026)
+    pg_fresh_db.apply_rollback(ROLLBACK_026)
 
     # memories.stage is back.
     memories_cols = pg_fresh_db.column_names("memories")

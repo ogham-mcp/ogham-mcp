@@ -64,17 +64,14 @@ ALTER TABLE memories
     DROP COLUMN IF EXISTS stage_entered_at;
 
 -- Trigger: auto-init a lifecycle row when a new memory is inserted.
-CREATE OR REPLACE FUNCTION init_memory_lifecycle() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path = public, pg_catalog
-AS $$
+CREATE OR REPLACE FUNCTION init_memory_lifecycle() RETURNS trigger AS $$
 BEGIN
     INSERT INTO memory_lifecycle (memory_id, profile, stage, stage_entered_at, updated_at)
     VALUES (NEW.id, NEW.profile, 'fresh', NEW.created_at, NEW.created_at)
     ON CONFLICT (memory_id) DO NOTHING;
     RETURN NEW;
 END;
-$$;
+$$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS memories_init_lifecycle ON memories;
 CREATE TRIGGER memories_init_lifecycle
@@ -83,7 +80,8 @@ CREATE TRIGGER memories_init_lifecycle
     EXECUTE FUNCTION init_memory_lifecycle();
 
 -- Trigger: keep memory_lifecycle.profile in sync when a memory is moved
--- between profiles (rare but possible).
+-- between profiles (rare but possible). Same search_path hardening as
+-- init_memory_lifecycle above.
 CREATE OR REPLACE FUNCTION sync_memory_lifecycle_profile() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path = public, pg_catalog

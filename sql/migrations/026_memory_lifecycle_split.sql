@@ -80,8 +80,12 @@ CREATE TRIGGER memories_init_lifecycle
     EXECUTE FUNCTION init_memory_lifecycle();
 
 -- Trigger: keep memory_lifecycle.profile in sync when a memory is moved
--- between profiles (rare but possible).
-CREATE OR REPLACE FUNCTION sync_memory_lifecycle_profile() RETURNS trigger AS $$
+-- between profiles (rare but possible). Same search_path hardening as
+-- init_memory_lifecycle above.
+CREATE OR REPLACE FUNCTION sync_memory_lifecycle_profile() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path = public, pg_catalog
+AS $$
 BEGIN
     IF NEW.profile IS DISTINCT FROM OLD.profile THEN
         UPDATE memory_lifecycle
@@ -90,7 +94,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 DROP TRIGGER IF EXISTS memories_sync_lifecycle_profile ON memories;
 CREATE TRIGGER memories_sync_lifecycle_profile

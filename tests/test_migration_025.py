@@ -11,9 +11,7 @@ from pathlib import Path
 import pytest
 
 MIG = Path(__file__).parent.parent / "src/ogham/sql/migrations/025_memory_lifecycle.sql"
-ROLLBACK = (
-    Path(__file__).parent.parent / "src/ogham/sql/migrations/025_memory_lifecycle_rollback.sql"
-)
+ROLLBACK = Path(__file__).parent.parent / "src/ogham/sql/migrations/DANGER_025_memory_lifecycle.sql"
 
 
 def _can_connect() -> bool:
@@ -63,7 +61,7 @@ def test_migration_025_forward_then_rollback_no_data_loss(pg_fresh_db):
     assert "stage_entered_at" in cols
     assert pg_fresh_db.count("memories") == 3
 
-    pg_fresh_db.apply_sql(ROLLBACK)
+    pg_fresh_db.apply_rollback(ROLLBACK)
     cols_after = pg_fresh_db.column_names("memories")
     assert "stage" not in cols_after
     assert "stage_entered_at" not in cols_after

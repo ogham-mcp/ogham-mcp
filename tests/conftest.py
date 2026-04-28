@@ -219,6 +219,13 @@ def pg_fresh_db():
             sql = Path(path).read_text()
             self.be._execute(sql, fetch="none")
 
+        def apply_rollback(self, path):
+            sql = Path(path).read_text()
+            self.be._execute(
+                "SET ogham.confirm_rollback = 'I-KNOW-WHAT-I-AM-DOING';\n" + sql,
+                fetch="none",
+            )
+
         def column_names(self, table):
             rows = self.be._execute(
                 "SELECT column_name FROM information_schema.columns WHERE table_name = %(t)s",

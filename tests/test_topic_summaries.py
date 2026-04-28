@@ -13,8 +13,12 @@ import pytest
 MIG_025 = Path(__file__).parent.parent / "src/ogham/sql/migrations/025_memory_lifecycle.sql"
 MIG_026 = Path(__file__).parent.parent / "src/ogham/sql/migrations/026_memory_lifecycle_split.sql"
 MIG_028 = Path(__file__).parent.parent / "src/ogham/sql/migrations/028_topic_summaries.sql"
+MIG_030 = (
+    Path(__file__).parent.parent / "src/ogham/sql/migrations/030_topic_summaries_dim_agnostic.sql"
+)
+MIG_031 = Path(__file__).parent.parent / "src/ogham/sql/migrations/031_wiki_rpc_functions.sql"
 ROLLBACK_028 = (
-    Path(__file__).parent.parent / "src/ogham/sql/migrations/028_topic_summaries_rollback.sql"
+    Path(__file__).parent.parent / "src/ogham/sql/migrations/DANGER_028_topic_summaries.sql"
 )
 
 
@@ -49,8 +53,10 @@ def _apply_028(pg_fresh_db):
     # of what the previous test in this file left behind. pg_fresh_db
     # only scrubs memories + 025/026 state; 028 tables aren't in its
     # cleanup path.
-    pg_fresh_db.apply_sql(ROLLBACK_028)
+    pg_fresh_db.apply_rollback(ROLLBACK_028)
     pg_fresh_db.apply_sql(MIG_028)
+    pg_fresh_db.apply_sql(MIG_030)
+    pg_fresh_db.apply_sql(MIG_031)
 
 
 def _seed_memories(n: int = 3, profile: str = "test-025") -> list[str]:

@@ -18,7 +18,7 @@ MIG_025 = Path(__file__).parent.parent / "src/ogham/sql/migrations/025_memory_li
 MIG_026 = Path(__file__).parent.parent / "src/ogham/sql/migrations/026_memory_lifecycle_split.sql"
 MIG_028 = Path(__file__).parent.parent / "src/ogham/sql/migrations/028_topic_summaries.sql"
 ROLLBACK_028 = (
-    Path(__file__).parent.parent / "src/ogham/sql/migrations/028_topic_summaries_rollback.sql"
+    Path(__file__).parent.parent / "src/ogham/sql/migrations/DANGER_028_topic_summaries.sql"
 )
 
 
@@ -227,7 +227,7 @@ def test_migration_028_rollback_drops_tables(pg_fresh_db):
 
     assert "topic_summaries" in pg_fresh_db.tables()
 
-    pg_fresh_db.apply_sql(ROLLBACK_028)
+    pg_fresh_db.apply_rollback(ROLLBACK_028)
 
     tables = pg_fresh_db.tables()
     assert "topic_summaries" not in tables
