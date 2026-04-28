@@ -5,6 +5,34 @@ from typing import Any, cast
 import pytest
 
 
+def _truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+
+
+def pytest_configure(config):
+    """Default local collection to hermetic unit-test config.
+
+    Several legacy integration modules perform reachability checks at import
+    time, before autouse fixtures can isolate environment variables. If a
+    developer's local Ogham config points at Postgres, ordinary ``pytest`` can
+    spend minutes trying to connect to that database during collection. Keep
+    default local runs hermetic, while preserving explicit scratch Postgres and
+    external Supabase/Ollama opt-in paths.
+    """
+    if _truthy_env("OGHAM_RUN_EXTERNAL_INTEGRATION") or _truthy_env("OGHAM_TEST_ALLOW_DESTRUCTIVE"):
+        return
+
+    url = os.environ.get("DATABASE_URL", "")
+    if "scratch" in url.lower():
+        return
+
+    os.environ.setdefault("DATABASE_BACKEND", "supabase")
+    os.environ.setdefault("SUPABASE_URL", "https://fake.supabase.co")
+    os.environ.setdefault("SUPABASE_KEY", "fake-key")
+    os.environ.setdefault("EMBEDDING_PROVIDER", "ollama")
+    os.environ.setdefault("DEFAULT_PROFILE", "default")
+
+
 def _destructive_db_safe() -> tuple[bool, str]:
     """Return (allowed, reason). Guard for fixtures that DROP / DELETE.
 
@@ -15,7 +43,7 @@ def _destructive_db_safe() -> tuple[bool, str]:
     Protects against accidentally running the lifecycle test fixtures
     against a prod / demo DB and wiping triggers, columns, or rows.
     """
-    if os.environ.get("OGHAM_TEST_ALLOW_DESTRUCTIVE", "").strip().lower() in ("1", "true", "yes"):
+    if _truthy_env("OGHAM_TEST_ALLOW_DESTRUCTIVE"):
         return True, "OGHAM_TEST_ALLOW_DESTRUCTIVE set"
     url = os.environ.get("DATABASE_URL", "")
     if "scratch" in url.lower():
@@ -27,12 +55,45 @@ def _destructive_db_safe() -> tuple[bool, str]:
     )
 
 
+def _postgres_integration_db_safe() -> tuple[bool, str]:
+    """Return whether live Postgres integration tests may run.
+
+    Unlike unit tests, postgres integration tests use the configured
+    ``Settings`` object so a developer's ~/.ogham/config.env is visible.
+    We still require a scratch database name/URL, or explicit opt-in, so
+    `pytest` never exercises a personal/prod Ogham database by accident.
+    """
+    if _truthy_env("OGHAM_TEST_ALLOW_DESTRUCTIVE"):
+        return True, "OGHAM_TEST_ALLOW_DESTRUCTIVE set"
+
+    url = os.environ.get("DATABASE_URL", "")
+    if not url:
+        try:
+            from ogham.config import settings
+
+            url = settings.database_url or ""
+        except Exception:
+            url = ""
+
+    if "scratch" in url.lower():
+        return True, "database URL contains 'scratch'"
+    return (
+        False,
+        f"Postgres integration tests require a scratch DATABASE_URL; got {url!r}",
+    )
+
+
 @pytest.fixture(autouse=True)
 def _isolated_unit_environment(monkeypatch, request):
     """Keep unit tests independent from a developer's local Ogham env."""
     is_external_integration = request.node.get_closest_marker(
         "integration"
     ) or request.node.get_closest_marker("postgres_integration")
+
+    if request.node.get_closest_marker("postgres_integration"):
+        allowed, reason = _postgres_integration_db_safe()
+        if not allowed:
+            pytest.skip(reason)
 
     if not is_external_integration:
         monkeypatch.setenv("DATABASE_BACKEND", "supabase")
@@ -52,14 +113,14 @@ def _isolated_unit_environment(monkeypatch, request):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _apply_lifecycle_migrations():
-    """Ensure lifecycle schema exists on the scratch DB for the run.
+def _ensure_standard_postgres_test_schema():
+    """Ensure scratch Postgres has the standard pgvector test schema.
 
-    Migrations 025 + 026 are both idempotent. We apply them once per
-    test session in order: 025 adds memories.stage columns, then 026
-    moves lifecycle state into ``memory_lifecycle`` (dropping the
-    memories columns). After this fixture runs, the scratch DB is in the
-    post-026 state.
+    Local Postgres integration tests should run against a predictable
+    scratch database, not whatever schema happens to live in a developer's
+    personal Ogham DB. For an empty scratch DB, apply schema_postgres.sql.
+    For an older scratch DB, apply the small idempotent baseline migrations
+    needed by current tests.
 
     The ``pg_fresh_db`` fixture drops everything on teardown; tests that
     use it re-apply the migrations explicitly -- so even though this
@@ -71,7 +132,7 @@ def _apply_lifecycle_migrations():
 
         if settings.database_backend != "postgres":
             return
-        allowed, reason = _destructive_db_safe()
+        allowed, reason = _postgres_integration_db_safe()
         if not allowed:
             # Session-scope fixture can't skip individual tests; just no-op
             # and let per-test guards handle the skip with a clear reason.
@@ -79,6 +140,22 @@ def _apply_lifecycle_migrations():
         from ogham.backends.postgres import PostgresBackend
 
         backend = PostgresBackend()
+        repo_root = Path(__file__).parent.parent
+
+        tables = backend._execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
+            fetch="all",
+        )
+        table_names = {str(r["table_name"]) for r in tables}
+        if "memories" not in table_names:
+            schema = repo_root / "sql/schema_postgres.sql"
+            backend._execute(schema.read_text(), fetch="none")
+            return
+
+        # Current profile stats tests require migration 022's additive
+        # relationship/tagging/decay counters.
+        mig_022 = repo_root / "sql/migrations/022_profile_health_stats.sql"
+        backend._execute(mig_022.read_text(), fetch="none")
 
         # Has 026 been applied? (i.e. memory_lifecycle exists)
         tables = backend._execute(
@@ -96,11 +173,11 @@ def _apply_lifecycle_migrations():
         )
         col_names = {str(r["column_name"]) for r in cols}
         if "stage" not in col_names:
-            mig_025 = Path(__file__).parent.parent / "sql/migrations/025_memory_lifecycle.sql"
+            mig_025 = repo_root / "sql/migrations/025_memory_lifecycle.sql"
             backend._execute(mig_025.read_text(), fetch="none")
 
         # Apply 026.
-        mig_026 = Path(__file__).parent.parent / "sql/migrations/026_memory_lifecycle_split.sql"
+        mig_026 = repo_root / "sql/migrations/026_memory_lifecycle_split.sql"
         backend._execute(mig_026.read_text(), fetch="none")
     except Exception:
         # Tests that need the columns will still skip via _can_connect

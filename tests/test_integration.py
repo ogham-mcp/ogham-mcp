@@ -1,11 +1,13 @@
 """Integration tests against real Supabase + Ollama.
 
-Run with: uv run pytest tests/test_integration.py -v
+Run with: OGHAM_RUN_EXTERNAL_INTEGRATION=1 uv run pytest tests/test_integration.py -v
 Skip with: uv run pytest -m 'not integration'
 
 Uses a dedicated '_test_integration' profile to avoid polluting real data.
 All test memories are cleaned up in the teardown fixture.
 """
+
+import os
 
 import pytest
 
@@ -14,6 +16,12 @@ TEST_PROFILE = "_test_integration"
 
 def _can_connect() -> bool:
     """Check if Supabase and Ollama are reachable."""
+    if os.environ.get("OGHAM_RUN_EXTERNAL_INTEGRATION", "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return False
     try:
         from ogham.database import get_client
 

@@ -24,9 +24,13 @@ def _run_server(
     transport: str | None = None,
     host: str | None = None,
     port: int | None = None,
+    recall: bool | None = None,
+    inscribe: bool | None = None,
 ):
+    from ogham.flow_control import set_flow_overrides
     from ogham.server import main as server_main
 
+    set_flow_overrides(recall=recall, inscribe=inscribe)
     server_main(transport=transport, host=host, port=port)
 
 
@@ -42,9 +46,19 @@ def serve(
     transport: Optional[str] = typer.Option(None, help="Transport: stdio or sse"),
     host: Optional[str] = typer.Option(None, help="SSE bind host (default 127.0.0.1)"),
     port: Optional[int] = typer.Option(None, help="SSE port (default 8742)"),
+    recall: Optional[bool] = typer.Option(
+        None,
+        "--recall/--no-recall",
+        help="Enable or disable recall for this server process",
+    ),
+    inscribe: Optional[bool] = typer.Option(
+        None,
+        "--inscribe/--no-inscribe",
+        help="Enable or disable inscribe for this server process",
+    ),
 ):
     """Start the MCP server."""
-    _run_server(transport=transport, host=host, port=port)
+    _run_server(transport=transport, host=host, port=port, recall=recall, inscribe=inscribe)
 
 
 @app.command()
@@ -55,8 +69,42 @@ def store(
     tags_csv: Optional[str] = typer.Option(None, "--tags", help="Comma-separated tags"),
     source: str = typer.Option("cli", help="Source identifier"),
     output_json: bool = typer.Option(False, "--json", help="Output JSON instead of rich text"),
+    inscribe: Optional[bool] = typer.Option(
+        None,
+        "--inscribe/--no-inscribe",
+        help="Enable or disable inscribe for this command",
+    ),
 ):
     """Store a new memory."""
+    from ogham.flow_control import disabled_message, inscribe_enabled, temporary_flow_overrides
+
+    with temporary_flow_overrides(inscribe=inscribe):
+        if not inscribe_enabled():
+            if output_json:
+                print(
+                    json.dumps(
+                        {
+                            "status": "disabled",
+                            "flow": "inscribe",
+                            "message": disabled_message("inscribe"),
+                        }
+                    )
+                )
+            else:
+                console.print(f"[yellow]{disabled_message('inscribe')}[/yellow]")
+            return
+
+        _store_impl(content, profile, tags, tags_csv, source, output_json)
+
+
+def _store_impl(
+    content: str,
+    profile: str | None,
+    tags: list[str] | None,
+    tags_csv: str | None,
+    source: str,
+    output_json: bool,
+) -> None:
     from ogham.config import settings
     from ogham.service import store_memory_enriched
 
@@ -220,8 +268,35 @@ def search(
     tags_csv: Optional[str] = typer.Option(None, "--tags", help="Comma-separated tags"),
     output_json: bool = typer.Option(False, "--json", help="Output JSON instead of rich table"),
     extract: bool = typer.Option(False, "--extract", help="Extract query-relevant facts via LLM"),
+    recall: Optional[bool] = typer.Option(
+        None,
+        "--recall/--no-recall",
+        help="Enable or disable recall for this command",
+    ),
 ):
     """Search memories by meaning and keywords (hybrid search)."""
+    from ogham.flow_control import disabled_message, recall_enabled, temporary_flow_overrides
+
+    with temporary_flow_overrides(recall=recall):
+        if not recall_enabled():
+            if output_json:
+                print("[]")
+            else:
+                console.print(f"[yellow]{disabled_message('recall')}[/yellow]")
+            return
+
+        _search_impl(query, limit, profile, tags, tags_csv, output_json, extract)
+
+
+def _search_impl(
+    query: str,
+    limit: int,
+    profile: str | None,
+    tags: list[str] | None,
+    tags_csv: str | None,
+    output_json: bool,
+    extract: bool,
+) -> None:
     from ogham.config import settings
 
     merged_tags = list(tags or [])
@@ -475,6 +550,12 @@ def import_cmd(
     dedup: float = typer.Option(0.8, help="Dedup threshold (0 to disable)"),
 ):
     """Import memories from a JSON export file."""
+    from ogham.flow_control import disabled_message, inscribe_enabled
+
+    if not inscribe_enabled():
+        console.print(f"[yellow]{disabled_message('inscribe')}[/yellow]")
+        return
+
     from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
 
     from ogham.config import settings

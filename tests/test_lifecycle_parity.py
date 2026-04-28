@@ -8,13 +8,16 @@ columns returning defaults (stage='fresh', stage_entered_at=created_at).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from ogham.service import store_memory_enriched
 
-GO_BIN = "/Users/kevinburns/Developer/web-projects/ogham-cli/ogham"
+DEFAULT_GO_BIN = Path("/Users/kevinburns/Developer/web-projects/ogham-cli/ogham")
+GO_BIN = os.environ.get("OGHAM_GO_BIN") or (str(DEFAULT_GO_BIN) if DEFAULT_GO_BIN.exists() else "")
 
 
 def _can_connect() -> bool:
@@ -36,6 +39,7 @@ def _can_connect() -> bool:
 pytestmark = [
     pytest.mark.postgres_integration,
     pytest.mark.skipif(not _can_connect(), reason="Postgres backend not configured or unreachable"),
+    pytest.mark.skipif(not GO_BIN, reason="Go Ogham CLI unavailable; set OGHAM_GO_BIN"),
 ]
 
 

@@ -121,6 +121,9 @@ class Settings(BaseSettings):
     server_host: str = Field(default="127.0.0.1", validation_alias="OGHAM_HOST")
     server_port: int = Field(default=8742, validation_alias="OGHAM_PORT")
 
+    recall_enabled: bool = Field(default=True, validation_alias="OGHAM_RECALL_ENABLED")
+    inscribe_enabled: bool = Field(default=True, validation_alias="OGHAM_INSCRIBE_ENABLED")
+
     gateway_url: str = Field(default="", validation_alias="OGHAM_GATEWAY_URL")
     gateway_api_key: str = Field(default="", validation_alias="OGHAM_API_KEY")
 
