@@ -238,8 +238,7 @@ noise_commands:
   - help
 
 # Tools that are always noise -- never stored regardless of content.
-# Reconnaissance tools, file edits, web fetches, skill invocations, task management.
-# Only Bash (filtered by signal keywords) produces memories from tool use.
+# Reconnaissance tools, web fetches, skill invocations, task management.
 always_skip_tools:
   - ToolSearch
   - Skill
@@ -247,8 +246,6 @@ always_skip_tools:
   - Glob
   - Grep
   - ListDir
-  - Edit
-  - Write
   - NotebookEdit
   - WebFetch
   - WebSearch
@@ -266,6 +263,11 @@ always_skip_tools:
   - CronCreate
   - CronDelete
   - CronList
+
+# Tools that can produce useful memories only after inspecting the tool payload.
+response_gated_tools:
+  - Edit
+  - Write
 
 # Tools that are captured only if content contains signal keywords.
 # Bash is the main one -- ls/cat already filtered by noise_commands.

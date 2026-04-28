@@ -230,6 +230,7 @@ ogham cleanup                   # Remove expired memories
 ogham hooks install             # Auto-detect client + configure hooks
 ogham hooks recall              # Read from the stone (load project context)
 ogham hooks inscribe            # Carve into the stone (capture activity)
+ogham hooks inscribe --dry-run  # Preview hook memory without storing
 ogham serve                     # Start MCP server (stdio, default)
 ogham serve --transport sse     # Start SSE server on port 8742
 ogham openapi                   # Generate OpenAPI spec
