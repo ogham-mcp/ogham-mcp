@@ -70,8 +70,7 @@ def test_post_tool_stores_action():
 
     mock_store.assert_called_once()
     content = mock_store.call_args.kwargs["content"]
-    assert "Bash" in content
-    assert "git commit" in content
+    assert "git commit: fix: update config" in content
 
 
 def test_post_tool_skips_ogham_tools():
@@ -120,11 +119,11 @@ def test_post_tool_skips_always_skip_tools():
         assert mock_store.call_count == 0, f"{tool_name} should be always-skipped"
 
 
-def test_post_tool_skips_edit_write_tools():
-    """Edit, Write, Agent, WebFetch are now skipped -- too noisy."""
+def test_post_tool_skips_non_response_gated_noise_tools():
+    """Agent and WebFetch remain skipped -- too noisy for hook capture."""
     from ogham.hooks import post_tool
 
-    for tool_name in ["Write", "Edit", "Agent", "WebFetch"]:
+    for tool_name in ["Agent", "WebFetch"]:
         with patch("ogham.service.store_memory_enriched") as mock_store:
             post_tool(
                 {
@@ -136,6 +135,147 @@ def test_post_tool_skips_edit_write_tools():
                 profile="work",
             )
         assert mock_store.call_count == 0, f"{tool_name} should be skipped"
+
+
+def test_post_tool_captures_edit_added_to_collection():
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(
+            {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": "/src/ogham/hooks.py",
+                    "old_string": 'ALWAYS_SKIP_TOOLS = frozenset({"Read", "Glob"})',
+                    "new_string": (
+                        'ALWAYS_SKIP_TOOLS = frozenset({"Read", "Glob", "Edit", "Write"})'
+                    ),
+                },
+                "cwd": "/Users/dev/ogham-mcp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+
+    mock_store.assert_called_once()
+    content = mock_store.call_args.kwargs["content"]
+    assert content == "hooks.py: added Edit, Write to ALWAYS_SKIP_TOOLS [ogham-mcp]"
+    tags = mock_store.call_args.kwargs["tags"]
+    assert "tool:Edit" in tags
+    assert "type:code-change" in tags
+
+
+def test_post_tool_captures_edit_assignment_change():
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(
+            {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": "/src/ogham/config.py",
+                    "old_string": "x = 1",
+                    "new_string": "x = 2",
+                },
+                "cwd": "/Users/dev/ogham-mcp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+
+    mock_store.assert_called_once()
+    content = mock_store.call_args.kwargs["content"]
+    assert content == "config.py: changed x from 1 to 2 [ogham-mcp]"
+
+
+def test_post_tool_skips_tiny_typo_edit():
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(
+            {
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": "/src/ogham/README.md",
+                    "old_string": "teh",
+                    "new_string": "the",
+                },
+                "cwd": "/Users/dev/ogham-mcp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+
+    mock_store.assert_not_called()
+
+
+def test_post_tool_captures_write_new_file_docstring():
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(
+            {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": "/src/ogham/dashboard_server.py",
+                    "content": (
+                        '"""FastAPI standalone dashboard server."""\n\n'
+                        "from fastapi import FastAPI\n"
+                    ),
+                },
+                "tool_response": "Created file",
+                "cwd": "/Users/dev/ogham-mcp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+
+    mock_store.assert_called_once()
+    content = mock_store.call_args.kwargs["content"]
+    assert content == (
+        "created dashboard_server.py: FastAPI standalone dashboard server. [ogham-mcp]"
+    )
+
+
+def test_post_tool_skips_write_overwrite():
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(
+            {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": "/src/ogham/dashboard_server.py",
+                    "content": "# rewritten file\n",
+                },
+                "tool_response": "Updated existing file",
+                "cwd": "/Users/dev/ogham-mcp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+
+    mock_store.assert_not_called()
+
+
+def test_post_tool_skips_write_without_creation_response():
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(
+            {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": "/src/ogham/dashboard_server.py",
+                    "content": '"""FastAPI standalone dashboard server."""\n',
+                },
+                "cwd": "/Users/dev/ogham-mcp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+
+    mock_store.assert_not_called()
 
 
 def test_post_tool_skips_noise_bash():
@@ -186,6 +326,227 @@ def test_post_tool_captures_signal_bash():
         assert mock_store.call_count == 1, f"{cmd!r} should be captured as signal"
 
 
+def test_post_tool_captures_bash_error_from_response():
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "uv run pytest", "exit_code": 1},
+                "tool_response": (
+                    "ImportError: cannot import name 'task_redis_prefix' "
+                    "from 'fastmcp.server.tasks.keys'"
+                ),
+                "cwd": "/Users/dev/ogham-mcp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+
+    mock_store.assert_called_once()
+    content = mock_store.call_args.kwargs["content"]
+    assert content.startswith("error: ImportError cannot import name")
+    tags = mock_store.call_args.kwargs["tags"]
+    assert "type:error" in tags
+
+
+def test_post_tool_captures_bash_deploy_outcome():
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "uv publish --token pypi-FAKEFAKEFAKEFAKEFAKEFAKE"},
+                "tool_response": "Published 0.10.2",
+                "cwd": "/Users/dev/ogham-mcp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+
+    mock_store.assert_called_once()
+    content = mock_store.call_args.kwargs["content"]
+    assert content == "published 0.10.2 [ogham-mcp]"
+    tags = mock_store.call_args.kwargs["tags"]
+    assert "type:deploy" in tags
+
+
+def test_post_tool_captures_gh_pr_merge():
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "gh pr merge 37 --squash"},
+                "tool_response": "Merged pull request #37",
+                "cwd": "/Users/dev/ogham-mcp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+
+    mock_store.assert_called_once()
+    content = mock_store.call_args.kwargs["content"]
+    assert content == "merged PR #37 (squash) [ogham-mcp]"
+
+
+@pytest.mark.parametrize(
+    ("command", "response", "expected"),
+    [
+        (
+            "gh pr create --title 'Add dashboard hooks'",
+            "title: Add dashboard hooks\nurl: https://github.com/x/y/pull/12",
+            "created PR: Add dashboard hooks [ogham-mcp]",
+        ),
+        (
+            "gh pr close 12",
+            "title: Close stale dashboard hooks PR",
+            "closed PR: Close stale dashboard hooks PR [ogham-mcp]",
+        ),
+        (
+            "gh issue close 44",
+            "Closed issue #44",
+            "closed issue #44 [ogham-mcp]",
+        ),
+    ],
+)
+def test_post_tool_captures_other_gh_actions(command, response, expected):
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+                "tool_response": response,
+                "cwd": "/Users/dev/ogham-mcp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+
+    mock_store.assert_called_once()
+    content = mock_store.call_args.kwargs["content"]
+    assert content == expected
+    tags = mock_store.call_args.kwargs["tags"]
+    assert "type:decision" in tags
+
+
+def test_post_tool_captures_gh_release_create():
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "gh release create v0.10.3"},
+                "tool_response": "Created release v0.10.3",
+                "cwd": "/Users/dev/ogham-mcp",
+                "session_id": "s1",
+            },
+            profile="work",
+        )
+
+    mock_store.assert_called_once()
+    content = mock_store.call_args.kwargs["content"]
+    assert content == "created GitHub release v0.10.3 [ogham-mcp]"
+    tags = mock_store.call_args.kwargs["tags"]
+    assert "type:deploy" in tags
+
+
+def test_post_tool_dry_run_does_not_store_or_dedup():
+    from ogham.hooks import post_tool
+
+    hook_input = {
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": "/src/ogham/config.py",
+            "old_string": "x = 1",
+            "new_string": "x = 2",
+        },
+        "cwd": "/Users/dev/ogham-mcp",
+        "session_id": "s1",
+    }
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        preview = post_tool(hook_input, profile="work", dry_run=True)
+        post_tool(hook_input, profile="work")
+
+    assert preview == "config.py: changed x from 1 to 2 [ogham-mcp]"
+    mock_store.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected_tag"),
+    [
+        ("I prefer PostgreSQL over MySQL for this project", "type:preference"),
+        ("let's go with vendor X because the pricing is better", "type:decision"),
+        ("actually the API key goes in the header, not body", "type:correction"),
+        ("the project deadline is April 30 2026 for the launch", "type:fact"),
+        ("I'm based in Germany and work at Aldi on platform tooling", "type:context"),
+    ],
+)
+def test_user_prompt_submit_captures_normal_user_signals(prompt, expected_tag):
+    from ogham.hooks import user_prompt_submit
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        user_prompt_submit(
+            prompt=prompt,
+            cwd="/Users/dev/ogham-mcp",
+            session_id="s1",
+            profile="work",
+        )
+
+    mock_store.assert_called_once()
+    content = mock_store.call_args.kwargs["content"]
+    assert prompt in content
+    tags = mock_store.call_args.kwargs["tags"]
+    assert "type:prompt" in tags
+    assert expected_tag in tags
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "yes",
+        "what database should we use for the project?",
+        "please run the tests again without changing anything",
+    ],
+)
+def test_user_prompt_submit_skips_low_signal_prompts(prompt):
+    from ogham.hooks import user_prompt_submit
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        result = user_prompt_submit(
+            prompt=prompt,
+            cwd="/Users/dev/ogham-mcp",
+            session_id="s1",
+            profile="work",
+        )
+
+    assert result is None
+    mock_store.assert_not_called()
+
+
+def test_user_prompt_submit_dry_run_does_not_store():
+    from ogham.hooks import user_prompt_submit
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        preview = user_prompt_submit(
+            prompt="I prefer PostgreSQL over MySQL for this project",
+            cwd="/Users/dev/ogham-mcp",
+            session_id="s1",
+            profile="work",
+            dry_run=True,
+        )
+
+    assert preview == "I prefer PostgreSQL over MySQL for this project [ogham-mcp]"
+    mock_store.assert_not_called()
+
+
 def test_post_tool_tags_include_tool_name():
     from ogham.hooks import post_tool
 
@@ -203,6 +564,7 @@ def test_post_tool_tags_include_tool_name():
     tags = mock_store.call_args.kwargs["tags"]
     assert "tool:Bash" in tags
     assert "type:action" in tags
+    assert "type:decision" in tags
     assert "session:s1" in tags
 
 
