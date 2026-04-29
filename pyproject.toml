@@ -112,6 +112,7 @@ exclude = [
     "**/*.pyc",
     "sql/migrations/DANGER_*",
     "sql/archive/",
+    "demo-scripts/",
 ]
 
 [build-system]

@@ -121,7 +121,20 @@ publish: build publish-check
 tag:
 	@VERSION=$$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"); \
 	echo "=== Creating GitHub release v$$VERSION ==="; \
-	git add -A && git commit -m "v$$VERSION" --allow-empty; \
+	BEFORE_HEAD=$$(git rev-parse HEAD); \
+	git add -A; \
+	if ! git commit -m "v$$VERSION" --allow-empty; then \
+		echo "ERROR: 'git commit --allow-empty' returned non-zero -- pre-commit hook (prek/ruff/pyright) likely blocked the commit."; \
+		echo "       Run 'git commit --allow-empty -m \"v$$VERSION\"' manually to see the hook output, fix it, then re-run 'make tag'."; \
+		exit 1; \
+	fi; \
+	AFTER_HEAD=$$(git rev-parse HEAD); \
+	if [ "$$BEFORE_HEAD" = "$$AFTER_HEAD" ]; then \
+		echo "ERROR: HEAD did not move after 'git commit --allow-empty' (was $$BEFORE_HEAD, still $$BEFORE_HEAD)."; \
+		echo "       A pre-commit hook silently aborted the commit. Tagging this HEAD would publish stale code."; \
+		echo "       This was the root cause of the v0.13.0 ship incident -- do not bypass."; \
+		exit 1; \
+	fi; \
 	git push origin main; \
 	git tag -a "v$$VERSION" -m "v$$VERSION"; \
 	git push origin "v$$VERSION"; \
