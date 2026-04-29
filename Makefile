@@ -140,8 +140,54 @@ publish-check:
 		exit 1; \
 	fi
 	@echo "  ✓ No credential-like strings in dist/"
+	@echo ""
+	@echo "=== Bloat-check: sdist file count + forbidden paths ==="
+	@TMPDIR=$$(mktemp -d); \
+	SDIST=$$(ls -t dist/*.tar.gz 2>/dev/null | head -1); \
+	tar -xzf "$$SDIST" -C "$$TMPDIR"; \
+	ROOT=$$(ls -d "$$TMPDIR"/*/ | head -1); \
+	FILE_COUNT=$$(find "$$ROOT" -type f | wc -l | tr -d ' '); \
+	echo "  Files in sdist: $$FILE_COUNT"; \
+	if [ $$FILE_COUNT -lt 100 ]; then \
+		echo "❌ Publish blocked: sdist has fewer than 100 files ($$FILE_COUNT) -- something likely got over-excluded."; \
+		rm -rf "$$TMPDIR"; exit 1; \
+	fi; \
+	if [ $$FILE_COUNT -gt 400 ]; then \
+		echo "❌ Publish blocked: sdist has more than 400 files ($$FILE_COUNT) -- bloat or unintended directory shipped."; \
+		echo "   v0.13.0 baseline was 185 files. Recent good ships: 185-200 files."; \
+		echo "   Top 20 directories by file count:"; \
+		(cd "$$ROOT" && find . -type f | sed 's|^\./||; s|/[^/]*$$||' | sort | uniq -c | sort -rn | head -20 | sed 's/^/    /'); \
+		rm -rf "$$TMPDIR"; exit 1; \
+	fi; \
+	echo "  ✓ File count in expected range (100-400)"; \
+	FORBIDDEN=$$(find "$$ROOT" -type f \( \
+		-path '*/docs/*' -o \
+		-path '*/benchmarks/*' -o \
+		-path '*/.claude/*' -o \
+		-path '*/.github/*' -o \
+		-path '*/.worktrees/*' -o \
+		-path '*/research/*' -o \
+		-path '*/extras/*' -o \
+		-path '*/notebooks/*' -o \
+		-path '*/demo-scripts/*' -o \
+		-path '*/sql/migrations/rollback/*' -o \
+		-name '*.env' -o \
+		-name '*.env.local' -o \
+		-name '*.env.*.local' -o \
+		-name 'DANGER_*.sql' -o \
+		-name 'config.toml' \
+	\) 2>/dev/null | head -20); \
+	if [ -n "$$FORBIDDEN" ]; then \
+		echo "❌ Publish blocked: forbidden paths in sdist:"; \
+		echo "$$FORBIDDEN" | sed "s|$$ROOT|    |"; \
+		echo ""; \
+		echo "   These directories should be in [tool.hatch.build.targets.sdist].exclude."; \
+		rm -rf "$$TMPDIR"; exit 1; \
+	fi; \
+	echo "  ✓ No forbidden paths (docs/, benchmarks/, .claude/, .github/, demo-scripts/, rollback/, .env*, DANGER_*.sql)"; \
+	rm -rf "$$TMPDIR"
 
-publish: build publish-check
+publish: build publish-check smoke
 	@echo "=== Publishing to PyPI ==="
 	uv publish --token $$(op read "op://Ogham-Gateway/PyPi - Ogham Dev token/api_key")
 	@echo ""
