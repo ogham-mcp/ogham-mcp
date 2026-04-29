@@ -45,12 +45,23 @@ build: clean
 
 # --- Sync dev → public repo ---
 
-# Files to sync from dev to public
+# Files to sync from dev to public.
+#
+# v0.13.1 audit found 8 release-critical files were silently skipped by
+# this list (lifecycle.py + graph.py + tools/memory.py + new tests +
+# docs/internals/hooks.md). Adding them explicitly + globbing migrations
+# closes the v0.9.2 / v0.13.0 sync-gap class of bugs once and for all.
+#
+# Migrations are now globbed at sync time (see the sync target). Schemas
+# stay individually listed because they're hand-curated and we want the
+# explicit dev → public mapping visible at review time.
 SYNC_SOURCES := \
 	src/ogham/hooks.py \
 	src/ogham/hooks_cli.py \
 	src/ogham/hooks_install.py \
 	src/ogham/hooks_config.yaml \
+	src/ogham/lifecycle.py \
+	src/ogham/graph.py \
 	src/ogham/service.py \
 	src/ogham/database.py \
 	src/ogham/config.py \
@@ -63,9 +74,15 @@ SYNC_SOURCES := \
 	src/ogham/backends/postgres.py \
 	src/ogham/backends/supabase.py \
 	src/ogham/backends/gateway.py \
+	src/ogham/tools/memory.py \
+	src/ogham/tools/wiki.py \
+	src/ogham/tools/stats.py \
 	tests/test_hooks.py \
+	tests/test_hooks_cli.py \
 	tests/test_extraction.py \
 	tests/test_backend_wiring.py \
+	tests/test_supabase_lifecycle_graph_parity.py \
+	docs/internals/hooks.md \
 	sql/schema.sql \
 	sql/schema_postgres.sql \
 	sql/schema_selfhost_supabase.sql \
@@ -81,7 +98,21 @@ sync:
 			cp "$(DEV_REPO)/$$f" "$(PUB_REPO)/$$f"; \
 		fi; \
 	done
-	@echo "Synced $$(echo $(SYNC_SOURCES) | wc -w | tr -d ' ') files"
+	@echo "Synced $$(echo $(SYNC_SOURCES) | wc -w | tr -d ' ') tracked files"
+	@echo ""
+	@echo "--- Syncing sql/migrations/ (additive; never deletes public-only files) ---"
+	@mkdir -p "$(PUB_REPO)/sql/migrations"
+	@MIG_COUNT=0; for f in $(DEV_REPO)/sql/migrations/[0-9]*.sql; do \
+		if [ -f "$$f" ]; then \
+			cp "$$f" "$(PUB_REPO)/sql/migrations/" && MIG_COUNT=$$((MIG_COUNT+1)); \
+		fi; \
+	done; echo "Synced $$MIG_COUNT migration files"
+	@mkdir -p "$(PUB_REPO)/sql/migrations/rollback"
+	@RB_COUNT=0; for f in $(DEV_REPO)/sql/migrations/rollback/*.sql; do \
+		if [ -f "$$f" ]; then \
+			cp "$$f" "$(PUB_REPO)/sql/migrations/rollback/" && RB_COUNT=$$((RB_COUNT+1)); \
+		fi; \
+	done; echo "Synced $$RB_COUNT rollback files"
 	@echo ""
 	@echo "--- Changes in public repo ---"
 	@cd $(PUB_REPO) && git diff --stat HEAD
