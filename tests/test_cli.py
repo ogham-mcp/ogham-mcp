@@ -8,10 +8,15 @@ runner = CliRunner()
 
 @pytest.fixture(autouse=True)
 def mock_settings(monkeypatch):
+    from ogham.flow_control import clear_flow_overrides
+
+    clear_flow_overrides()
     monkeypatch.setenv("SUPABASE_URL", "https://fake.supabase.co")
     monkeypatch.setenv("SUPABASE_KEY", "fake-key")
     monkeypatch.setenv("EMBEDDING_PROVIDER", "ollama")
     monkeypatch.setenv("DEFAULT_PROFILE", "default")
+    yield
+    clear_flow_overrides()
 
 
 def test_cli_health():
@@ -28,6 +33,18 @@ def test_cli_health():
 
     assert result.exit_code == 0
     assert "ok" in result.output.lower()
+
+
+def test_cli_config_shows_memory_flow_controls():
+    """ogham config should expose effective recall/inscribe state."""
+    from ogham.cli import app
+
+    result = runner.invoke(app, ["config", "--json"])
+
+    assert result.exit_code == 0
+    assert '"memory_flows"' in result.output
+    assert '"recall_enabled": true' in result.output
+    assert '"inscribe_enabled": true' in result.output
 
 
 def test_cli_profiles():
@@ -85,6 +102,22 @@ def test_cli_search():
 
     assert result.exit_code == 0
     assert "test memory" in result.output
+
+
+def test_cli_search_no_recall_skips_search():
+    """ogham search --no-recall should not embed or search."""
+    from ogham.cli import app
+
+    with (
+        patch("ogham.embeddings.generate_embedding") as mock_embed,
+        patch("ogham.database.hybrid_search_memories") as mock_search,
+    ):
+        result = runner.invoke(app, ["search", "test query", "--no-recall"])
+
+    assert result.exit_code == 0
+    assert "Recall is disabled" in result.output
+    mock_embed.assert_not_called()
+    mock_search.assert_not_called()
 
 
 def test_cli_list():
@@ -175,6 +208,18 @@ def test_cli_store():
     assert call_kwargs["source"] == "cli"
 
 
+def test_cli_store_no_inscribe_skips_store():
+    """ogham store --no-inscribe should not call the store pipeline."""
+    from ogham.cli import app
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        result = runner.invoke(app, ["store", "test memory content here", "--no-inscribe"])
+
+    assert result.exit_code == 0
+    assert "Inscribe is disabled" in result.output
+    mock_store.assert_not_called()
+
+
 def test_cli_store_with_ttl():
     """ogham store should show expiry when profile has TTL"""
     from ogham.cli import app
@@ -229,6 +274,23 @@ def test_cli_serve():
 
     assert result.exit_code == 0
     mock_main.assert_called_once_with(transport=None, host=None, port=None)
+
+
+def test_cli_serve_flow_overrides():
+    """ogham serve should apply recall/inscribe overrides for the server process."""
+    from ogham.cli import app
+    from ogham.flow_control import flow_status
+
+    captured = {}
+
+    def fake_main(**_kwargs):
+        captured.update(flow_status())
+
+    with patch("ogham.server.main", side_effect=fake_main):
+        result = runner.invoke(app, ["serve", "--no-recall", "--no-inscribe"])
+
+    assert result.exit_code == 0
+    assert captured == {"recall_enabled": False, "inscribe_enabled": False}
 
 
 def test_cli_serve_sse():

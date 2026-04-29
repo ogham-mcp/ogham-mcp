@@ -279,6 +279,8 @@ When `profiles` is set, results include memories from all listed profiles with a
 | `DEFAULT_MATCH_THRESHOLD` | No | `0.7` | Similarity threshold (see below) |
 | `DEFAULT_MATCH_COUNT` | No | `10` | Max results per search |
 | `DEFAULT_PROFILE` | No | `default` | Memory profile name |
+| `OGHAM_RECALL_ENABLED` | No | `true` | Enable memory recall/context retrieval |
+| `OGHAM_INSCRIBE_ENABLED` | No | `true` | Enable memory capture/content writes |
 
 ### Embedding providers
 
@@ -331,6 +333,35 @@ ogham hooks install
 
 - **recall** -- read from the stone. Searches Ogham for memories relevant to your project and injects them as context. Fires at session start and after compaction.
 - **inscribe** -- carve into the stone. Captures meaningful tool activity as memories. Skips noise (`ls`, `cat`, `git status`) and only stores signal (commits, deploys, errors, config changes). Fires after tool use and before compaction. Secrets are masked before storing.
+
+Disable either flow when you want an agent attached to Ogham without letting it pull memory into context or write new memory:
+
+```bash
+OGHAM_RECALL_ENABLED=false ogham serve       # no context injection / memory search
+OGHAM_INSCRIBE_ENABLED=false ogham serve     # no memory capture / content writes
+ogham hooks recall --no-recall               # one-off hook recall skip
+ogham hooks inscribe --no-inscribe           # one-off hook capture skip
+ogham search "query" --no-recall             # one-off CLI search skip
+ogham store "some fact" --no-inscribe        # one-off CLI store skip
+```
+
+For MCP clients, put the env vars in that client's Ogham server config:
+
+```json
+{
+  "mcpServers": {
+    "ogham": {
+      "command": "ogham-serve",
+      "env": {
+        "OGHAM_RECALL_ENABLED": "false",
+        "OGHAM_INSCRIBE_ENABLED": "false"
+      }
+    }
+  }
+}
+```
+
+Admin operations such as config, health, stats, audit, export, delete, and cleanup remain available so you can inspect or clean memory even when recall or inscribe is disabled.
 
 **Smart filtering:** Hooks don't capture everything. Routine commands (`ls`, `pwd`, `git add`) are skipped. Only signal events (errors, deployments, commits, config changes) are stored -- typically 20-30 memories per session instead of hundreds.
 
@@ -535,6 +566,39 @@ Ogham works with Supabase or vanilla PostgreSQL. Run the schema file that matche
 Supabase and Neon both include pgvector out of the box -- no extra setup needed. If you're self-hosting Postgres, you need PostgreSQL 15+ with the [pgvector](https://github.com/pgvector/pgvector) extension installed. We develop and test against PostgreSQL 17.
 
 For Postgres, set `DATABASE_BACKEND=postgres` and `DATABASE_URL=postgresql://...` in your environment.
+
+### Local pgvector test database
+
+Postgres integration tests are intentionally scratch-only. They run real
+memory rows through PostgreSQL + pgvector, but skip unless `DATABASE_URL`
+contains `scratch` or `OGHAM_TEST_ALLOW_DESTRUCTIVE=1` is set. This keeps
+ordinary `pytest` runs from touching a personal or production Ogham database.
+
+Start the standard local scratch database:
+
+```bash
+make test-postgres-db
+
+export DATABASE_BACKEND=postgres
+export DATABASE_URL=postgresql://ogham:ogham@localhost:5433/ogham_scratch
+
+uv run pytest -m postgres_integration
+# or:
+make test-postgres
+```
+
+The test harness applies the canonical `sql/schema_postgres.sql` to an empty
+scratch database, and reapplies the idempotent baseline migrations needed by
+current tests on older scratch databases.
+
+External Supabase + Ollama integration tests are opt-in so local test runs do
+not block on network services during collection:
+
+```bash
+OGHAM_RUN_EXTERNAL_INTEGRATION=1 uv run pytest -m integration -v
+# or:
+make test-external
+```
 
 ### Upgrading an existing Ogham database
 

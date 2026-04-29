@@ -8,6 +8,9 @@ FAKE_ID = "a1b2c3d4-0000-0000-0000-000000000001"
 
 @pytest.fixture(autouse=True)
 def mock_settings(monkeypatch):
+    from ogham.flow_control import clear_flow_overrides
+
+    clear_flow_overrides()
     monkeypatch.setenv("SUPABASE_URL", "https://fake.supabase.co")
     monkeypatch.setenv("SUPABASE_KEY", "fake-key")
     monkeypatch.setenv("EMBEDDING_PROVIDER", "ollama")
@@ -15,6 +18,8 @@ def mock_settings(monkeypatch):
     # Tests assume the resolution order falls through to settings.default_profile
     # = "default". The OGHAM_PROFILE env var would short-circuit that.
     monkeypatch.delenv("OGHAM_PROFILE", raising=False)
+    yield
+    clear_flow_overrides()
 
 
 @pytest.fixture(autouse=True)
@@ -177,6 +182,20 @@ def test_store_memory_uses_active_profile(mock_embedding, mock_db):
     assert call_kwargs["profile"] == "personal"
 
 
+def test_store_memory_disabled_does_not_store_or_enqueue(mock_embedding, mock_db):
+    from ogham.flow_control import temporary_flow_overrides
+    from ogham.tools.memory import store_memory
+
+    with temporary_flow_overrides(inscribe=False):
+        result = store_memory(content="test memory", source="test", tags=["tag1"])
+
+    assert result["status"] == "disabled"
+    assert result["flow"] == "inscribe"
+    mock_embedding.assert_not_called()
+    mock_db["store"].assert_not_called()
+    mock_db["enqueue"].assert_not_called()
+
+
 def test_hybrid_search(mock_embedding, mock_db):
     """v0.12.1 split shape: hybrid_search returns dict with results +
     wiki_preamble keys. wiki_preamble defaults to [] when injection is
@@ -197,6 +216,22 @@ def test_hybrid_search(mock_embedding, mock_db):
     assert call_kwargs["query_text"] == "test query"
     assert call_kwargs["profile"] == "default"
     mock_db["record_access"].assert_called_once_with([FAKE_ID])
+
+
+def test_hybrid_search_disabled_does_not_recall(mock_embedding, mock_db):
+    from ogham.flow_control import temporary_flow_overrides
+    from ogham.tools.memory import hybrid_search
+
+    with temporary_flow_overrides(recall=False):
+        out = hybrid_search(query="test query")
+
+    assert out["status"] == "disabled"
+    assert out["flow"] == "recall"
+    assert out["results"] == []
+    assert out["wiki_preamble"] == []
+    mock_embedding.assert_not_called()
+    mock_db["search"].assert_not_called()
+    mock_db["record_access"].assert_not_called()
 
 
 def test_list_recent(mock_embedding, mock_db):
@@ -1259,6 +1294,30 @@ def test_store_decision_with_related_memories(mock_embedding, mock_db):
         created_by="user",
         metadata={},
     )
+
+
+def test_store_decision_disabled_with_related_memories_does_not_create_edges(
+    mock_embedding, mock_db
+):
+    """Disabled inscribe should short-circuit before supports edges use result['id']."""
+    from ogham.flow_control import temporary_flow_overrides
+    from ogham.tools.memory import store_decision
+
+    related_id = "b2c3d4e5-0000-0000-0000-000000000002"
+
+    with temporary_flow_overrides(inscribe=False):
+        with patch("ogham.tools.memory.db_create_relationship") as mock_rel:
+            result = store_decision(
+                decision="Use RRF for hybrid search",
+                rationale="No score normalization needed",
+                related_memories=[related_id],
+            )
+
+    assert result["status"] == "disabled"
+    assert result["flow"] == "inscribe"
+    mock_embedding.assert_not_called()
+    mock_db["store"].assert_not_called()
+    mock_rel.assert_not_called()
 
 
 # --- get_related_memories database tests ---

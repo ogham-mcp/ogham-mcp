@@ -10,6 +10,16 @@ Typer-based CLI for managing Claude Code hooks. Commands:
 - Calls `hooks_install.install_hooks()`
 - Prints success/failure status with rich formatting
 
+### `recall`
+- Runs recall hooks for session start / post-compaction context
+- Supports `--recall/--no-recall` for one-off flow control
+- Also honours `OGHAM_RECALL_ENABLED`
+
+### `inscribe`
+- Runs inscribe hooks for post-tool capture / pre-compaction drains
+- Supports `--inscribe/--no-inscribe` for one-off flow control
+- Also honours `OGHAM_INSCRIBE_ENABLED`
+
 ### `uninstall`
 - Calls `hooks_install.uninstall_hooks()`
 - Removes all Ogham hook entries from Claude Code settings

@@ -208,6 +208,11 @@ def store_memory_enriched(
 
     Returns the stored memory dict with id, created_at, links_created, etc.
     """
+    from ogham.flow_control import disabled_payload, inscribe_enabled
+
+    if not inscribe_enabled():
+        return disabled_payload("inscribe", profile=profile)
+
     # Lazy import to avoid circular dependency with tools/memory.py
     from ogham.tools.memory import _require_content
 
@@ -492,6 +497,11 @@ def search_memories_enriched(
             extract query-relevant facts. Returns a single extracted-facts
             result instead of raw memories. Default: False (verbatim results).
     """
+    from ogham.flow_control import recall_enabled
+
+    if not recall_enabled():
+        return []
+
     embedding_usage: EmbeddingUsage | None = None
 
     if embedding is None:

@@ -230,10 +230,15 @@ def store_memory(
         metadata: Additional structured data to store alongside the memory.
         auto_link: Automatically link to similar existing memories (default True).
     """
+    from ogham.flow_control import disabled_payload, inscribe_enabled
+
+    active_profile = get_active_profile()
+    if not inscribe_enabled():
+        return disabled_payload("inscribe", profile=active_profile)
+
     from ogham.recompute_executor import enqueue_for_tags
     from ogham.service import store_memory_enriched
 
-    active_profile = get_active_profile()
     result = store_memory_enriched(
         content=content,
         profile=active_profile,
@@ -303,6 +308,8 @@ def store_decision(
         tags=decision_tags,
         metadata=metadata,
     )
+    if result.get("status") == "disabled":
+        return result
 
     if related_memories:
         for rel_id in related_memories:
@@ -536,6 +543,15 @@ def hybrid_search(
                   with v0.12 runs; 'short' is the typical-cost default.
     """
     _require_limit(limit)
+    from ogham.flow_control import disabled_payload, recall_enabled
+
+    if not recall_enabled():
+        return {
+            **disabled_payload("recall"),
+            "results": [],
+            "wiki_preamble": [],
+        }
+
     from ogham.embeddings import generate_embedding
     from ogham.service import _wiki_injection_results, search_memories_enriched
 
@@ -573,6 +589,11 @@ def list_recent(
         tags: Filter to memories with any of these tags.
     """
     _require_limit(limit)
+    from ogham.flow_control import recall_enabled
+
+    if not recall_enabled():
+        return []
+
     return list_recent_memories(
         profile=get_active_profile(),
         limit=limit,
@@ -628,6 +649,11 @@ def update_memory(
         tags: New tags (replaces existing tags).
         metadata: New metadata (replaces existing metadata).
     """
+    from ogham.flow_control import disabled_payload, inscribe_enabled
+
+    if not inscribe_enabled():
+        return disabled_payload("inscribe", id=memory_id, profile=get_active_profile())
+
     updates: dict[str, Any] = {}
     if content is not None:
         updates["content"] = content
@@ -681,6 +707,11 @@ def reinforce_memory(
         memory_id: The UUID of the memory to reinforce.
         strength: How strongly to reinforce (0.5-1.0, default 0.85). Higher = stronger boost.
     """
+    from ogham.flow_control import disabled_payload, inscribe_enabled
+
+    if not inscribe_enabled():
+        return disabled_payload("inscribe", id=memory_id, profile=get_active_profile())
+
     if not 0.0 < strength <= 1.0:
         raise ValueError(f"strength must be between 0.0 (exclusive) and 1.0, got {strength}")
     from ogham.database import get_memory_by_id
@@ -719,6 +750,11 @@ def contradict_memory(
         memory_id: The UUID of the memory to contradict.
         strength: How strongly to contradict (0.0-0.5, default 0.15). Lower = stronger.
     """
+    from ogham.flow_control import disabled_payload, inscribe_enabled
+
+    if not inscribe_enabled():
+        return disabled_payload("inscribe", id=memory_id, profile=get_active_profile())
+
     if not 0.0 <= strength < 1.0:
         raise ValueError(f"strength must be between 0.0 and 1.0 (exclusive), got {strength}")
     from ogham.database import get_memory_by_id
@@ -850,6 +886,11 @@ def import_memories_tool(data: str, dedup_threshold: float = 0.8) -> dict[str, A
         data: JSON string from a previous export_profile call.
         dedup_threshold: Skip memories with similarity above this (0 to disable dedup).
     """
+    from ogham.flow_control import disabled_payload, inscribe_enabled
+
+    if not inscribe_enabled():
+        return disabled_payload("inscribe", profile=get_active_profile())
+
     return _import_memories(data, profile=get_active_profile(), dedup_threshold=dedup_threshold)
 
 
@@ -924,6 +965,11 @@ def explore_knowledge(
         source: Filter seed results to memories from this source.
     """
     _require_limit(limit)
+    from ogham.flow_control import recall_enabled
+
+    if not recall_enabled():
+        return []
+
     embedding = generate_embedding(query)
     results = db_explore_graph(
         query_text=query,
@@ -961,6 +1007,11 @@ def find_related(
         min_strength: Minimum edge strength to follow (default 0.5).
         limit: Maximum results to return (default 20).
     """
+    from ogham.flow_control import recall_enabled
+
+    if not recall_enabled():
+        return []
+
     return db_get_related(
         memory_id=memory_id,
         depth=depth,
@@ -988,6 +1039,11 @@ def suggest_connections(
         min_shared_entities: Minimum entities in common (default 2).
         limit: Maximum suggestions (default 10).
     """
+    from ogham.flow_control import recall_enabled
+
+    if not recall_enabled():
+        return []
+
     from ogham.database import get_backend
 
     # v0.13.1: route through facade so Supabase works (was raising

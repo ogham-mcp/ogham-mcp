@@ -16,7 +16,7 @@
 #   - uv for Python builds
 #   - psycopg installed (for migrations)
 
-.PHONY: test lint build publish tag clean wheel sync gateway migrate release release-patch check-clean version-check smoke preflight
+.PHONY: test test-postgres-db test-postgres test-external lint build publish tag clean wheel sync gateway migrate release release-patch check-clean version-check smoke preflight
 
 # --- Paths ---
 DEV_REPO := /Users/kevinburns/Developer/web-projects/openbrain-sharedmemory
@@ -25,9 +25,20 @@ GATEWAY_REPO := /Users/kevinburns/Developer/web-projects/ogham-gateway
 
 # --- Core targets ---
 
-# Run all tests
+# Run the standard local suite. External Supabase/Ollama tests are opt-in.
 test:
 	uv run pytest tests/ -v
+
+test-postgres-db:
+	docker compose --profile test up -d postgres-scratch
+
+test-postgres: test-postgres-db
+	DATABASE_BACKEND=postgres \
+	DATABASE_URL=postgresql://ogham:ogham@localhost:5433/ogham_scratch \
+	uv run pytest -m postgres_integration
+
+test-external:
+	OGHAM_RUN_EXTERNAL_INTEGRATION=1 uv run pytest -m integration -v
 
 # Lint + format check
 lint:
