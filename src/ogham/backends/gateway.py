@@ -395,3 +395,7 @@ class GatewayBackend:
     ) -> list[dict[str, Any]]:
         self._lifecycle_unsupported("suggest_unlinked_by_shared_entities")
         return []
+
+    def link_memory_entities(self, *args: Any, **kwargs: Any) -> int:
+        self._lifecycle_unsupported("link_memory_entities")
+        return 0

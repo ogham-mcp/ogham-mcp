@@ -1046,3 +1046,8 @@ BEGIN
     LIMIT max_results;
 END;
 $$;
+
+-- v0.14: lock down entity-graph SECURITY DEFINER functions to service_role
+-- only. Migration 037 mirrors this for existing deployments.
+REVOKE EXECUTE ON FUNCTION refresh_entity_temporal_span(bigint) FROM anon, authenticated, PUBLIC;
+REVOKE EXECUTE ON FUNCTION spread_entity_activation_memories(text[], text, integer, double precision, double precision, integer) FROM anon, authenticated, PUBLIC;

@@ -11,6 +11,8 @@ import logging
 import os
 import re
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
@@ -255,17 +257,38 @@ def store_memory_enriched(
         embedding_usage = {}
         embedding = generate_embedding(content, usage_out=embedding_usage)
 
-    # Compute surprise score + detect conflicts (>75% similarity)
+    # Compute surprise score + detect conflicts (>75% similarity).
+    #
+    # PERF: this hybrid_search runs synchronously inside store_memory and
+    # was historically the dominant tail in store-latency p95 (Supabase
+    # panel showed 7-8s outliers on INSERTs because of this call). Two
+    # caps now bound the tail:
+    #
+    #   * limit=1 instead of 3 -- the surprise score only needs the top
+    #     neighbour, and the conflict warning is a soft hint where one
+    #     example is enough. Caps the work HNSW does per call.
+    #   * wall-clock timeout via ThreadPoolExecutor. If hybrid_search
+    #     doesn't return in OGHAM_CONFLICT_TIMEOUT_MS (default 1500ms),
+    #     we skip surprise scoring (default 0.5) and skip conflict
+    #     reporting. The store still completes.
+    #
+    # The timeout-via-thread pattern is sync-friendly: we don't actually
+    # cancel the in-flight RPC, but we stop waiting for it. The
+    # background thread's result is discarded.
     surprise = 0.5
     conflicts: list[dict[str, Any]] = []
     conflict_threshold = float(os.environ.get("OGHAM_CONFLICT_THRESHOLD", "0.75"))
+    conflict_timeout_ms = float(os.environ.get("OGHAM_CONFLICT_TIMEOUT_MS", "1500"))
     try:
-        existing = hybrid_search_memories(
-            query_text=content[:200],
-            query_embedding=embedding,
-            profile=profile,
-            limit=3,
-        )
+        with ThreadPoolExecutor(max_workers=1) as _pool:
+            _future = _pool.submit(
+                hybrid_search_memories,
+                query_text=content[:200],
+                query_embedding=embedding,
+                profile=profile,
+                limit=1,
+            )
+            existing = _future.result(timeout=conflict_timeout_ms / 1000.0)
         if existing:
             max_sim = max(r.get("similarity", 0) for r in existing)
             surprise = round(1.0 - max_sim, 3)
@@ -279,6 +302,13 @@ def store_memory_enriched(
                             "content_preview": r.get("content", "")[:200],
                         }
                     )
+    except FuturesTimeout:
+        logger.warning(
+            "store_memory: surprise scoring timed out after %.0fms; "
+            "store proceeding with default surprise=0.5 "
+            "(tune via OGHAM_CONFLICT_TIMEOUT_MS)",
+            conflict_timeout_ms,
+        )
     except Exception:
         logger.debug("Surprise scoring skipped: search failed, using default 0.5")
 
@@ -301,6 +331,24 @@ def store_memory_enriched(
         recurrence_days=recurrence_days,
         surprise=surprise,
     )
+
+    # v0.14: Populate entities + memory_entities for the new row. Failure
+    # here is non-fatal -- the memory itself is already stored, and the
+    # backend gracefully degrades on deployments that haven't applied
+    # migration 036 yet (link_memory_entities returns 0 when entities
+    # tables are absent). This keeps spreading-activation, density, and
+    # suggest_connections fed without blocking ingest on graph plumbing.
+    if entity_tags:
+        try:
+            from ogham.database import get_backend
+
+            get_backend().link_memory_entities(
+                memory_id=str(result["id"]),
+                profile=profile,
+                entity_tags=entity_tags,
+            )
+        except Exception as exc:
+            logger.debug("link_memory_entities skipped: %s", exc)
 
     response: dict[str, Any] = {
         "status": "stored",
@@ -738,6 +786,26 @@ def _search_memories_raw(
     """Retrieve memories via intent-aware search paths. No reranking, no access recording."""
     if embedding is None:
         embedding = embedding_generator(query)
+
+    # OGHAM_BENCH_RAW=true / OGHAM_BENCH_MODE=true short-circuits to a plain
+    # hybrid_search_memories call with no reformulation, no entity extraction,
+    # no intent branching, no activation merge. BENCH_MODE additionally
+    # routes to the sterile SQL function (no access_count / graph_boost /
+    # entity_overlap multipliers) — see backends/postgres.py. Used for
+    # apples-to-apples retrieval benchmarks across releases. Never enable
+    # in production.
+    _bench_raw = os.environ.get("OGHAM_BENCH_RAW", "").lower() in ("true", "1", "yes")
+    _bench_mode = os.environ.get("OGHAM_BENCH_MODE", "").lower() in ("true", "1", "yes")
+    if _bench_raw or _bench_mode:
+        return hybrid_search_memories(
+            query_text=query,
+            query_embedding=embedding,
+            profile=profile,
+            limit=limit,
+            tags=tags,
+            source=source,
+            profiles=profiles,
+        )
 
     # Query reformulation is gated per-intent (v0.10.1). Global application
     # regressed MRR in v0.9.2 because it stripped filler words that temporal
@@ -1866,6 +1934,17 @@ def _merge_activation_results(
     if not query_entity_tags:
         return hybrid_results[:limit]
 
+    # Global damping knob. Scales both activation_weight (re-ranking magnitude)
+    # and graph_fraction (bridge-doc tail injection). Set 0..1 to soften the
+    # graph layer when the underlying entity graph is dense enough to displace
+    # gold-rank-1 hits. Default 1.0 = current behaviour. damping=0 short-
+    # circuits the spreading-activation RPC entirely (no DB work).
+    damping = float(os.environ.get("OGHAM_ACTIVATION_DAMPING", "1.0"))
+    if damping <= 0.0:
+        return hybrid_results[:limit]
+    if damping != 1.0:
+        graph_fraction = graph_fraction * damping
+
     # Density-adaptive activation weight (Shodh-inspired).
     if activation_weight is None:
         activation_weight = _density_adaptive_activation_weight(profile)
@@ -1874,6 +1953,8 @@ def _merge_activation_results(
             profile,
             activation_weight,
         )
+    if damping != 1.0:
+        activation_weight = activation_weight * damping
 
     try:
         activated = spread_entity_activation(

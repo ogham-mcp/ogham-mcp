@@ -255,6 +255,20 @@ class DatabaseBackend(Protocol):
     """Returns (entity_count, edge_count) -- both as floats so callers can
     compute density = edges / entities without re-casting."""
 
+    # ── Entity graph writes (v0.14) ───────────────────────────────────
+
+    def link_memory_entities(
+        self,
+        memory_id: str,
+        profile: str,
+        entity_tags: list[str],
+    ) -> int: ...
+
+    """Upsert entities and link to a memory. ``entity_tags`` are
+    ``"type:name"`` strings from ``ogham.extraction.extract_entities``.
+    Returns the number of new (memory, entity) edges inserted (0 on a
+    re-run since memory_entities has a unique constraint)."""
+
     # ── Hidden-link suggestions (v0.13.1) ─────────────────────────────
 
     def suggest_unlinked_by_shared_entities(

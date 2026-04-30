@@ -895,6 +895,60 @@ def import_memories_tool(data: str, dedup_threshold: float = 0.8) -> dict[str, A
 
 
 @mcp.tool
+@log_timing("backfill_entities")
+def backfill_entities_tool(profile: str | None = None, batch_size: int = 200) -> dict[str, Any]:
+    """Populate entities + memory_entities for existing memory rows.
+
+    One-shot per deployment after migration 036 (v0.14). Live writes after
+    v0.14 are linked automatically; this covers historical rows.
+
+    Args:
+        profile: Restrict to one profile, or None to walk every memory
+            in the active backend.
+        batch_size: Rows per fetch.
+    """
+    from ogham.entity_backfill import backfill_entities
+
+    return backfill_entities(profile=profile, batch_size=batch_size)
+
+
+@mcp.tool
+@log_timing("import_claude_code_memories")
+def import_claude_code_memories_tool(
+    directory: str,
+    dedup_threshold: float = 0.8,
+    project_tag: str | None = None,
+) -> dict[str, Any]:
+    """Import a Claude Code local-memory directory into the active profile.
+
+    Parses YAML-frontmatter markdown files under ``directory`` (typically
+    ``~/.claude/projects/<encoded-cwd>/memory/``) and imports each body as
+    a memory tagged ``source:claude-code-memory``. ``MEMORY.md`` is treated
+    as the index and skipped.
+
+    Args:
+        directory: Path to a Claude Code memory directory.
+        dedup_threshold: Skip memories with similarity above this (0 to disable).
+        project_tag: Override the inferred project tag. The encoded-cwd
+            heuristic is lossy on hyphenated repo names (e.g.
+            ``openbrain-sharedmemory`` decodes to ``sharedmemory``);
+            pass ``project_tag="ogham"`` to keep tags consistent.
+    """
+    from ogham.claude_code_import import import_claude_code_memories
+    from ogham.flow_control import disabled_payload, inscribe_enabled
+
+    if not inscribe_enabled():
+        return disabled_payload("inscribe", profile=get_active_profile())
+
+    return import_claude_code_memories(
+        directory,
+        profile=get_active_profile(),
+        dedup_threshold=dedup_threshold,
+        project_tag=project_tag,
+    )
+
+
+@mcp.tool
 @log_timing("cleanup_expired")
 def cleanup_expired() -> dict[str, Any]:
     """Delete expired memories in the active profile. Expired memories are already

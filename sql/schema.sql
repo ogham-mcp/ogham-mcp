@@ -1079,3 +1079,11 @@ BEGIN
     LIMIT max_results;
 END;
 $$;
+
+-- v0.14: lock down entity-graph SECURITY DEFINER functions to service_role
+-- only. These bypass RLS by design and were never meant to be part of
+-- the public REST surface. Migration 037 keeps existing deployments in
+-- sync with this schema-time grant. See migration 037 header for the
+-- full rationale.
+REVOKE EXECUTE ON FUNCTION refresh_entity_temporal_span(bigint) FROM anon, authenticated, PUBLIC;
+REVOKE EXECUTE ON FUNCTION spread_entity_activation_memories(text[], text, integer, double precision, double precision, integer) FROM anon, authenticated, PUBLIC;

@@ -606,6 +606,234 @@ def import_cmd(
     )
 
 
+@app.command(name="import-claude-code")
+def import_claude_code_cmd(
+    directory: str = typer.Argument(
+        help="Path to a Claude Code memory dir (e.g. ~/.claude/projects/<encoded-cwd>/memory/)"
+    ),
+    profile: str = typer.Option(None, help="Profile to import into"),
+    dedup: float = typer.Option(0.8, help="Dedup threshold (0 to disable)"),
+    project: str = typer.Option(
+        None,
+        help=(
+            "Override the inferred project tag. The encoded-cwd heuristic is "
+            "lossy on hyphenated repo names (e.g. 'openbrain-sharedmemory' -> "
+            "'sharedmemory'); pass --project ogham to keep tags consistent."
+        ),
+    ),
+):
+    """Import memories from a Claude Code local-memory directory.
+
+    Parses ``MEMORY.md``-companion ``.md`` files (each with YAML frontmatter
+    carrying name/description/type/originSessionId) and imports the bodies
+    as Ogham memories tagged ``source:claude-code-memory``, ``type:<frontmatter
+    type>``, and ``project:<inferred from directory>``.
+    """
+    from ogham.flow_control import disabled_message, inscribe_enabled
+
+    if not inscribe_enabled():
+        console.print(f"[yellow]{disabled_message('inscribe')}[/yellow]")
+        return
+
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
+
+    from ogham.claude_code_import import import_claude_code_memories
+    from ogham.config import settings
+
+    target = profile or settings.default_profile
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeRemainingColumn(),
+        console=console,
+    ) as progress:
+        embed_task = progress.add_task("Embedding...", total=None)
+        dedup_task = progress.add_task("Deduplicating...", total=None, visible=False)
+
+        def on_embed_progress(embedded, total):
+            if progress.tasks[embed_task].total is None:
+                progress.update(embed_task, total=total)
+            progress.update(embed_task, completed=embedded)
+
+        def on_progress(imported, skipped, total):
+            progress.update(embed_task, visible=False)
+            if progress.tasks[dedup_task].total is None:
+                progress.update(dedup_task, total=total, visible=True)
+            progress.update(
+                dedup_task,
+                completed=imported + skipped,
+                description=f"Processing ({imported} new, {skipped} skipped)",
+            )
+
+        result = import_claude_code_memories(
+            directory,
+            profile=target,
+            dedup_threshold=dedup,
+            on_progress=on_progress,
+            on_embed_progress=on_embed_progress,
+            project_tag=project,
+        )
+
+    if result.get("warning"):
+        console.print(f"[yellow]Warning: {result['warning']} ({result['directory']})[/yellow]")
+        return
+    console.print(
+        f"[green]Imported {result['imported']} memories, "
+        f"skipped {result['skipped']} duplicates from {result['directory']}.[/green]"
+    )
+
+
+@app.command(name="import-claude-ai")
+def import_claude_ai_cmd(
+    path: str = typer.Argument(
+        help=(
+            "Path to a Claude.ai data export — accepts the .zip Anthropic emails "
+            "you, the unzipped directory, or conversations.json directly."
+        )
+    ),
+    profile: str = typer.Option(None, help="Profile to import into"),
+    dedup: float = typer.Option(0.8, help="Dedup threshold (0 to disable)"),
+    mode: str = typer.Option(
+        "turn-pairs",
+        help=(
+            "Granularity: 'turn-pairs' (default, one memory per human/assistant "
+            "exchange), 'raw' (one per message), 'summarize' (placeholder, "
+            "currently behaves like turn-pairs)."
+        ),
+    ),
+    project: str = typer.Option(
+        None,
+        help="Override the project tag attached to every imported memory.",
+    ),
+    since: str = typer.Option(
+        None,
+        help=("Only import conversations updated on/after this date (ISO 8601, e.g. 2026-01-01)."),
+    ),
+    no_smart_filter: bool = typer.Option(
+        False,
+        "--no-smart-filter",
+        help="Keep pleasantry turn-pairs that the default filter drops.",
+    ),
+):
+    """Import memories from a Claude.ai data export.
+
+    Anthropic offers a first-party export at Settings -> Privacy -> Request
+    your data. After ~24-48h you receive a ZIP with conversations.json plus
+    metadata. This command parses that export, walks each conversation as
+    consecutive (human, assistant) turn-pairs, and stores one memory per
+    pair (assistant turn as content, human prompt in metadata.user_prompt).
+
+    Privacy note: a year of Claude.ai history can include sensitive content.
+    Pre-prune the export ZIP before running if needed; --since narrows by
+    date.
+    """
+    from ogham.flow_control import disabled_message, inscribe_enabled
+
+    if not inscribe_enabled():
+        console.print(f"[yellow]{disabled_message('inscribe')}[/yellow]")
+        return
+
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
+
+    from ogham.claude_ai_import import import_claude_ai_export
+    from ogham.config import settings
+
+    target = profile or settings.default_profile
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeRemainingColumn(),
+        console=console,
+    ) as progress:
+        embed_task = progress.add_task("Embedding...", total=None)
+        dedup_task = progress.add_task("Deduplicating...", total=None, visible=False)
+
+        def on_embed_progress(embedded, total):
+            if progress.tasks[embed_task].total is None:
+                progress.update(embed_task, total=total)
+            progress.update(embed_task, completed=embedded)
+
+        def on_progress(imported, skipped, total):
+            progress.update(embed_task, visible=False)
+            if progress.tasks[dedup_task].total is None:
+                progress.update(dedup_task, total=total, visible=True)
+            progress.update(
+                dedup_task,
+                completed=imported + skipped,
+                description=f"Processing ({imported} new, {skipped} skipped)",
+            )
+
+        result = import_claude_ai_export(
+            path,
+            profile=target,
+            mode=mode,  # type: ignore[arg-type]
+            smart_filter=not no_smart_filter,
+            project_tag=project,
+            since=since,
+            dedup_threshold=dedup,
+            on_progress=on_progress,
+            on_embed_progress=on_embed_progress,
+        )
+
+    if result.get("warning"):
+        console.print(f"[yellow]Warning: {result['warning']} ({result['path']})[/yellow]")
+        return
+    console.print(
+        f"[green]Imported {result['imported']} memories, "
+        f"skipped {result['skipped']} duplicates from {result['path']} "
+        f"(mode={result['mode']}).[/green]"
+    )
+
+
+@app.command(name="backfill-entities")
+def backfill_entities_cmd(
+    profile: str = typer.Option(None, help="Profile to backfill (default: all)"),
+    batch_size: int = typer.Option(200, help="Memory rows per batch"),
+):
+    """Populate entities + memory_entities for existing memory rows.
+
+    One-shot per deployment after applying migration 036. New writes after
+    v0.14 are linked automatically by the live store_memory path; this
+    command covers anything written before that.
+    """
+    from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
+
+    from ogham.entity_backfill import backfill_entities
+
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TextColumn("{task.fields[edges]} edges"),
+        TimeRemainingColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Linking entities...", total=None, edges=0)
+
+        def on_progress(processed: int, edges: int, total: int) -> None:
+            if progress.tasks[task].total != total:
+                progress.update(task, total=total)
+            progress.update(task, completed=processed, edges=edges)
+
+        result = backfill_entities(
+            profile=profile,
+            batch_size=batch_size,
+            on_progress=on_progress,
+        )
+
+    scope = f" in profile {result['profile']!r}" if result.get("profile") else ""
+    console.print(
+        f"[green]Backfill complete: {result['edges_added']} edges added across "
+        f"{result['memories_with_entities']}/{result['total']} memories{scope}.[/green]"
+    )
+
+
 @app.command()
 def init(
     db_url: str = typer.Option(None, help="PostgreSQL connection string"),

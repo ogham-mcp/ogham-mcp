@@ -18,6 +18,7 @@ wrapping this call logs the failure and moves on.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from ogham.config import settings
@@ -87,6 +88,7 @@ def recompute_topic_summary(
     *,
     provider: str | None = None,
     model: str | None = None,
+    force_oversize: bool = False,
 ) -> dict[str, Any]:
     """Recompute the topic summary for (profile, topic_key) if sources changed.
 
@@ -94,6 +96,9 @@ def recompute_topic_summary(
     log useful telemetry without a second DB round-trip:
       * {"action": "no_sources"} -- no memories with this tag
       * {"action": "skipped", "reason": "source_hash_match", "summary_id": ...}
+      * {"action": "skipped_oversize", "source_count": N, "max_sources": M}
+        -- mega-rollup tag exceeds settings.compile_max_sources. Pass
+        force_oversize=True to override.
       * {"action": "recomputed", "summary_id": ..., "source_count": ...}
 
     Caller passes provider + model explicitly, or omits them to fall back
@@ -107,6 +112,27 @@ def recompute_topic_summary(
     source_ids = backend.wiki_recompute_get_source_ids(profile, topic_key)
     if not source_ids:
         return {"action": "no_sources", "profile": profile, "topic_key": topic_key}
+
+    # 1b. Mega-rollup guard. Tags with hundreds of source memories produce
+    #     outputs that fail JSON escape and saturate context. Refuse unless
+    #     explicitly forced. 0 disables the check.
+    max_sources = getattr(settings, "compile_max_sources", 100)
+    if max_sources > 0 and len(source_ids) > max_sources and not force_oversize:
+        logger.warning(
+            "compile_wiki refusing %s/%s: %d source memories exceeds "
+            "compile_max_sources=%d. Pass force_oversize=True to override.",
+            profile,
+            topic_key,
+            len(source_ids),
+            max_sources,
+        )
+        return {
+            "action": "skipped_oversize",
+            "profile": profile,
+            "topic_key": topic_key,
+            "source_count": len(source_ids),
+            "max_sources": max_sources,
+        }
 
     # 2. Hash check -- short-circuit if nothing has moved.
     new_hash = compute_source_hash(source_ids)
@@ -148,12 +174,30 @@ def recompute_topic_summary(
     # 4. Synthesize. Failures propagate -- previous fresh row stays intact.
     used_provider = provider or getattr(settings, "llm_provider", "ollama")
     used_model = model or getattr(settings, "llm_model", "llama3.2")
+
+    # Output budget. 8192 fits "body up to ~1500 words + tldr_short +
+    # tldr_one_line + JSON overhead" -- enough for typical conversation
+    # tags. Modern models (Gemini 2.5 Flash, GPT-4o, Claude 3.5 Sonnet)
+    # support far more (1M+ tokens for Gemini 2.5 Flash), so we expose
+    # this as a knob for operators willing to pay for richer output on
+    # large source sets. Self-hosters bringing their own LLM bear the
+    # cost; we just warn loudly when a high cap is set so it's not
+    # invisible. Override via OGHAM_COMPILE_MAX_TOKENS env var.
+    max_tokens = int(os.environ.get("OGHAM_COMPILE_MAX_TOKENS", "8192"))
+    if max_tokens > 16384:
+        logger.warning(
+            "OGHAM_COMPILE_MAX_TOKENS=%d is large -- LLM cost scales linearly "
+            "with output length and provider rate limits may bite. Default 8192.",
+            max_tokens,
+        )
+
     forms = synthesize_json(
         prompt=prompt,
         provider=used_provider,
         model=used_model,
         system=_compile_system_prompt(),
         json_schema=TLDR_SCHEMA,
+        max_tokens=max_tokens,
     )
     composed = forms["body"]
     tldr_short = forms["tldr_short"]

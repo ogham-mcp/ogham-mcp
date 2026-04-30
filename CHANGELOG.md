@@ -4,6 +4,228 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.14.0] - 2026-04-30 -- Memory hygiene + ingestion control
+
+Theme: explicit control over what flows in and out of memory. Three
+features compose into one story: PR #42's flow gates set the policy,
+the Claude Code importer is the first ingestion surface that respects
+it, and the entity graph -- dormant since v0.10 -- finally lights up.
+
+### New: explicit recall + inscribe flow controls (#42, thanks @ersahinco)
+
+Two-layer gating across hook, CLI, and MCP surfaces:
+
+- Per-call flags: `--recall/--no-recall` on `ogham hooks recall` and
+  `ogham search`; `--inscribe/--no-inscribe` on `ogham hooks inscribe`
+  and `ogham store`.
+- Process-wide env vars: `OGHAM_RECALL_ENABLED=false` /
+  `OGHAM_INSCRIBE_ENABLED=false` disable the corresponding flow for
+  the whole server.
+
+Use this when you want an agent attached to Ogham without letting it
+pull memory into context (`--no-recall`) or write new memory
+(`--no-inscribe`). Admin operations like config / health / stats /
+audit / export remain available -- only the read-into-context and
+write-new-memory paths are gated.
+
+```bash
+ogham search "query" --no-recall              # one-off CLI search skip
+ogham store "fact" --no-inscribe              # one-off CLI store skip
+ogham hooks recall --no-recall                # one-off hook recall skip
+ogham hooks inscribe --no-inscribe            # one-off hook capture skip
+OGHAM_INSCRIBE_ENABLED=false ogham serve      # process-wide
+```
+
+### New: Claude Code local-memory importer (#216)
+
+```bash
+ogham import-claude-code ~/.claude/projects/<encoded-cwd>/memory \
+    --project ogham --dedup 0.8
+```
+
+Reads YAML-frontmatter markdown files from Claude Code's auto-memory
+directory and imports each as a memory tagged
+`source:claude-code-memory + type:<frontmatter type>`. The encoded-cwd
+heuristic for inferring a project tag is lossy on hyphenated repo
+names (e.g. `openbrain-sharedmemory` -> `sharedmemory`), so `--project`
+overrides the inferred tag. `MEMORY.md` (the index file) and dotfiles
+are skipped. The importer respects `inscribe_enabled()` -- gating from
+PR #42 applies here too.
+
+MCP tool: `import_claude_code_memories(directory, project_tag=...)`.
+
+### New: Claude.ai conversation export importer
+
+```bash
+ogham import-claude-ai ~/Downloads/data-<id>-batch-0000 --profile claude-ai
+```
+
+Imports a Claude.ai data export (Settings -> Privacy -> Request your
+data). Accepts the ZIP Anthropic emails, the unzipped directory, or
+`conversations.json` directly. Walks each conversation as consecutive
+(human, assistant) turn-pairs and stores one memory per pair with
+the assistant turn as content and the human prompt in
+`metadata.user_prompt` -- this flips retrieval onto the answer's
+substance while keeping the question recoverable.
+
+Tagging: `source:claude-ai`, `claude-conversation:<title-slug>`,
+optional `project:<tag>`. UUIDs from the export land in metadata so
+re-importing the same export six months later only pulls in new
+turns. A conservative smart filter drops pleasantry exchanges
+("thanks" / "got it"); pass `--no-smart-filter` to keep them. Use
+`--since 2026-01-01` to import only recent conversations and
+`--mode raw` for one memory per individual message.
+
+To get the LLM-distilled summary view of an imported conversation,
+run `compile_wiki(topic="claude-conversation:<slug>")` -- verbatim
+ingest plus on-demand synthesis means you keep the raw turns and
+also get the digest, without the importer making LLM calls upfront.
+
+MCP tool: `import_claude_ai_export(path, profile, mode=...)`.
+
+### Note: bulk importers skip per-memory enrichment
+
+All three bulk importers (Claude Code, Claude.ai, Agent Zero) write
+through `import_memories`, which embeds + dedups + inserts in
+batches but skips per-memory entity extraction and auto-link. This
+is by design -- a 600-memory import would otherwise run thousands
+of secondary RPCs. Imported memories are immediately searchable
+via embedding + keyword; to populate the entity graph after import
+run:
+
+```bash
+ogham backfill-entities --profile <name>
+```
+
+This walks the profile, runs `extract_entities(content)` per memory,
+and populates `memory_entities` + relationship edges. Re-runs are
+idempotent (ON CONFLICT DO NOTHING).
+
+### New: entity graph end-to-end (#240)
+
+The `entities` and `memory_entities` tables landed in v0.10's schema
+but never had a write path. Spreading-activation, density, and
+suggest-connections were silent no-ops on every install. v0.14 closes
+the loop:
+
+- **Migration 036** retrofits the schema (`CREATE IF NOT EXISTS` for
+  tables, indexes, RLS) on older deployments and adds the
+  `link_memory_entities`, `refresh_entity_temporal_span`, and
+  `spread_entity_activation_memories` RPCs. Idempotent on fresh
+  installs that already have the tables.
+- **Live write hook**: `service.store_memory` calls
+  `link_memory_entities` after every successful insert, populating
+  the graph from now on. Failure is logged + swallowed so older
+  deployments missing the RPC degrade rather than break ingest.
+- **Backfill loop**: `ogham backfill-entities [--profile NAME]`
+  walks existing memories and populates entities + edges from
+  `extract_entities(content)`. ON CONFLICT DO NOTHING makes re-runs
+  free.
+
+After backfill, `suggest_connections`, `entity_graph_density`, and
+the `spread_entity_activation_memories` RPC all start returning real
+results. MCP tool: `backfill_entities`.
+
+### New: `compile_wiki` source-count cap (#243)
+
+`settings.compile_max_sources=100` (default; 0 disables) refuses
+mega-rollup tags before they hit the LLM. Tags like `type:gotcha`
+that accumulate hundreds of memories produce LLM outputs that fail
+JSON escape and saturate context budgets. Refused topics return
+`status="skipped_oversize"` in ~0.3s instead of burning a 70-second
+LLM call. Pass `force_oversize=True` (CLI / MCP) to override.
+
+### Security: lock down entity-graph SECURITY DEFINER RPCs
+
+Migration 037 revokes EXECUTE from `anon` and `authenticated` on
+all 10 SECURITY DEFINER functions added in v0.13.1 (Hotfix A) and
+v0.14 (migration 036). These are infrastructure used by the Ogham
+server (which holds the service_role key); they were never intended
+to be part of the public REST surface. Without the revoke, anyone
+with the project's anon key could call them and bypass RLS by design.
+
+Apply 037 in order after 036. Schema files (`schema.sql`,
+`schema_postgres.sql`, `schema_selfhost_supabase.sql`) also patched
+so fresh installs ship locked-down.
+
+### Performance: bounded conflict-detection in `store_memory`
+
+Supabase telemetry showed memory INSERTs at 45.8% of total database
+time with 7-8 second max-time outliers. Tracing it back:
+`store_memory_enriched` ran a synchronous `hybrid_search` inside the
+write path for surprise scoring + conflict warning, with no upper
+bound on its latency. p95 hybrid_search times multiplied across every
+store created the long tail.
+
+Two bounds in v0.14:
+
+- `limit=1` on the conflict-detection search (was 3). Surprise scoring
+  only needs the top neighbour; the conflict warning is a soft hint
+  where one example suffices. Halves the HNSW probe cost.
+- Wall-clock timeout via `OGHAM_CONFLICT_TIMEOUT_MS` (default 1500).
+  Out-of-budget calls log a warning and fall through with
+  `surprise=0.5`; the store completes regardless. The in-flight RPC
+  keeps running on its background thread until it returns -- we just
+  stop waiting.
+
+Plus a boot-time warmup: `ogham serve` now runs one discardable
+`hybrid_search` before taking traffic, so the user's first query
+doesn't pay the Supabase cold-connect cost. Disable with
+`OGHAM_BOOT_WARMUP=false`.
+
+Steady-state store latency dropped from 8000 ms max to ~600 ms typical
+on a 1300-memory profile.
+
+### Fixed: LLM compile path for `compile_wiki`
+
+Three latent bugs in `synthesize_json` surfaced during a bulk
+recompile of v0.13's TLDR rows:
+
+- `response_format={"type": "json_object"}` is now passed to
+  OpenAI-compat providers (was prompt-only before; default Ollama
+  fallbacks ignored the schema hint and returned markdown prose).
+  Ollama path also lifts to top-level `format=json` for older
+  runtimes.
+- `max_tokens` bumped 4096 -> 8192 for compile bodies; long-source
+  topics were truncating mid-string.
+- `JSONDecoder(strict=False)` fallback for bare control characters
+  (`\n`, `\t`) inside markdown body fields. Strict parse is still
+  tried first so real structural errors surface.
+
+### New: `OGHAM_COMPILE_MAX_TOKENS` knob
+
+The 8192-token compile body fits typical conversation tags but can
+truncate on very long technical discussions (~10-15+ source memories
+of dense code/explanation). Modern models support far more --
+Gemini 2.5 Flash takes 1M tokens of input and emits up to 64K
+output, GPT-4o and Claude 3.5 Sonnet are similarly generous. If
+you're bringing your own LLM, you bear the cost; we shouldn't cap
+you at 8192 just because that fits Ollama defaults.
+
+Override with the env var:
+
+```bash
+OGHAM_COMPILE_MAX_TOKENS=32768 ogham serve
+```
+
+Default stays 8192 (cheap, predictable). Values above 16384 emit a
+warning so the cost implication isn't invisible. Provider
+rate-limits and per-call billing still apply -- `compile_wiki` runs
+one synthesize call per recompiled topic.
+
+### Migrations
+
+Apply in order on existing deployments:
+
+| | |
+|---|---|
+| **036** | `entities` + `memory_entities` tables + supporting RPCs |
+| **037** | REVOKE EXECUTE on SECURITY DEFINER RPCs from anon/authenticated |
+
+After 036, run `ogham backfill-entities --profile <name>` per profile
+to populate historical entities. New writes after upgrade are linked
+automatically by the live write hook.
+
 ## [0.13.1] - 2026-04-29 -- Smart hook capture + Supabase background-task fix
 
 Patch release. The headline is smart inscribe extraction (#43, thanks

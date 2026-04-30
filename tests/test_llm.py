@@ -219,6 +219,89 @@ def test_synthesize_missing_api_key_raises(monkeypatch):
         synthesize(prompt="x", provider="openai", model="gpt-4o-mini")
 
 
+# ---------- response_format plumbing (v0.14 fix from Hotfix C) -----------------
+
+
+def test_synthesize_passes_response_format_to_openai_compat(monkeypatch):
+    """response_format is forwarded into the OpenAI-compat request body."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    resp = _mock_response(json_body={"choices": [{"message": {"content": "{}"}}]})
+    patcher, client = _patch_post(resp)
+
+    from ogham.llm import synthesize
+
+    with patcher:
+        synthesize(
+            prompt="x",
+            provider="openai",
+            model="gpt-4o-mini",
+            response_format={"type": "json_object"},
+        )
+
+    body = client.post.call_args.kwargs["json"]
+    assert body["response_format"] == {"type": "json_object"}
+
+
+def test_synthesize_ollama_lifts_format_json_top_level(monkeypatch):
+    """Ollama path gets `format=json` at the top level when response_format is json_object.
+
+    Older Ollama versions don't honour OpenAI-compat response_format and need
+    the top-level `format` instead. Belt-and-braces -- both fields are set.
+    """
+    resp = _mock_response(json_body={"choices": [{"message": {"content": "{}"}}]})
+    patcher, client = _patch_post(resp)
+
+    from ogham.llm import synthesize
+
+    with patcher:
+        synthesize(
+            prompt="x",
+            provider="ollama",
+            model="llama3.2",
+            response_format={"type": "json_object"},
+        )
+
+    body = client.post.call_args.kwargs["json"]
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["format"] == "json"
+
+
+def test_synthesize_no_response_format_omits_field(monkeypatch):
+    """When response_format is None it's not sent in the body."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    resp = _mock_response(json_body={"choices": [{"message": {"content": "ok"}}]})
+    patcher, client = _patch_post(resp)
+
+    from ogham.llm import synthesize
+
+    with patcher:
+        synthesize(prompt="x", provider="openai", model="gpt-4o-mini")
+
+    body = client.post.call_args.kwargs["json"]
+    assert "response_format" not in body
+    assert "format" not in body
+
+
+def test_synthesize_json_auto_sets_response_format(monkeypatch):
+    """synthesize_json sets response_format={'type':'json_object'} automatically."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    resp = _mock_response(json_body={"choices": [{"message": {"content": '{"body": "x"}'}}]})
+    patcher, client = _patch_post(resp)
+
+    from ogham.llm import synthesize_json
+
+    with patcher:
+        synthesize_json(
+            prompt="x",
+            provider="openai",
+            model="gpt-4o-mini",
+            json_schema={"type": "object", "required": ["body"]},
+        )
+
+    body = client.post.call_args.kwargs["json"]
+    assert body["response_format"] == {"type": "json_object"}
+
+
 # ---------- synthesize_json: structured output for v0.13 progressive recall ----
 
 
@@ -298,6 +381,37 @@ def test_synthesize_json_strips_bare_fence_without_lang(monkeypatch):
         )
 
     assert result["body"] == "a"
+
+
+def test_synthesize_json_tolerates_bare_control_chars_in_string(monkeypatch):
+    """Bare \\n/\\t inside string values is recovered via strict=False fallback.
+
+    Gemini occasionally emits raw control chars in long markdown body fields
+    despite response_format=json_object. Strict parse fails; non-strict fallback
+    recovers the value. Surfaced 2026-04-29 during Hotfix C bulk recompile
+    (project:ogham + sql-migration topics).
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    # Bare newline (0x0A) inside the body string. Strict JSON forbids this;
+    # strict=False accepts and preserves it.
+    bad = '{\n  "body": "line one\nline two",\n  "tldr_short": "x",\n  "tldr_one_line": "y"\n}'
+    resp = _mock_response(json_body={"choices": [{"message": {"content": bad}}]})
+    patcher, _ = _patch_post(resp)
+
+    from ogham.llm import synthesize_json
+
+    schema = {
+        "type": "object",
+        "required": ["body", "tldr_short", "tldr_one_line"],
+    }
+    with patcher:
+        result = synthesize_json(
+            prompt="x", provider="openai", model="gpt-4o-mini", json_schema=schema
+        )
+
+    assert result["body"] == "line one\nline two"
+    assert result["tldr_short"] == "x"
+    assert result["tldr_one_line"] == "y"
 
 
 def test_synthesize_json_missing_required_field_raises(monkeypatch):

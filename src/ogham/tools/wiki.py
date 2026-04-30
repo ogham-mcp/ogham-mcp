@@ -130,6 +130,7 @@ def compile_wiki(
     provider: str | None = None,
     model: str | None = None,
     force: bool = False,
+    force_oversize: bool = False,
 ) -> dict[str, Any]:
     """Compile a topic into a synthesized markdown wiki page.
 
@@ -150,11 +151,19 @@ def compile_wiki(
             re-compile with a different provider/model on the same
             source set without manually marking the existing summary
             stale. Default False (cheapest behaviour).
+        force_oversize: When True, override the
+            settings.compile_max_sources cap. Default False -- topics
+            with more sources than the cap are refused with
+            `status="skipped_oversize"` to protect against mega-rollup
+            tags producing JSON-malformed LLM outputs.
 
     Returns:
         A dict with the stamped markdown plus structured fields. If no
         memories carry this tag in the active profile, returns
-        `{"status": "no_sources", ...}` without writing anything.
+        `{"status": "no_sources", ...}` without writing anything. If the
+        tag's source set exceeds `settings.compile_max_sources` and
+        force_oversize is False, returns `{"status": "skipped_oversize",
+        "source_count": N, "max_sources": M, ...}` without an LLM call.
     """
     from ogham.flow_control import disabled_payload, inscribe_enabled
 
@@ -179,6 +188,7 @@ def compile_wiki(
         topic_key=topic,
         provider=provider,
         model=model,
+        force_oversize=force_oversize,
     )
 
     if result.get("action") == "no_sources":
@@ -187,6 +197,21 @@ def compile_wiki(
             "topic_key": topic,
             "profile": profile,
             "message": _wiki_message("no_sources", topic=topic, profile=profile),
+        }
+
+    if result.get("action") == "skipped_oversize":
+        return {
+            "status": "skipped_oversize",
+            "topic_key": topic,
+            "profile": profile,
+            "source_count": result.get("source_count"),
+            "max_sources": result.get("max_sources"),
+            "message": (
+                f"Topic {topic!r} has {result.get('source_count')} source memories, "
+                f"exceeding the compile_max_sources cap of {result.get('max_sources')}. "
+                "Mega-rollup tags produce LLM outputs that fail JSON escaping; pass "
+                "force_oversize=True to override, or use a more targeted tag."
+            ),
         }
 
     summary = get_summary_by_topic(profile, topic)

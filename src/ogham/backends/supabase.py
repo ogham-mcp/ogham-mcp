@@ -833,3 +833,20 @@ class SupabaseBackend:
         }
         result = self._get_client().rpc("suggest_unlinked_by_shared_entities", params).execute()
         return _rows(result.data)
+
+    @with_retry(max_attempts=2, base_delay=0.3)
+    def link_memory_entities(
+        self,
+        memory_id: str,
+        profile: str,
+        entity_tags: list[str],
+    ) -> int:
+        if not entity_tags:
+            return 0
+        params: dict[str, Any] = {
+            "p_memory_id": memory_id,
+            "p_profile": profile,
+            "p_entity_tags": entity_tags,
+        }
+        result = self._get_client().rpc("link_memory_entities", params).execute()
+        return int(result.data) if isinstance(result.data, int | float | str) else 0

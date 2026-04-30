@@ -90,6 +90,81 @@ def _seed_memories_with_tag(
     return [r["id"] for r in rows]
 
 
+def test_recompute_refuses_oversize_topic(pg_fresh_db, monkeypatch):
+    """Mega-rollup tags exceeding compile_max_sources are refused without an LLM call.
+
+    Surfaced 2026-04-29 by Hotfix C: tags like project:ogham (687 memories) and
+    type:gotcha (203) produced LLM outputs that failed JSON escape and saturated
+    context budgets. The cap defaults to settings.compile_max_sources=100; tests
+    drop it to 5 so a small seed exceeds it.
+    """
+    _apply_028(pg_fresh_db)
+    _seed_memories_with_tag(8, tag="megarollup")
+
+    from ogham.recompute import recompute_topic_summary
+
+    monkeypatch.setattr("ogham.recompute.settings.compile_max_sources", 5, raising=False)
+
+    # Without force_oversize, the call refuses cheaply.
+    with patch("ogham.recompute.synthesize_json") as mocked_synth:
+        out = recompute_topic_summary(
+            profile="test-025",
+            topic_key="megarollup",
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+
+    assert out["action"] == "skipped_oversize"
+    assert out["source_count"] == 8
+    assert out["max_sources"] == 5
+    assert mocked_synth.call_count == 0  # LLM never called
+
+    # With force_oversize=True, the call proceeds.
+    with (
+        patch(
+            "ogham.recompute.synthesize_json",
+            return_value=_three_forms("forced over the cap"),
+        ),
+        patch("ogham.recompute.generate_embedding", return_value=[0.1] * 512),
+    ):
+        out2 = recompute_topic_summary(
+            profile="test-025",
+            topic_key="megarollup",
+            provider="openai",
+            model="gpt-4o-mini",
+            force_oversize=True,
+        )
+
+    assert out2["action"] == "recomputed"
+    assert out2["source_count"] == 8
+
+
+def test_recompute_oversize_cap_disabled_when_zero(pg_fresh_db, monkeypatch):
+    """Setting compile_max_sources=0 disables the cap entirely."""
+    _apply_028(pg_fresh_db)
+    _seed_memories_with_tag(8, tag="nocap")
+
+    from ogham.recompute import recompute_topic_summary
+
+    monkeypatch.setattr("ogham.recompute.settings.compile_max_sources", 0, raising=False)
+
+    with (
+        patch(
+            "ogham.recompute.synthesize_json",
+            return_value=_three_forms("compiled with cap disabled"),
+        ),
+        patch("ogham.recompute.generate_embedding", return_value=[0.1] * 512),
+    ):
+        out = recompute_topic_summary(
+            profile="test-025",
+            topic_key="nocap",
+            provider="openai",
+            model="gpt-4o-mini",
+        )
+
+    assert out["action"] == "recomputed"
+
+
 def test_recompute_no_sources_returns_no_sources(pg_fresh_db):
     _apply_028(pg_fresh_db)
 

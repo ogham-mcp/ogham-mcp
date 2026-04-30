@@ -105,6 +105,17 @@ class Settings(BaseSettings):
     wiki_injection_top_k: int = 3
     wiki_injection_min_similarity: float = 0.4
 
+    # Hard cap on source-memory count for compile_wiki. Mega-rollup tags
+    # (e.g. "type:gotcha", "project:foo") accumulate hundreds of memories
+    # over time; synthesizing all of them into one ~1500-word page produces
+    # very large LLM outputs that fail JSON escaping reliability and saturate
+    # context budgets without producing a coherent page. Surfaced 2026-04-29
+    # by Hotfix C: project:ogham (687 mem, 1.4M char prompt) consistently
+    # failed even on Gemini 2.5 Pro. Above this cap, compile_wiki refuses
+    # by default; pass `force_oversize=True` to override for one-off intent.
+    # 0 disables the check.
+    compile_max_sources: int = 100
+
     # Locale for wiki-layer prompt templates and user-facing messages.
     # Two-letter language code matching a file under src/ogham/data/languages/
     # (en, de, fr, ja, ...). Falls back to English when a key is missing

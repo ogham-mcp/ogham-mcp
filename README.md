@@ -459,6 +459,72 @@ The export is read-only -- it writes files but never reads them back. Edits in O
 
 Full guide with frontmatter reference, troubleshooting, and screenshots: [obsidian export docs](https://ogham-mcp.dev/docs/obsidian-export/).
 
+## Importing existing memory
+
+### From Claude Code (auto-memory MD files)
+
+Claude Code's auto-memory system writes per-project notes under `~/.claude/projects/<encoded-cwd>/memory/`. Each note is a markdown file with YAML frontmatter (`name`, `description`, `type`, optional `originSessionId`). Pull them into Ogham:
+
+```bash
+ogham import-claude-code ~/.claude/projects/<encoded-cwd>/memory \
+    --project ogham --dedup 0.8
+```
+
+Each parseable file becomes one Ogham memory tagged `source:claude-code-memory + type:<frontmatter type> + project:<inferred or explicit>`. `MEMORY.md` (the index) and dotfiles are skipped. Files without recognisable frontmatter log a warning and are skipped.
+
+The encoded-cwd directory naming is lossy on hyphenated repo names: `openbrain-sharedmemory` decodes to `sharedmemory` because every `/` and `-` becomes the same separator. Pass `--project NAME` to override the inferred tag and keep your project tags consistent.
+
+The importer respects `inscribe_enabled()` — `--no-inscribe` and `OGHAM_INSCRIBE_ENABLED=false` skip the import. Re-runs are dedup-safe via the `--dedup` cosine threshold (default 0.8). MCP tool: `import_claude_code_memories(directory, project_tag=...)`.
+
+### From Claude.ai (conversation data export)
+
+Anthropic offers a first-party data export at **Settings → Privacy → Request your data**. After ~24-48h you receive a ZIP containing `conversations.json`. Pull it into Ogham:
+
+```bash
+ogham import-claude-ai ~/Downloads/data-<id>-batch-0000 --profile claude-ai
+```
+
+Accepts the ZIP itself, the unzipped directory, or `conversations.json` directly. Each `(human, assistant)` turn-pair becomes one memory with the assistant turn as content (the signal you'll search on) and the human prompt in `metadata.user_prompt` (recoverable for context). Tagging: `source:claude-ai`, `claude-conversation:<title-slug>`, optional `project:<tag>`.
+
+A conservative smart filter drops pleasantry exchanges; pass `--no-smart-filter` to keep them. Use `--since 2026-01-01` to import only recent conversations, or `--mode raw` for one memory per individual message instead of per turn-pair.
+
+To get an LLM-distilled summary of an imported conversation, call `compile_wiki(topic="claude-conversation:<slug>")` via MCP. Verbatim ingest plus on-demand synthesis means you keep the raw turns *and* get a digest, without the importer making LLM calls upfront. The summary regenerates whenever the source memories change.
+
+UUIDs from the export land in metadata so re-importing the same export later only adds new turns. MCP tool: `import_claude_ai_export(path, profile, mode=...)`.
+
+### Bulk imports skip per-memory enrichment
+
+The Claude Code, Claude.ai, and JSON importers all write through `import_memories`, which embeds + dedups + inserts in batches but **skips per-memory entity extraction and auto-link** — a 600-memory import would otherwise run thousands of secondary RPCs. Imported memories are immediately searchable via embedding + keyword. To populate the entity graph after a bulk import, run `ogham backfill-entities --profile <name>` (see [Entity graph](#entity-graph) below).
+
+### From a JSON export
+
+```bash
+ogham export --profile work > backup.json
+ogham import backup.json --profile work-restored
+```
+
+Round-trips the full memory schema (content, embeddings, tags, metadata, lifecycle state). Useful for migrating between deployments or seeding a fresh profile from another.
+
+## Entity graph
+
+Ogham extracts entity tags from every stored memory at ingest (people, files, errors, locations, projects -- pure regex, no LLM). v0.14 added the live wire-up so those tags also populate a separate entity graph used for spreading-activation retrieval and cross-memory connection suggestions.
+
+After applying migration 036 on an existing deployment, run a one-shot backfill to populate historical memories:
+
+```bash
+ogham backfill-entities --profile work
+```
+
+The backfill walks the memories table, runs the entity extractor, and links each memory to its entities via `link_memory_entities`. ON CONFLICT DO NOTHING makes re-runs free. New writes after v0.14 are linked automatically; the backfill only matters for memories created before the upgrade.
+
+Once the graph is populated:
+
+- `suggest_connections` returns memories that share entities with an anchor memory (was always empty before).
+- `entity_graph_density` returns real numbers (count of distinct entities and edges per profile).
+- The `spread_entity_activation_memories` RPC walks the bipartite memory/entity graph for context-rich retrieval.
+
+MCP tool: `backfill_entities(profile=None, batch_size=200)`.
+
 ## Skills
 
 Ogham ships with three workflow skills in `skills/` that wire up common MCP tool chains. Install them in Claude Code, Cursor, or any client that supports skills.

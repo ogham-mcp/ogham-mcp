@@ -359,6 +359,24 @@ def pg_fresh_db():
             fetch="none",
         )
 
+        # Cleanup migration 036 artifacts (v0.14 entities backfill).
+        # Drop in dependency order so FK constraints clear cleanly.
+        backend._execute(
+            "DROP FUNCTION IF EXISTS link_memory_entities(uuid, text, text[]) CASCADE",
+            fetch="none",
+        )
+        backend._execute(
+            "DROP FUNCTION IF EXISTS spread_entity_activation_memories"
+            "(text[], text, int, float, float, int) CASCADE",
+            fetch="none",
+        )
+        backend._execute(
+            "DROP FUNCTION IF EXISTS refresh_entity_temporal_span(bigint) CASCADE",
+            fetch="none",
+        )
+        backend._execute("DROP TABLE IF EXISTS memory_entities CASCADE", fetch="none")
+        backend._execute("DROP TABLE IF EXISTS entities CASCADE", fetch="none")
+
     _cleanup()
     yield _Harness(backend)
     _cleanup()

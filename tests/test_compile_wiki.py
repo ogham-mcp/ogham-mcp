@@ -151,6 +151,7 @@ def test_compile_wiki_passes_provider_and_model_through():
         topic_key="quantum",
         provider="gemini",
         model="gemini-2.5-flash",
+        force_oversize=False,
     )
 
 

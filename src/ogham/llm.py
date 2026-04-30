@@ -52,6 +52,7 @@ def synthesize(
     system: str | None = None,
     max_tokens: int = 2048,
     timeout: float = 120.0,
+    response_format: dict[str, Any] | None = None,
 ) -> str:
     """Synthesize a response from the configured LLM provider.
 
@@ -59,6 +60,10 @@ def synthesize(
     executor's thread pool, and sync httpx is simpler to reason about
     than wrapping async calls in run_in_executor just to get back to
     a thread.
+
+    `response_format` is forwarded to OpenAI-compatible providers (e.g.
+    `{"type": "json_object"}`); Anthropic ignores it -- callers needing
+    JSON from Anthropic must rely on the system-prompt schema hint.
     """
     if provider == "anthropic":
         return _anthropic(prompt, model, system, max_tokens, timeout)
@@ -67,7 +72,7 @@ def synthesize(
             f"unknown LLM provider {provider!r}; expected one of "
             f"{sorted([*_OPENAI_COMPAT, 'anthropic'])}"
         )
-    return _openai_compat(provider, prompt, model, system, max_tokens, timeout)
+    return _openai_compat(provider, prompt, model, system, max_tokens, timeout, response_format)
 
 
 def _openai_compat(
@@ -77,6 +82,7 @@ def _openai_compat(
     system: str | None,
     max_tokens: int,
     timeout: float,
+    response_format: dict[str, Any] | None = None,
 ) -> str:
     base, env_key = _OPENAI_COMPAT[provider]
     if provider == "ollama":
@@ -106,11 +112,17 @@ def _openai_compat(
         "messages": messages,
         "max_tokens": max_tokens,
     }
+    if response_format is not None:
+        body["response_format"] = response_format
     if provider == "ollama":
         # Some Ollama models silently ignore max_tokens and use num_predict
         # instead. Set both -- max_tokens for the OpenAI-compat shim,
         # options.num_predict for the underlying runtime. Belt-and-braces.
         body["options"] = {"num_predict": max_tokens}
+        # Ollama maps response_format to the runtime "format" option; lift
+        # to top-level "format=json" so older Ollama versions handle it.
+        if response_format and response_format.get("type") == "json_object":
+            body["format"] = "json"
 
     with httpx.Client(timeout=timeout) as client:
         r = client.post(f"{base}/chat/completions", json=body, headers=headers)
@@ -184,6 +196,7 @@ def synthesize_json(
         system=full_system,
         max_tokens=max_tokens,
         timeout=timeout,
+        response_format={"type": "json_object"},
     )
 
     # Strip markdown fences the model may have added despite instructions.
@@ -196,21 +209,55 @@ def synthesize_json(
             lines = lines[:-1]
         raw = "\n".join(lines).strip()
 
+    # Three-attempt parse chain. Each step is more lenient than the last;
+    # we only escalate after the cheaper one fails so clean responses are
+    # not silently mutated by the repair pass.
+    #
+    #   1. json.loads(strict)        -- catches structural errors verbatim
+    #   2. JSONDecoder(strict=False) -- tolerates bare control chars
+    #   3. json_repair.repair_json   -- heuristic recovery (unescaped
+    #      quotes, missing commas, truncated outputs). Last resort:
+    #      handles long-body Gemini malformations that #2 can't reach.
+    #
+    # Required-field validation runs after parsing regardless of which
+    # attempt succeeded, so a repaired-but-incomplete response still
+    # surfaces as a ValueError downstream.
     try:
         parsed = json.loads(raw)
-    except json.JSONDecodeError as e:
-        title = json_schema.get("title", "<unnamed>")
-        raise ValueError(
-            f"LLM returned invalid JSON for json_schema={title}: {e}\n"
-            f"Raw response (first 500 chars): {raw[:500]}"
-        ) from e
+    except json.JSONDecodeError:
+        try:
+            parsed = json.JSONDecoder(strict=False).decode(raw)
+        except json.JSONDecodeError:
+            try:
+                from json_repair import repair_json
+
+                repaired = repair_json(raw, return_objects=False)
+                parsed = json.loads(repaired)
+            except (json.JSONDecodeError, ValueError) as e3:
+                title = json_schema.get("title", "<unnamed>")
+                raise ValueError(
+                    f"LLM returned invalid JSON for json_schema={title}: {e3}\n"
+                    f"Raw response (first 500 chars): {raw[:500]}"
+                ) from e3
+
+    # json-repair sometimes wraps a malformed object in a single-item list
+    # when it can't determine the right top-level shape. If that's what we
+    # got AND the wrapped item is a dict with the schema's required fields,
+    # unwrap it. Otherwise treat as a real shape mismatch.
+    required = json_schema.get("required", [])
+    if (
+        isinstance(parsed, list)
+        and len(parsed) == 1
+        and isinstance(parsed[0], dict)
+        and all(f in parsed[0] for f in required)
+    ):
+        parsed = parsed[0]
 
     if not isinstance(parsed, dict):
         raise ValueError(
             f"LLM returned JSON that is not an object (got {type(parsed).__name__}): {raw[:200]}"
         )
 
-    required = json_schema.get("required", [])
     missing = [f for f in required if f not in parsed]
     if missing:
         raise ValueError(

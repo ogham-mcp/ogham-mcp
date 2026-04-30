@@ -632,6 +632,22 @@ class PostgresBackend:
         )
         return rows or []
 
+    def link_memory_entities(
+        self,
+        memory_id: str,
+        profile: str,
+        entity_tags: list[str],
+    ) -> int:
+        """Upsert entities and link to a memory. Idempotent on re-run."""
+        if not entity_tags:
+            return 0
+        result = self._execute(
+            "SELECT link_memory_entities(%(memory_id)s::uuid, %(profile)s, %(tags)s) AS n",
+            {"memory_id": memory_id, "profile": profile, "tags": entity_tags},
+            fetch="scalar",
+        )
+        return int(result or 0)
+
     # ── Audit ─────────────────────────────────────────────────────────
 
     def emit_audit_event(
@@ -754,8 +770,14 @@ class PostgresBackend:
             "query_entity_tags": query_entity_tags,
             "recency_decay": recency_decay,
         }
+        # OGHAM_BENCH_MODE routes to a sterile parallel function with all
+        # production relevance multipliers neutralised. Used only for raw
+        # retrieval-quality benchmarks; never enable in production.
+        fn_name = "hybrid_search_memories"
+        if os.environ.get("OGHAM_BENCH_MODE", "").lower() in ("true", "1", "yes"):
+            fn_name = "hybrid_search_memories_bench"
         return self._execute(
-            "SELECT * FROM hybrid_search_memories("
+            f"SELECT * FROM {fn_name}("
             "  %(query_text)s, %(embedding)s::vector, %(limit)s::integer,"
             "  %(profile)s, %(tags)s, %(source)s,"
             "  0.3::float, 0.7::float, 10::integer, %(profiles)s, %(query_entity_tags)s,"

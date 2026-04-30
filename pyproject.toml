@@ -1,6 +1,6 @@
 [project]
 name = "ogham-mcp"
-version = "0.13.1"
+version = "0.14.0"
 description = "Shared memory MCP server — persistent, searchable, cross-client"
 requires-python = ">=3.13"
 dependencies = [
@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml>=6.0",
     "geotext>=0.4",
     "tenacity>=9.1.4",
+    "json-repair>=0.30",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +28,12 @@ postgres = [
 mistral = ["mistralai>=1.0"]
 voyage = ["voyageai>=0.3"]
 gemini = ["google-genai>=1.0"]
+# Local CPU embeddings via BGE-M3 ONNX (Josh @ ninthhousestudios, PR #14).
+# Excluded from `all` because the model is 2.2 GB at runtime and the
+# wheel adds ~25 MB of ONNX runtime + tokenizer deps. Self-hosters who
+# want sparse three-signal hybrid search without API costs install
+# explicitly: `pip install ogham-mcp[onnx]`.
+onnx = ["onnxruntime>=1.17", "tokenizers>=0.19"]
 rerank = ["flashrank>=0.2"]
 dashboard = ["prefab-ui>=0.18", "fastapi>=0.115", "uvicorn>=0.34"]
 all = ["mistralai>=1.0", "voyageai>=0.3", "google-genai>=1.0", "psycopg-pool>=3.1", "psycopg[binary]>=3.1", "flashrank>=0.2", "prefab-ui>=0.18", "fastapi>=0.115", "uvicorn>=0.34"]
