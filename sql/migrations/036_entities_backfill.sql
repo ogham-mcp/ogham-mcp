@@ -60,18 +60,33 @@ CREATE INDEX IF NOT EXISTS idx_memory_entities_entity_profile
     ON memory_entities (entity_id, profile);
 
 -- 3. RLS policies (CREATE POLICY has no IF NOT EXISTS so DROP first)
+--
+-- Self-hosters on vanilla Postgres (no `anon` role) get a NOTICE and
+-- the policy creation no-ops -- safe to apply against any backend.
+-- Mirrors the guard pattern in migration 032.
 
 ALTER TABLE entities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE entities FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Deny anon access" ON entities;
-CREATE POLICY "Deny anon access" ON entities
-    FOR ALL TO anon USING (false) WITH CHECK (false);
-
 ALTER TABLE memory_entities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE memory_entities FORCE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Deny anon access" ON memory_entities;
-CREATE POLICY "Deny anon access" ON memory_entities
-    FOR ALL TO anon USING (false) WITH CHECK (false);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        RAISE NOTICE
+            'anon role not found -- skipping RLS policy creation for entities '
+            '+ memory_entities (non-Supabase install)';
+        RETURN;
+    END IF;
+
+    EXECUTE 'DROP POLICY IF EXISTS "Deny anon access" ON entities';
+    EXECUTE 'CREATE POLICY "Deny anon access" ON entities '
+            'FOR ALL TO anon USING (false) WITH CHECK (false)';
+
+    EXECUTE 'DROP POLICY IF EXISTS "Deny anon access" ON memory_entities';
+    EXECUTE 'CREATE POLICY "Deny anon access" ON memory_entities '
+            'FOR ALL TO anon USING (false) WITH CHECK (false)';
+END $$;
 
 -- 4. Supporting RPC functions (CREATE OR REPLACE -- safe to re-apply)
 

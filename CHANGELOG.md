@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.14.1] - 2026-04-30 -- Schema-smoke fix for vanilla Postgres
+
+### Fixed
+
+- **Migrations 036 + 037 anon-role guard** for vanilla Postgres
+  self-hosters. v0.14.0's two new migrations (`036_entities_backfill`
+  and `037_revoke_rpc_anon`) referenced the Supabase-specific `anon`
+  role unconditionally, so on plain Postgres installs (no `anon`
+  role) both migrations failed with `role "anon" does not exist`.
+  Wrapped the role-specific blocks in `DO $$ ... $$` that check
+  `pg_roles` first; on non-Supabase installs they now emit a
+  `NOTICE` and no-op gracefully. Mirrors the existing pattern in
+  migration 032. Supabase installs unaffected.
+
 ## [0.14.0] - 2026-04-30 -- Memory hygiene + ingestion control
 
 Theme: explicit control over what flows in and out of memory. Three

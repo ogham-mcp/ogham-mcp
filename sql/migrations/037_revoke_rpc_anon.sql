@@ -48,16 +48,42 @@
 --
 -- Should return zero rows.
 
--- Migration 035 functions (v0.13.1)
-REVOKE EXECUTE ON FUNCTION public.lifecycle_advance_fresh_to_stable(text, timestamptz, double precision, double precision) FROM anon, authenticated, PUBLIC;
-REVOKE EXECUTE ON FUNCTION public.lifecycle_close_editing_windows(text, timestamptz) FROM anon, authenticated, PUBLIC;
-REVOKE EXECUTE ON FUNCTION public.lifecycle_open_editing_window(uuid[]) FROM anon, authenticated, PUBLIC;
-REVOKE EXECUTE ON FUNCTION public.lifecycle_pipeline_counts(text) FROM anon, authenticated, PUBLIC;
-REVOKE EXECUTE ON FUNCTION public.hebbian_strengthen_edges(text[], text[], real, real) FROM anon, authenticated, PUBLIC;
-REVOKE EXECUTE ON FUNCTION public.entity_graph_density(text) FROM anon, authenticated, PUBLIC;
-REVOKE EXECUTE ON FUNCTION public.suggest_unlinked_by_shared_entities(uuid, text, integer, integer) FROM anon, authenticated, PUBLIC;
+-- Self-hosters on vanilla Postgres (no `anon`/`authenticated` roles) get
+-- a NOTICE and the migration no-ops. PUBLIC always exists, so the
+-- REVOKE FROM PUBLIC is unconditional.
 
--- Migration 036 functions (v0.14)
-REVOKE EXECUTE ON FUNCTION public.link_memory_entities(uuid, text, text[]) FROM anon, authenticated, PUBLIC;
-REVOKE EXECUTE ON FUNCTION public.refresh_entity_temporal_span(bigint) FROM anon, authenticated, PUBLIC;
-REVOKE EXECUTE ON FUNCTION public.spread_entity_activation_memories(text[], text, integer, double precision, double precision, integer) FROM anon, authenticated, PUBLIC;
+DO $$
+BEGIN
+    -- PUBLIC always exists -- safe to REVOKE on every install.
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.lifecycle_advance_fresh_to_stable(text, timestamptz, double precision, double precision) FROM PUBLIC';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.lifecycle_close_editing_windows(text, timestamptz) FROM PUBLIC';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.lifecycle_open_editing_window(uuid[]) FROM PUBLIC';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.lifecycle_pipeline_counts(text) FROM PUBLIC';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.hebbian_strengthen_edges(text[], text[], real, real) FROM PUBLIC';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.entity_graph_density(text) FROM PUBLIC';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.suggest_unlinked_by_shared_entities(uuid, text, integer, integer) FROM PUBLIC';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.link_memory_entities(uuid, text, text[]) FROM PUBLIC';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.refresh_entity_temporal_span(bigint) FROM PUBLIC';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.spread_entity_activation_memories(text[], text, integer, double precision, double precision, integer) FROM PUBLIC';
+
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        RAISE NOTICE
+            'anon/authenticated roles not found -- skipping role-specific '
+            'REVOKE EXECUTE (non-Supabase install). PUBLIC revokes already applied.';
+        RETURN;
+    END IF;
+
+    -- Migration 035 functions (v0.13.1)
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.lifecycle_advance_fresh_to_stable(text, timestamptz, double precision, double precision) FROM anon, authenticated';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.lifecycle_close_editing_windows(text, timestamptz) FROM anon, authenticated';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.lifecycle_open_editing_window(uuid[]) FROM anon, authenticated';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.lifecycle_pipeline_counts(text) FROM anon, authenticated';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.hebbian_strengthen_edges(text[], text[], real, real) FROM anon, authenticated';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.entity_graph_density(text) FROM anon, authenticated';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.suggest_unlinked_by_shared_entities(uuid, text, integer, integer) FROM anon, authenticated';
+
+    -- Migration 036 functions (v0.14)
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.link_memory_entities(uuid, text, text[]) FROM anon, authenticated';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.refresh_entity_temporal_span(bigint) FROM anon, authenticated';
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.spread_entity_activation_memories(text[], text, integer, double precision, double precision, integer) FROM anon, authenticated';
+END $$;
