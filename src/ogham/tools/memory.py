@@ -1184,11 +1184,14 @@ def _update_compression(
         client = backend._get_client()
         client.table("memories").update(updates).eq("id", memory_id).execute()
     else:
-        # Postgres
+        # Postgres -- fetch="none" because UPDATE without RETURNING produces
+        # no result set; default fetch="all" would call cursor.fetchall() and
+        # raise ProgrammingError("no results to fetch"). Reported by
+        # @wmemorgan in #51, latent since v0.9.0.
         set_clauses = [f"{k} = %({k})s" for k in updates]
         updates["id"] = memory_id
         sql = f"UPDATE memories SET {', '.join(set_clauses)} WHERE id = %(id)s"
-        backend._execute(sql, updates)
+        backend._execute(sql, updates, fetch="none")
 
 
 @mcp.tool

@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.14.2] - 2026-05-05 -- compress_old_memories Postgres fetch fix
+
+### Fixed
+
+- **`compress_old_memories` ProgrammingError on Postgres backend** (#51,
+  reported by @wmemorgan). When a memory aged into Level 1 or Level 2
+  compression, `_update_compression` called `backend._execute` without
+  `fetch="none"`. The backend defaults to `fetch="all"` and runs
+  `cursor.fetchall()` after a plain `UPDATE ... WHERE`, which produces
+  no result set -- raising `ProgrammingError("no results to fetch")`.
+  Fixed by passing `fetch="none"` explicitly. Two regression tests
+  pin the call signature so this can't silently regress.
+
+  Latent since v0.9.0. Self-hosters on the Postgres backend hitting
+  compression were affected; Supabase backend was unaffected (different
+  code path via the postgrest client).
+
 ## [0.14.1] - 2026-04-30 -- Schema-smoke fix for vanilla Postgres
 
 ### Fixed
