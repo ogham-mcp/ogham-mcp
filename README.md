@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/ogham-mcp-ogham-mcp-badge.png)](https://mseep.ai/app/ogham-mcp-ogham-mcp)
+
 # Ogham MCP
 
 *Ogham* (pronounced "OH-um") -- persistent, searchable shared memory for AI coding agents. Works across clients.
