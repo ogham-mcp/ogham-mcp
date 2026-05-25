@@ -131,4 +131,5 @@ build-backend = "hatchling.build"
 dev = [
     "matplotlib>=3.10.8",
     "pyright>=1.1.409",
+    "memory-tool-conformance @ git+https://github.com/M00C1FER/memory-tool-conformance.git",
 ]

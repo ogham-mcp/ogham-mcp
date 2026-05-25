@@ -6,6 +6,7 @@
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io%2Fogham--mcp%2Fogham--mcp-blue)](https://github.com/ogham-mcp/ogham-mcp/pkgs/container/ogham-mcp)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13%2B-blue)](https://python.org)
 [![PyPI](https://img.shields.io/pypi/v/ogham-mcp)](https://pypi.org/project/ogham-mcp/)
+[![Memory Tool Conformance](https://github.com/ogham-mcp/ogham-mcp/actions/workflows/memory-tool-conformance.yml/badge.svg)](https://github.com/M00C1FER/memory-tool-conformance)
 
 ## Contents
 
@@ -366,6 +367,10 @@ Admin operations such as config, health, stats, audit, export, delete, and clean
 **Smart filtering:** Hooks don't capture everything. Routine commands (`ls`, `pwd`, `git add`) are skipped. Only signal events (errors, deployments, commits, config changes) are stored -- typically 20-30 memories per session instead of hundreds.
 
 **Secret masking:** API keys, tokens, passwords, and JWTs are automatically replaced with `***MASKED***` before storing. The event is captured ("configured Stripe API key") but the actual secret never touches the database.
+
+### Anthropic Memory Tool conformance
+
+Ogham's primary MCP surface is Postgres-backed hybrid search (below). For clients using the [Anthropic Memory Tool 6-op contract](https://platform.claude.com/docs/en/build-with-claude/context-editing) (`view` / `create` / `str_replace` / `insert` / `delete` / `rename`), we ship a filesystem-backed adapter validated in CI against [memory-tool-conformance](https://github.com/M00C1FER/memory-tool-conformance) (10/10 scenarios). Factory entry point: `ogham.memory_tool.make_memory_contract`.
 
 ## MCP tools
 

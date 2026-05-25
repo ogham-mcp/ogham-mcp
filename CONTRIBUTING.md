@@ -32,6 +32,14 @@ uv run ruff check src tests
 uv run pytest tests -m 'not integration and not postgres_integration' -q
 ```
 
+Memory Tool 6-op conformance (Anthropic context-editing spec):
+
+```bash
+uv sync --extra dev --group dev
+uv run pytest tests/test_memory_tool_conformance.py -v
+# or: uv run memory-conformance --target ogham.memory_tool:make_memory_contract
+```
+
 Integration suites stay separate:
 
 ```bash
