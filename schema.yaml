@@ -1,0 +1,33 @@
+# Shared-data schema lock for the ogham-mcp / ogham-cli cross-stack
+# contract. Both consumers' CI parity tests assert that every regex
+# pattern in this directory compiles in the declared dialect, and that
+# the SHA-256 manifest of the embedded copy matches the manifest
+# pinned in the shared-data-vX.Y.Z tag the consumer vendored from.
+
+version: 0.1.0
+
+regex_dialect: re2
+# RE2 (Go's default regex engine; a subset of PCRE that Python's `re`
+# also accepts). Forbids backreferences (\1..\9) and variable-length
+# lookarounds ((?=, (?!, (?<=, (?<!). Non-capturing groups (?:...) and
+# fixed-width character classes are fine.
+
+files:
+  - name: hooks_config.yaml
+    consumers: [python, go]
+    purpose: Signal/noise filtering rules and secret-masking patterns for hook capture.
+    keys:
+      signals:
+        errors: list[str]
+        decisions: list[str]
+        architecture: list[str]
+        annotations: list[str]
+      noise_commands: list[str]
+      always_skip_tools: list[str]
+      response_gated_tools: list[str]
+      routine_tools: list[str]
+      git_signal: list[str]
+      git_noise: list[str]
+      secrets:
+        bare_tokens: "list[{name: str, pattern: str}]"
+        env_keys: "list[str]"

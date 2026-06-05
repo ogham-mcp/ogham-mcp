@@ -1,0 +1,453 @@
+# Ogham Hooks Configuration
+# Signal filtering and secret masking patterns.
+#
+# CANONICAL SOURCE -- both ogham-mcp (Python) and ogham-cli (Go)
+# consume this file. Edit here only; consumer-side copies are
+# vendored and SHA-locked against the shared-data-vX.Y.Z tag.
+# See shared/README.md for the consumption contract and
+# shared/schema.yaml for the regex dialect lock (RE2).
+#
+# Changes take effect on next hook invocation (no restart needed).
+
+# --- Signal filtering (verb-only, multilingual) ---
+#
+# Only bash activity matching a VERB/EVENT keyword is captured. The
+# previous noun-heavy list (config, docker, supabase, neon, auth, token,
+# schema, etc.) caused daily infrastructure work to be captured as
+# "signal" when it was really just routine. These lists now reflect
+# events that HAPPENED (past-tense verbs + explicit annotation markers)
+# rather than topics that were MENTIONED.
+
+signals:
+  errors:
+    # EN
+    - error
+    - failed
+    - failure
+    - bug
+    - broken
+    - broke
+    - crash
+    - crashed
+    - exception
+    - traceback
+    - stacktrace
+    - segfault
+    - panic
+    - regression
+    # DE
+    - fehler
+    - fehlgeschlagen
+    - ausnahme
+    - absturz
+    - defekt
+    - abgebrochen
+    - zeitüberschreitung
+    # FR
+    - erreur
+    - échoué
+    - échec
+    - bogue
+    - cassé
+    - plantage
+    # ES
+    - fallido
+    - fallo
+    - roto
+    - caída
+    # IT
+    - errore
+    - eccezione
+    - fallito
+    - guasto
+    - rotto
+    # PT
+    - erro
+    - exceção
+    - falhou
+    - falha
+    - quebrado
+    # NL
+    - fout
+    - mislukt
+    - storing
+    - kapot
+
+  decisions:
+    # EN -- past-tense action verbs only
+    - decided
+    - chose
+    - picked
+    - opted
+    - selected
+    - switched
+    - migrated
+    - replaced
+    - removed
+    - added
+    - changed
+    - adopted
+    - shipped
+    - merged
+    - deployed
+    - rolled back
+    - reverted
+    - reverted
+    - deprecated
+    - rejected
+    - approved
+    - committed
+    # DE
+    - entschieden
+    - gewählt
+    - gewechselt
+    - migriert
+    - ausgewählt
+    - ersetzt
+    - umgestiegen
+    - beschlossen
+    - ausgetauscht
+    - veröffentlicht
+    - zusammengeführt
+    # FR
+    - décidé
+    - choisi
+    - migré
+    - sélectionné
+    - remplacé
+    - adopté
+    - opté
+    - basculé
+    - déployé
+    - fusionné
+    # ES
+    - decidido
+    - elegido
+    - migrado
+    - seleccionado
+    - reemplazado
+    - adoptado
+    - optado
+    - cambiado
+    - desplegado
+    - fusionado
+    # IT
+    - deciso
+    - scelto
+    - migrato
+    - selezionato
+    - sostituito
+    - adottato
+    - optato
+    - cambiato
+    - schierato
+    - fuso
+    # PT
+    - decidido
+    - escolhido
+    - migrado
+    - selecionado
+    - substituído
+    - adotado
+    - optado
+    - mudado
+    - implantado
+    # NL
+    - besloten
+    - gekozen
+    - gemigreerd
+    - geselecteerd
+    - vervangen
+    - overgestapt
+    - gewijzigd
+    - uitgerold
+    - samengevoegd
+
+  architecture:
+    # EN
+    - refactored
+    - restructured
+    - decoupled
+    - rewrote
+    - redesigned
+    # DE
+    - refaktorisierung
+    - umstrukturierung
+    - entkoppelt
+    - neu geschrieben
+    # FR
+    - refactorisation
+    - restructuration
+    - découplé
+    - réécrit
+    # ES
+    - refactorización
+    - reestructuración
+    - desacoplado
+    - reescrito
+    # IT
+    - refactoring
+    - ristrutturazione
+    - disaccoppiato
+    # PT
+    - refatoração
+    - reestruturação
+    - desacoplado
+    # NL
+    - refactoring
+    - herstructurering
+    - ontkoppeld
+
+  # Explicit annotations -- these mark a real intent even when noun-shaped.
+  # Small list, kept because the user wrote them deliberately.
+  annotations:
+    - todo
+    - fixme
+    - hack
+    - workaround
+    - gotcha
+    - caveat
+    - xxx
+
+  # DROPPED (2026-04-22): the `infrastructure`, `devops`, `testing`,
+  # `security`, `database`, and `packages` categories. Those lists were
+  # domain nouns (config, docker, supabase, auth, token, schema, pip
+  # install, etc.) that fire on every daily command in infra-heavy
+  # work. If you fix or break a "supabase" thing, the error/decision
+  # verbs above catch it. If you just query supabase, nothing captures
+  # — that's the intent.
+
+# --- Noise filtering ---
+# These are always skipped, never captured.
+
+noise_commands:
+  - ls
+  - pwd
+  - cd
+  - cat
+  - head
+  - tail
+  - wc
+  - echo
+  - date
+  - whoami
+  - which
+  - type
+  - clear
+  - history
+  - man
+  - help
+
+# Tools that are always noise -- never stored regardless of content.
+# Reconnaissance tools, web fetches, skill invocations, task management.
+always_skip_tools:
+  - ToolSearch
+  - Skill
+  - Read
+  - Glob
+  - Grep
+  - ListDir
+  - NotebookEdit
+  - WebFetch
+  - WebSearch
+  - Agent
+  - Monitor
+  - TaskCreate
+  - TaskUpdate
+  - TaskGet
+  - TaskList
+  - TaskOutput
+  - TaskStop
+  - AskUserQuestion
+  - SendMessage
+  - ScheduleWakeup
+  - CronCreate
+  - CronDelete
+  - CronList
+
+# Tools that can produce useful memories only after inspecting the tool payload.
+response_gated_tools:
+  - Edit
+  - Write
+
+# Tools that are captured only if content contains signal keywords.
+# Bash is the main one -- ls/cat already filtered by noise_commands.
+routine_tools:
+  - Bash
+
+git_signal:
+  - commit
+  - push
+  - merge
+  - rebase
+  - tag
+  - release
+  - reset
+  - revert
+  - cherry-pick
+
+git_noise:
+  - add
+  - status
+  - diff
+  - log
+  - show
+  - branch
+  - checkout
+  - switch
+  - fetch
+  - pull
+  - stash
+  - clean
+  - gc
+  - remote
+  - config
+
+# --- Secret masking ---
+# Patterns for detecting secrets. Values are masked with ***MASKED***.
+
+secrets:
+  # Bare tokens (detected without KEY= prefix)
+  bare_tokens:
+    - name: GitHub PAT
+      pattern: 'ghp_[A-Za-z0-9]{36}'
+    - name: GitHub OAuth
+      pattern: 'gho_[A-Za-z0-9]{36}'
+    - name: GitHub fine-grained PAT
+      pattern: 'github_pat_[A-Za-z0-9_]{20,}'
+    - name: GitLab PAT
+      pattern: 'glpat-[A-Za-z0-9\-]{20,}'
+    - name: AWS access key
+      pattern: 'AKIA[A-Z0-9]{16}'
+    - name: SendGrid
+      pattern: 'SG\.[A-Za-z0-9_\-]{20,}'
+    - name: Slack
+      pattern: 'xox[bpars]-[A-Za-z0-9\-]{10,}'
+    - name: Anthropic
+      pattern: 'sk-ant-[A-Za-z0-9\-]{20,}'
+    - name: OpenAI project
+      pattern: 'sk-proj-[A-Za-z0-9\-]{20,}'
+    - name: OpenAI legacy
+      pattern: 'sk-[A-Za-z0-9]{40,}'
+    - name: NPM
+      pattern: 'npm_[A-Za-z0-9]{36}'
+    - name: PyPI
+      pattern: 'pypi-[A-Za-z0-9]{20,}'
+    - name: Webhook secret (Clerk/Svix)
+      pattern: 'whsec_[A-Za-z0-9]{20,}'
+    - name: Ogham API key
+      pattern: 'ogham_live_[A-Za-z0-9_\-]{20,}'
+    - name: Telegram bot token
+      pattern: '\d{8,12}:[A-Za-z0-9_-]{35}'
+    - name: Discord bot token
+      pattern: '[A-Za-z0-9]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27}'
+    - name: Supabase secret key
+      pattern: 'sb_secret_[A-Za-z0-9_\-]{20,}'
+    - name: Neon password
+      pattern: 'npg_[A-Za-z0-9]{10,}'
+    - name: Voyage AI
+      pattern: 'pa-[A-Za-z0-9_\-]{20,}'
+    # AWS (from gitleaks)
+    - name: AWS session token
+      pattern: 'FwoGZX[A-Za-z0-9/+=]{100,}'
+    - name: AWS MWS auth token
+      pattern: 'amzn\.mws\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+    # Azure (from gitleaks)
+    - name: Azure Storage key
+      pattern: '[A-Za-z0-9+/]{86}=='
+    - name: Azure AD client secret
+      pattern: '[A-Za-z0-9~._-]{34}'
+    - name: Azure DevOps PAT
+      pattern: '[a-z2-7]{52}'
+    - name: Azure Connection String
+      pattern: 'DefaultEndpointsProtocol=https;AccountName=[^;]+;AccountKey=[A-Za-z0-9+/=]{86}'
+    - name: Azure SAS token
+      pattern: 'sv=\d{4}-\d{2}-\d{2}&s[a-z]=[a-z]&[a-z]{2,3}=[^&]+'
+    # GCP (from gitleaks)
+    - name: GCP API key
+      pattern: 'AIza[A-Za-z0-9_\-]{35}'
+    - name: GCP service account
+      pattern: '"type"\s*:\s*"service_account"'
+    # Stripe (from gitleaks)
+    - name: Stripe live secret
+      pattern: 'sk_live_[0-9a-zA-Z]{24,}'
+    - name: Stripe test secret
+      pattern: 'sk_test_[0-9a-zA-Z]{24,}'
+    - name: Stripe restricted
+      pattern: 'rk_live_[0-9a-zA-Z]{24,}'
+    # Grafana (from gitleaks)
+    - name: Grafana API key
+      pattern: 'eyJr[A-Za-z0-9_\-]{30,}'
+    - name: Grafana cloud token
+      pattern: 'glc_[A-Za-z0-9+/]{32,}'
+    - name: Grafana service token
+      pattern: 'glsa_[A-Za-z0-9]{32}_[A-Fa-f0-9]{8}'
+    # Linear (from gitleaks)
+    - name: Linear API key
+      pattern: 'lin_api_[A-Za-z0-9]{40}'
+    # Postman (from gitleaks)
+    - name: Postman API key
+      pattern: 'PMAK-[A-Za-z0-9]{24}-[A-Za-z0-9]{34}'
+    # Datadog (contextual -- needs DD_ prefix, caught by env_keys)
+    # Heroku
+    - name: Heroku API key
+      pattern: '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}'
+    # Hashicorp (from gitleaks)
+    - name: Vault token
+      pattern: 'hvs\.[A-Za-z0-9]{24,}'
+    - name: Terraform Cloud token
+      pattern: '[a-z0-9]{14}\.atlasv1\.[a-z0-9\-_=]{60,}'
+    # Private keys
+    - name: Private key header
+      pattern: '-----BEGIN (?:RSA|DSA|EC|OPENSSH|PGP) PRIVATE KEY-----'
+    # Twilio (from gitleaks)
+    - name: Twilio API key
+      pattern: 'SK[0-9a-fA-F]{32}'
+    # Mailgun (from gitleaks)
+    - name: Mailgun API key
+      pattern: 'key-[0-9a-zA-Z]{32}'
+    # Shopify (from gitleaks)
+    - name: Shopify access token
+      pattern: 'shpat_[a-fA-F0-9]{32}'
+    # Planetscale (from gitleaks)
+    - name: Planetscale token
+      pattern: 'pscale_tkn_[A-Za-z0-9\-_.]{43}'
+    # Doppler (from gitleaks)
+    - name: Doppler token
+      pattern: 'dp\.pt\.[a-zA-Z0-9]{43}'
+
+  # Environment variable names whose values should be masked
+  env_keys:
+    - api_key
+    - secret_key
+    - access_key
+    - access_token
+    - auth_token
+    - password
+    - passwd
+    - bearer
+    - private_key
+    - database_url
+    - connection_string
+    - dsn
+    - redis_url
+    - valkey_url
+    - mongodb_uri
+    - encryption_key
+    - signing_key
+    - webhook_secret
+    - client_secret
+    - service_key
+    - master_key
+    # AWS
+    - aws_secret_access_key
+    - aws_session_token
+    # Azure
+    - azure_storage_key
+    - azure_client_secret
+    # GCP
+    - gcp_credentials
+    - google_application_credentials
+    # Datadog
+    - datadog_api_key
+    - dd_api_key
