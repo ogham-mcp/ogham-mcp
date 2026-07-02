@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.15.3] - 2026-07-05 -- Gemini pre-normalize skip + column-parity gate
+
+### Performance
+
+- **Skip client-side L2 normalization for `gemini-embedding-2` at
+  sub-3072 output dims.** The GA model pre-normalizes at every output
+  dim (verified across 512 / 768 / 1536 / 3072, `||v||` within 2e-7
+  of 1.0). Skip is gated on the model name, so anyone still on
+  `gemini-embedding-001` or a preview alias keeps the defensive
+  normalize path. Small speedup on batch embedding, no behavior
+  change for GA callers.
+
+### Testing
+
+- **Extended `test_schema_parity.py` to check column-set parity
+  across all three schema variants** (Supabase Cloud, self-hosted
+  Supabase, vanilla Postgres). Intentional divergences live in
+  `tests/schema_parity_whitelist.yaml`. Catches the "column added to
+  one variant, forgotten in the others" class of drift.
+
 ## [0.15.2] - 2026-06-18 -- Linux import ENAMETOOLONG hotfix
 
 ### Fixed

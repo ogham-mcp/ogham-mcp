@@ -1,0 +1,27 @@
+# Schema column-parity whitelist
+#
+# The schema-parity test (tests/test_schema_parity.py) asserts that every
+# CREATE TABLE shared across the three schema variants defines the same
+# column set. Real divergences that are intentional and understood belong
+# here, with a reason. Anything not on this list must be identical across
+# variants.
+#
+# Schema variants:
+#   - schema.sql                     Supabase Cloud (RLS + multi-tenant)
+#   - schema_selfhost_supabase.sql   Docker + Supabase self-hosted (RLS)
+#   - schema_postgres.sql            Neon / vanilla Postgres (no RLS)
+
+allowed_divergences:
+  - table: memories
+    column: tenant_id
+    present_in: [schema.sql]
+    reason: |
+      Multi-tenant scoping column set by the gateway via SET LOCAL app.tenant_id.
+      Only the cloud Supabase deploy carries multi-tenant traffic; self-hosted
+      Supabase and vanilla Postgres run single-tenant.
+  - table: memory_relationships
+    column: tenant_id
+    present_in: [schema.sql]
+    reason: |
+      Same multi-tenant rationale as memories.tenant_id. Set by the gateway
+      per request; not needed on self-hosted / vanilla single-tenant deploys.

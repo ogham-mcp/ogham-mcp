@@ -1,8 +1,13 @@
 """Gemini L2-normalization parity tests.
 
-Gemini pre-normalizes vectors only at the model's native 3072 dim.
-At 512 / 768 / 1536 the client must normalize or cosine similarity
-becomes magnitude-weighted and retrieval quality silently drifts.
+`gemini-embedding-2` (GA) returns pre-normalized vectors at every output
+dim -- verified empirically 2026-07-02 across 512/768/1536/3072 (||v||
+within 2e-7 of 1.0). The client-side normalize is now redundant work
+for this model.
+
+Older / preview aliases (e.g. `gemini-embedding-001`) are treated as
+not-pre-normalized -- we keep the defensive normalize path for them so
+retrieval quality doesn't silently drift if someone pins an old model.
 
 Mirror tests to internal/native/embedding_test.go in ogham-cli.
 """
@@ -59,12 +64,33 @@ def _fake_client(vectors):
     return _FakeClient()
 
 
-def test_embed_gemini_normalizes_sub_3072(monkeypatch):
-    """Raw server vector (1..512) -> sum(v^2) ~ 1 after the fix."""
+def test_embed_gemini_skips_normalize_for_ga_model_at_sub_3072(monkeypatch):
+    """`gemini-embedding-2` returns pre-normalized vectors; the client
+    must NOT re-normalize (would waste an O(n) pass and introduce fp error)."""
     from ogham import embeddings as emb_mod
 
     monkeypatch.setattr(emb_mod.settings, "gemini_api_key", "fake")
     monkeypatch.setattr(emb_mod.settings, "embedding_dim", 512)
+    monkeypatch.setattr(emb_mod.settings, "gemini_embed_model", "gemini-embedding-2")
+
+    # Non-unit magnitude on purpose: if we normalize, this test fails.
+    raw = [float(i + 1) for i in range(512)]
+    with patch.object(emb_mod, "_get_gemini_client", return_value=_fake_client([raw])):
+        got = _embed_gemini("hello")
+
+    # Server value passes through untouched (1.0 not 1.0/norm).
+    assert got[0] == 1.0
+    assert got == raw
+
+
+def test_embed_gemini_normalizes_sub_3072_for_non_ga_model(monkeypatch):
+    """For older / preview aliases we keep the defensive normalize -- we
+    haven't verified their server-side normalization behavior."""
+    from ogham import embeddings as emb_mod
+
+    monkeypatch.setattr(emb_mod.settings, "gemini_api_key", "fake")
+    monkeypatch.setattr(emb_mod.settings, "embedding_dim", 512)
+    monkeypatch.setattr(emb_mod.settings, "gemini_embed_model", "gemini-embedding-001")
 
     raw = [float(i + 1) for i in range(512)]
     with patch.object(emb_mod, "_get_gemini_client", return_value=_fake_client([raw])):
@@ -76,11 +102,13 @@ def test_embed_gemini_normalizes_sub_3072(monkeypatch):
 
 
 def test_embed_gemini_does_not_normalize_at_3072(monkeypatch):
-    """At native 3072 dim Gemini already returns unit vectors; don't touch."""
+    """At native 3072 dim Gemini already returns unit vectors; don't touch,
+    regardless of model alias."""
     from ogham import embeddings as emb_mod
 
     monkeypatch.setattr(emb_mod.settings, "gemini_api_key", "fake")
     monkeypatch.setattr(emb_mod.settings, "embedding_dim", 3072)
+    monkeypatch.setattr(emb_mod.settings, "gemini_embed_model", "gemini-embedding-2")
 
     # Non-unit magnitude on purpose: if we normalize, this test fails.
     raw = [float(i + 1) for i in range(3072)]

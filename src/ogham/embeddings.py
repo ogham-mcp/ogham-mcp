@@ -352,10 +352,19 @@ def _embed_gemini(text: str, usage_out: EmbeddingUsage | None = None) -> list[fl
     )
     embedding = response.embeddings[0].values
     _validate_dim(embedding)
-    if settings.embedding_dim < 3072:
+    if settings.embedding_dim < 3072 and not _gemini_model_pre_normalizes():
         embedding = _l2_normalize(embedding)
     _set_usage_out(usage_out, _extract_gemini_usage(response))
     return embedding
+
+
+def _gemini_model_pre_normalizes() -> bool:
+    """`gemini-embedding-2` (GA) returns pre-normalized vectors at every
+    output dim -- verified empirically 2026-07-02 at 512/768/1536/3072,
+    ||v|| within 2e-7 of 1.0. Older / preview aliases are treated as
+    not-pre-normalized so we keep the defensive client-side normalize.
+    """
+    return settings.gemini_embed_model == "gemini-embedding-2"
 
 
 def _validate_dim(embedding: list[float]) -> None:
@@ -369,11 +378,13 @@ def _l2_normalize(embedding: list[float]) -> list[float]:
     """Rescale `embedding` to unit length. Zero vectors pass through unchanged
     (normalizing would divide by zero).
 
-    Gemini only pre-normalizes vectors at the model's native 3072 dim. At
-    512 / 768 / 1536 the magnitude varies, which turns cosine similarity
-    into a magnitude-weighted score. Google's docs explicitly say the
-    caller must normalize sub-3072 outputs client-side:
-    https://ai.google.dev/gemini-api/docs/embeddings
+    Historical note: pre-GA Gemini embedding models only pre-normalized at
+    the model's native 3072 dim; sub-3072 outputs needed client-side
+    normalize or cosine similarity became magnitude-weighted. `gemini-embedding-2`
+    GA changed this -- it now pre-normalizes at all output dims
+    (verified 2026-07-02 across 512/768/1536/3072). See `_gemini_model_pre_normalizes`
+    for the gate; this function stays as the defensive path for older aliases and
+    for providers other than Gemini.
     """
     sum_sq = sum(x * x for x in embedding)
     if sum_sq == 0:
@@ -627,7 +638,7 @@ def _embed_gemini_batch(
         embeddings = [e.values for e in response.embeddings]
         for emb in embeddings:
             _validate_dim(emb)
-        if settings.embedding_dim < 3072:
+        if settings.embedding_dim < 3072 and not _gemini_model_pre_normalizes():
             embeddings = [_l2_normalize(emb) for emb in embeddings]
         _set_usage_out(usage_out, _extract_gemini_usage(response))
         return embeddings
