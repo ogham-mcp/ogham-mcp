@@ -1289,7 +1289,17 @@ _BEFORE_WORDS = frozenset(_dir.get("before", []))
 
 
 def _extract_memory_date(r: dict[str, Any]) -> str | None:
-    """Extract a date from a memory (metadata > content prefix > created_at)."""
+    """Extract a date from a memory (metadata > content prefix > created_at).
+
+    Always coerces the `created_at` fallback via `str(...)` (see below), so
+    this reliably returns `str | None` even when a row's `created_at` is a
+    real `datetime` object (Postgres backend). Keep it that way: other
+    callers mix this value with string sentinels/comparisons -- e.g. the
+    ordering-query sort key in `_search_memories_raw` (`"9999"` fallback) and
+    `_tdr_rerank`'s `sorted(all_dates)` -- and would raise `TypeError` if a
+    raw `datetime` ever leaked through and got compared/sorted against a
+    `str`.
+    """
     meta_dates = r.get("metadata", {}).get("dates", [])
     if meta_dates:
         return meta_dates[0]
@@ -1434,22 +1444,31 @@ def _temporal_rerank(
         anchor = anchor_start + (anchor_end - anchor_start) / 2
     except (ValueError, TypeError):
         return results
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
 
     direction = _detect_direction(query)
 
     for r in results:
-        mem_date_str = _extract_memory_date(r)
-        if not mem_date_str:
+        # _extract_memory_date is str | None today (see its docstring), but
+        # this stays tolerant of a raw datetime too -- e.g. a future change
+        # surfacing the Postgres backend's created_at directly -- so this
+        # block never regresses to a silent TypeError-swallow (TBU-162).
+        mem_date_val: Any = _extract_memory_date(r)
+        if not mem_date_val:
             continue
 
         try:
-            # Use full timestamp precision when available
-            if len(mem_date_str) > 10:
-                mem_dt = datetime.fromisoformat(mem_date_str.replace("Z", "+00:00"))
+            if isinstance(mem_date_val, datetime):
+                mem_dt = mem_date_val
+            elif len(mem_date_val) > 10:
+                mem_dt = datetime.fromisoformat(mem_date_val.replace("Z", "+00:00"))
             else:
-                mem_dt = datetime.fromisoformat(mem_date_str)
+                mem_dt = datetime.fromisoformat(mem_date_val)
         except (ValueError, TypeError):
             continue
+        if mem_dt.tzinfo is None:
+            mem_dt = mem_dt.replace(tzinfo=timezone.utc)
 
         # Delta in fractional days (sub-day precision)
         delta_days = (mem_dt - anchor).total_seconds() / 86400.0

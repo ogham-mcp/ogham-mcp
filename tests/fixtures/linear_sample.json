@@ -1,0 +1,35 @@
+{
+  "data": {
+    "issue": {
+      "id": "11111111-2222-3333-4444-555555555555",
+      "identifier": "ENG-42",
+      "title": "[v1.2.0] Retry embed batch on partial response",
+      "description": "**Bug**: the embedding batch call sometimes returns fewer vectors than items submitted, and the partial result passes through instead of triggering a retry.\n\n**Fix**:\n\n1. Detect when the response length is smaller than the batch length and raise a retryable error the retry decorator catches.\n2. Add a test with a mocked partial response -- assert the retry happens and the final result succeeds.\n\nEffort: half-day.",
+      "state": {
+        "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "name": "Done"
+      },
+      "priority": 2,
+      "assignee": null,
+      "labels": {
+        "nodes": [
+          {
+            "id": "99999999-8888-7777-6666-555555555555",
+            "name": "Bug"
+          }
+        ]
+      },
+      "comments": {
+        "nodes": [
+          {
+            "id": "synthetic-comment-1",
+            "body": "Landed in commit abc123 -- retry now triggers on partial batch responses.",
+            "user": {
+              "name": "Sam Rivera"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

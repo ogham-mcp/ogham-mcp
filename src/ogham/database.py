@@ -10,10 +10,12 @@ import logging
 from typing import Any, cast
 
 from ogham.backends.protocol import DatabaseBackend
+from ogham.entity_graph import V1_PREDICATES, EntityGraph
 
 logger = logging.getLogger(__name__)
 
 _backend: DatabaseBackend | None = None
+_entity_graph: EntityGraph | None = None
 
 
 def set_tenant_context(tenant_id: str | None) -> None:
@@ -47,6 +49,69 @@ def _reset_backend() -> None:
     _backend = None
 
 
+def _validate_schema_fingerprint(backend: Any, settings: Any) -> None:
+    """Refuse to serve if ``settings.embedding_dim`` disagrees with the DB column dim.
+
+    TBU-159 blocker guard: dim-parameterizing the shipping schemas (Design
+    Council Option A) is worse than doing nothing without this check --
+    a stale-dim DB with a bumped ``EMBEDDING_DIM`` looks like it works
+    (writes succeed) while reads silently fail (dimension mismatch on the
+    vector comparison), which is much harder to diagnose than a clean
+    startup failure.
+
+    Only enforced for backends that expose raw SQL introspection
+    (``PostgresBackend`` via psycopg -- same ``hasattr(backend, "_execute")``
+    discriminator used by ``health.py``/``health_dimensions.py``). The
+    Supabase/PostgREST backend only exposes named RPC functions -- there is
+    no ``pg_attribute`` introspection RPC in the shipped schema, and adding
+    one is out of scope for TBU-159 -- so that path (and the HTTP-proxying
+    ``GatewayBackend``) logs a warning and returns instead of raising.
+    """
+    if not hasattr(backend, "_execute"):
+        logger.warning(
+            "Schema-fingerprint guard skipped: backend %s has no raw SQL "
+            "introspection path (TBU-159 covers PostgresBackend only). "
+            "Verify EMBEDDING_DIM=%s matches the applied schema manually.",
+            type(backend).__name__,
+            settings.embedding_dim,
+        )
+        return
+
+    try:
+        # NOTE: pgvector's `vector` type stores atttypmod == N directly (no
+        # +4 VARHDRSZ-style offset the way numeric/varchar do). Verified
+        # empirically against Docker postgres-scratch: applying vector(512)
+        # yields atttypmod=512, format_type() = 'vector(512)'. An earlier
+        # draft of this guard subtracted 4 by analogy with other typmod
+        # conventions -- that was wrong for pgvector and would have flagged
+        # every correctly-applied schema as mismatched.
+        actual_dim = backend._execute(
+            "SELECT atttypmod FROM pg_attribute "
+            "WHERE attrelid = 'memories'::regclass AND attname = 'embedding'",
+            fetch="scalar",
+        )
+    except Exception as e:
+        # Schema may not be applied yet (fresh install / `ogham init`) --
+        # don't block startup on a guard that assumes the table exists.
+        logger.warning("Schema-fingerprint check skipped: %s", e)
+        return
+
+    if actual_dim is None:
+        # memories.embedding column not found -- same "not applied yet" case.
+        return
+
+    if actual_dim != settings.embedding_dim:
+        raise RuntimeError(
+            f"Schema dim mismatch: DB memories.embedding is vector({actual_dim}) "
+            f"but settings.embedding_dim={settings.embedding_dim}. "
+            f"Fix ONE of: "
+            f"(a) re-embed all rows to {settings.embedding_dim} and re-apply schema, or "
+            f"(b) swap EMBEDDING_DIM={actual_dim} in .env to match the applied schema. "
+            f"Ogham refuses to serve with silent dim mismatch (writes succeed, reads fail "
+            f"asymmetrically)."
+        )
+
+
 def get_backend() -> DatabaseBackend:
     """Return (and lazily create) the singleton backend instance."""
     global _backend
@@ -57,15 +122,22 @@ def get_backend() -> DatabaseBackend:
         if backend_name == "gateway":
             from ogham.backends.gateway import GatewayBackend
 
-            _backend = GatewayBackend(settings.gateway_url, settings.gateway_api_key)
+            new_backend: DatabaseBackend = GatewayBackend(
+                settings.gateway_url, settings.gateway_api_key
+            )
         elif backend_name == "postgres":
             from ogham.backends.postgres import PostgresBackend
 
-            _backend = PostgresBackend()
+            new_backend = PostgresBackend()
         else:
             from ogham.backends.supabase import SupabaseBackend
 
-            _backend = SupabaseBackend()
+            new_backend = SupabaseBackend()
+        # Validate BEFORE publishing to the singleton -- if this raises, the
+        # next get_backend() call retries from scratch instead of silently
+        # returning the already-flagged mismatched backend.
+        _validate_schema_fingerprint(new_backend, settings)
+        _backend = new_backend
     return _backend
 
 
@@ -78,6 +150,58 @@ def get_client():
     if not hasattr(backend, "_get_client"):
         raise RuntimeError(f"Backend {type(backend).__name__!r} does not expose a raw client")
     return cast(Any, backend)._get_client()
+
+
+def _reset_entity_graph() -> None:
+    """Reset the entity-graph singleton. Used by tests."""
+    global _entity_graph
+    _entity_graph = None
+
+
+def get_entity_graph_and_vocab() -> tuple[EntityGraph, frozenset[str]]:
+    """Return (and lazily create) the singleton EntityGraph + allowed predicate vocab.
+
+    Mirrors ``get_backend()`` / ``get_client()`` above: composes a concrete
+    ``PostgresEntityGraph`` / ``SupabaseEntityGraph`` from the already-cached
+    ``DatabaseBackend`` instance's pool/client (``_get_pool()`` /
+    ``_get_client()``) rather than opening a second connection. This is the
+    entity-graph tools' composition root -- ``ogham.tools.entity_graph`` calls
+    this facade instead of importing ``ogham.postgres.entity_graph`` /
+    ``ogham.supabase.entity_graph`` directly, keeping the tools module
+    backend-agnostic (same boundary ``get_client()`` already enforces for the
+    memory tools).
+
+    Vocab is the hard-coded ``ogham.entity_graph.V1_PREDICATES`` constant
+    (see that module's docstring for why) rather than a query against
+    ``entity_edge_predicates`` -- no DB round-trip at server start.
+
+    Raises:
+        RuntimeError: if the configured backend is ``gateway`` -- no
+            GatewayEntityGraph exists yet (tracked as a follow-up).
+    """
+    global _entity_graph
+    if _entity_graph is None:
+        backend = get_backend()
+        from ogham.config import settings
+
+        backend_name = getattr(settings, "database_backend", "supabase")
+        if backend_name == "postgres":
+            from ogham.postgres.entity_graph import PostgresEntityGraph
+
+            pool = cast(Any, backend)._get_pool()
+            _entity_graph = PostgresEntityGraph(pool, V1_PREDICATES)
+        elif backend_name == "gateway":
+            raise RuntimeError(
+                "entity graph tools are not supported on the gateway backend yet -- "
+                "switch DATABASE_BACKEND to 'postgres' or 'supabase' to use "
+                "store_triple / query_join."
+            )
+        else:
+            from ogham.supabase.entity_graph import SupabaseEntityGraph
+
+            client = cast(Any, backend)._get_client()
+            _entity_graph = SupabaseEntityGraph(client, V1_PREDICATES)
+    return _entity_graph, V1_PREDICATES
 
 
 # ── Thin delegates — one per public function ────────────────────────────
@@ -111,6 +235,26 @@ def store_memory(
 
 def get_memory_by_id(memory_id: str, profile: str) -> dict[str, Any] | None:
     return get_backend().get_memory_by_id(memory_id, profile)
+
+
+def find_by_metadata_kv(key: str, value: str, profile: str) -> dict[str, Any] | None:
+    """Return the first memory in ``profile`` whose ``metadata[key] == value``, or None.
+
+    Used by tracker importers (e.g. ``ogham.tools.import_linear``) to dedupe
+    on ``metadata.tracker_external_id`` before re-storing an issue.
+
+    # build-less: linear scan over get_all_memories_full() -- every backend
+    # (postgres, supabase, gateway) already implements that method, so this
+    # needs zero backend-protocol or schema changes. Fine for tracker-import
+    # dedupe (tens-hundreds of issues per run). Upgrade trigger: if a profile
+    # grows large enough (~thousands of memories) that per-issue full scans
+    # become a measurable cost, add an indexed metadata lookup on the backend
+    # instead.
+    """
+    for memory in get_backend().get_all_memories_full(profile):
+        if (memory.get("metadata") or {}).get(key) == value:
+            return memory
+    return None
 
 
 def store_memories_batch(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

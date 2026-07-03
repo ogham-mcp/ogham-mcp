@@ -267,13 +267,15 @@ def _prompt_embeddings() -> dict:
         url = Prompt.ask("   Ollama URL", default=default_url)
         env_vars["OLLAMA_URL"] = url
 
+    from ogham.config import PROVIDER_DEFAULT_DIMS
+
+    dim = PROVIDER_DEFAULT_DIMS.get(provider, 512)
+    env_vars["EMBEDDING_DIM"] = str(dim)
     if provider == "mistral":
-        env_vars["EMBEDDING_DIM"] = "1024"
         console.print(
-            "   [yellow]Mistral uses fixed 1024 dimensions -- schema will be set to 1024.[/yellow]"
+            f"   [yellow]Mistral uses fixed {dim} dimensions --"
+            f" schema will be set to {dim}.[/yellow]"
         )
-    else:
-        env_vars["EMBEDDING_DIM"] = "512"
 
     return env_vars
 
@@ -376,10 +378,15 @@ def _find_schema_file(backend: str) -> Path | None:
 
 
 def _adjust_schema_dim(sql: str, dim: str) -> str:
-    """Replace vector(512) with the configured dimension if different."""
-    if dim and dim != "512":
-        return sql.replace("vector(512)", f"vector({dim})")
-    return sql
+    """Substitute the schema's ``:embedding_dim`` psql placeholder with ``dim``.
+
+    Thin wrapper around ``schema_apply.render_schema_sql`` -- kept as a
+    module-level function here since callers below pass the dim around as a
+    string (env-var value) rather than an int.
+    """
+    from ogham.schema_apply import render_schema_sql
+
+    return render_schema_sql(sql, int(dim) if dim else 512)
 
 
 def _run_schema(env_vars: dict) -> bool:
@@ -393,16 +400,21 @@ def _run_schema(env_vars: dict) -> bool:
         console.print("   Ogham needs tables and functions in your database.")
         console.print("   For Supabase, paste the schema SQL into the SQL Editor.")
         schema_path = _find_schema_file("supabase")
-        if schema_path and dim != "512":
-            # Write a dimension-adjusted copy next to the original
+        if schema_path:
+            # The shipping schema uses a `:embedding_dim` psql placeholder
+            # (TBU-159), so it's never directly paste-ready -- always write
+            # a dim-substituted copy next to the original, even at 512.
             adjusted_path = schema_path.parent / f"schema_{dim}d.sql"
-            adjusted_sql = _adjust_schema_dim(schema_path.read_text(), dim)
-            adjusted_path.write_text(adjusted_sql)
-            console.print(
-                f"   [yellow]Adjusted schema for {dim} dims:[/yellow] [bold]{adjusted_path}[/bold]"
-            )
-        elif schema_path:
-            console.print(f"   Schema file: [bold]{schema_path}[/bold]")
+            try:
+                adjusted_sql = _adjust_schema_dim(schema_path.read_text(), dim)
+            except (ValueError, TypeError) as e:
+                console.print(f"   [red]Schema adjustment failed: {e}[/red]")
+                console.print(f"   Schema file: [bold]{schema_path}[/bold] (run manually)")
+            else:
+                adjusted_path.write_text(adjusted_sql)
+                console.print(
+                    f"   [yellow]Schema for {dim} dims:[/yellow] [bold]{adjusted_path}[/bold]"
+                )
         else:
             console.print("   Schema file: [bold]sql/schema.sql[/bold] (from the repo)")
         console.print(
@@ -443,7 +455,12 @@ def _run_schema(env_vars: dict) -> bool:
             )
             return False
 
-        schema_sql = _adjust_schema_dim(schema_path.read_text(), dim)
+        try:
+            schema_sql = _adjust_schema_dim(schema_path.read_text(), dim)
+        except (ValueError, TypeError) as e:
+            console.print(f"   [red]Schema adjustment failed: {e}[/red]")
+            console.print(f"   Run the schema manually: {schema_path}")
+            return False
         if dim != "512":
             console.print(f"   [cyan]Schema adjusted for {dim} dimensions.[/cyan]")
         try:
@@ -756,7 +773,17 @@ def run_init(
             if env_key:
                 env_vars[env_key] = api_key
 
-        env_vars["EMBEDDING_DIM"] = str(dim or 512)
+        if dim is None:
+            from ogham.config import PROVIDER_DEFAULT_DIMS
+
+            env_vars["EMBEDDING_DIM"] = str(
+                PROVIDER_DEFAULT_DIMS.get(env_vars["EMBEDDING_PROVIDER"], 512)
+            )
+        else:
+            # Explicit --dim wins, including the historical "0 falls back
+            # to 512" idiom -- only the unset (None) case gets the
+            # provider-aware default above.
+            env_vars["EMBEDDING_DIM"] = str(dim or 512)
         exec_mode = mode or "uvx"
         transport, sse_host, sse_port = "stdio", "127.0.0.1", 8742
     else:

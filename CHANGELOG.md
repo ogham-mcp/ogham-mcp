@@ -4,6 +4,93 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.16.0] - 2026-07-03 -- Typed-edge context graph + Linear importer + dim-parameterized schemas
+
+### Added
+
+- **Typed-edge context graph: two new tools, `store_triple` and
+  `query_join`.** `store_triple(subject, predicate, object)` records a
+  typed relationship -- `AuthService DEPENDS_ON Postgres` -- against a
+  fixed predicate vocabulary. `query_join(start_entity, predicate_path,
+  hop_limit)` walks that path exactly and returns the entities, edges,
+  and source citations along it. This answers the question a vector
+  search cannot: "which team owns the component that depends on the
+  service the planner chose?" The answer is a path through your stored
+  facts, not a passage of text that happens to mention all three.
+- **Controlled predicate vocabulary.** Sixteen predicate names --
+  `DEPENDS_ON`, `OWNS`, `ASSIGNED_TO`, `DECIDED`, `MENTIONS`, `BLOCKS`,
+  and their inverses -- validated at write time. Off-vocabulary
+  predicates are rejected, so the graph stays queryable.
+- **Write-time supersession.** When you store a new edge for a
+  subject/predicate pair that already has one, the old edge moves to
+  history with a timestamp instead of being deleted. Current-view
+  queries see only the live fact; you can still read the full history
+  when you need the timeline. No more stale relationships reading as
+  current.
+- **Entity aliases.** "the auth module" resolves to `AuthModule` before
+  the graph is queried, so triples and joins line up even when the same
+  thing is named different ways.
+- **Linear importer.** `import_linear` (MCP tool) and `ogham import
+  linear` (CLI) pull your Linear issues in as memories, so past
+  decisions and task context are searchable alongside everything else.
+  Re-runs are de-duplicated on the issue id.
+
+### Changed
+
+- **The embedding dimension is now a parameter, not a hardcoded 512.**
+  All three schema files (`schema.sql`, `schema_postgres.sql`,
+  `schema_selfhost_supabase.sql`) use `:embedding_dim` instead of a
+  literal `vector(512)`. If you run a non-512 provider (Mistral at 1024,
+  Voyage, Gemini at 768, OpenAI's large model at 3072) you no longer
+  edit SQL by hand -- set `EMBEDDING_DIM` and apply. The interactive
+  setup wizard and the Python apply path handle the substitution for
+  you; for a manual apply, substitute the token first:
+  `sed 's/:embedding_dim/'"$EMBEDDING_DIM"'/g' sql/schema_postgres.sql | psql "$DATABASE_URL"`.
+  **Existing 512-dim installs are unaffected** -- applying at
+  `EMBEDDING_DIM=512` produces exactly the same schema as before.
+
+### Reliability
+
+- **Startup guard against a silent dimension mismatch.** On the Postgres
+  backend, Ogham now checks at boot that your configured `EMBEDDING_DIM`
+  matches the actual dimension of the `memories.embedding` column, and
+  refuses to start on a mismatch with a message telling you which side
+  to fix. This closes a trap where writes succeed at the wrong dimension
+  and searches quietly return nothing useful later.
+
+- **Fixed a lockout of the graph tables on self-hosted Postgres.** If
+  you self-host on plain Postgres (not Supabase) with a non-superuser
+  database role, row-level security was left forced on the entity and
+  typed-edge tables without a matching policy, which silently hid every
+  row -- graph lookups and `store_triple` / `query_join` returned
+  nothing. Upgrading now runs a self-heal migration that unlocks those
+  tables automatically. Supabase installs are unaffected.
+
+### Fixed
+
+- **Fixed a crash in `hybrid_search` on the self-hosted Postgres
+  backend.** Timestamps come back as datetime objects on Postgres (and
+  as strings on Supabase), and a date parser assumed strings, so every
+  hybrid search raised an error. The same root-cause fix also resolves a
+  crash in OKF export for time-limited memories and makes exported OKF
+  bundles byte-consistent across backends.
+
+- **The setup wizard now sets the right embedding dimension per
+  provider.** It previously wrote `EMBEDDING_DIM=512` even for providers
+  that default to 1024 (OpenAI, Mistral, Voyage), which could stop the
+  server starting after the new dimension check. Both the interactive
+  and `ogham init --provider ...` paths now use the provider's real
+  default; an explicit dimension still wins.
+
+- **Self-hosted Supabase schema `hybrid_search_memories` was behind the
+  other two schema variants by two parameters.** Brought to signature
+  parity so hybrid search behaves the same across Supabase Cloud,
+  self-hosted Supabase, and vanilla Postgres. The test suite now checks
+  SQL function signatures across all three variants, not just their
+  columns.
+
+
+
 ## [0.15.3] - 2026-07-05 -- Gemini pre-normalize skip + column-parity gate
 
 ### Performance

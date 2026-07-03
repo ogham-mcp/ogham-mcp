@@ -801,6 +801,40 @@ def import_claude_ai_cmd(
     )
 
 
+@app.command(name="import-linear")
+def import_linear_cmd(
+    team: str = typer.Option(..., "--team", help="Linear team key, e.g. TBU"),
+    since: int = typer.Option(30, "--since", help="Days lookback for updatedAt filter"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Ogham profile to store into"),
+):
+    """Import Linear issues into Ogham as memories, deduped by tracker_external_id."""
+    import os
+
+    from ogham.importers.linear import LinearClient
+    from ogham.tools.import_linear import _DefaultMemoryService, import_linear_impl
+    from ogham.tools.memory import get_active_profile
+
+    token = os.environ.get("LINEAR_API_TOKEN")
+    if not token:
+        console.print("[red]LINEAR_API_TOKEN not set[/red]")
+        raise typer.Exit(code=1)
+
+    target = profile or get_active_profile()
+    client = LinearClient(token=token)
+    service = _DefaultMemoryService()
+    result = import_linear_impl(
+        client=client,
+        service=service,
+        team_key=team,
+        since_days=since,
+        profile=target,
+    )
+    console.print(
+        f"[green]imported={result['imported']} skipped={result['skipped']} "
+        f"disabled={result['disabled']}[/green]"
+    )
+
+
 @app.command(name="backfill-entities")
 def backfill_entities_cmd(
     profile: str = typer.Option(None, help="Profile to backfill (default: all)"),

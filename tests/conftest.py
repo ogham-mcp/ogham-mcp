@@ -103,11 +103,13 @@ def _isolated_unit_environment(monkeypatch, request):
         monkeypatch.setenv("DEFAULT_PROFILE", "default")
 
     from ogham.config import settings
-    from ogham.database import _reset_backend
+    from ogham.database import _reset_backend, _reset_entity_graph
 
     settings._reset()
     _reset_backend()
+    _reset_entity_graph()
     yield
+    _reset_entity_graph()
     _reset_backend()
     settings._reset()
 
@@ -148,8 +150,11 @@ def _ensure_standard_postgres_test_schema():
         )
         table_names = {str(r["table_name"]) for r in tables}
         if "memories" not in table_names:
+            from ogham.schema_apply import render_schema_sql
+
             schema = repo_root / "sql/schema_postgres.sql"
-            backend._execute(schema.read_text(), fetch="none")
+            schema_sql = render_schema_sql(schema.read_text(), settings.embedding_dim)
+            backend._execute(schema_sql, fetch="none")
             return
 
         # Current profile stats tests require migration 022's additive
@@ -183,6 +188,24 @@ def _ensure_standard_postgres_test_schema():
         # Tests that need the columns will still skip via _can_connect
         # guards; tests that don't touch Postgres are unaffected.
         pass
+
+
+@pytest.fixture
+def pg_url() -> str:
+    """Raw Postgres URL for the shared scratch DB.
+
+    Deliberately not named ``pg_fresh_db`` -- that fixture has a different
+    shape (a migration harness object, not a URL) and destructive teardown
+    (drops entities/memory_entities). Shared by the entity-graph
+    ``postgres_integration`` test modules (store_triple, query_join), which
+    each open their own ``ConnectionPool`` against this URL and never
+    drop/truncate -- they use uuid-prefixed entity names so runs never
+    collide, regardless of order.
+    """
+    url = os.environ.get("DATABASE_URL", "")
+    if "scratch" not in url.lower():
+        pytest.skip("DATABASE_URL must point at a scratch Postgres database")
+    return url
 
 
 @pytest.fixture

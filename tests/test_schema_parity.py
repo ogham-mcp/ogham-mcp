@@ -16,12 +16,12 @@ SCHEMA_FILES = [
     REPO_ROOT / "sql" / "schema.sql",
     REPO_ROOT / "sql" / "schema_selfhost_supabase.sql",
 ]
-# Pre-existing SQL-function param-count tests only cover the schemas kept in
-# lockstep with the Python backend. `schema_selfhost_supabase.sql` has a
-# known drift on `hybrid_search_memories` (missing query_entity_tags + recency_decay)
-# tracked in v0.16 Linear TBU-149 -- exclude it here until that lands so the
-# self-hosted schema doesn't red the pre-existing tests before the fix is in.
-_FUNCTION_PARITY_SCHEMAS = [f for f in SCHEMA_FILES if f.name != "schema_selfhost_supabase.sql"]
+# All three schema variants must stay in lockstep with the Python backend's
+# SQL function calls (TBU-149: schema_selfhost_supabase.sql was 2 params
+# behind on hybrid_search_memories -- missing query_entity_tags +
+# recency_decay -- which broke self-hosted Supabase deploys with PGRST202
+# param-count mismatch. Fixed; all three schemas now checked).
+_FUNCTION_PARITY_SCHEMAS = SCHEMA_FILES
 WHITELIST_PATH = Path(__file__).parent / "schema_parity_whitelist.yaml"
 
 
@@ -124,13 +124,63 @@ def test_no_unnumbered_migrations():
 
 def test_schema_has_required_tables():
     """All schema files must define the core tables."""
-    required_tables = ["memories", "memory_relationships", "profile_settings"]
+    required_tables = [
+        "memories",
+        "memory_relationships",
+        "profile_settings",
+        "entity_edges",
+        "entity_edge_predicates",
+        "entity_aliases",
+    ]
     for schema in SCHEMA_FILES:
         if not schema.exists():
             continue
         sql = schema.read_text().lower()
         for table in required_tables:
             assert table in sql, f"{table} missing from {schema.name}"
+
+
+def test_predicate_vocab_seed_present():
+    """All schema files must seed the 16 v1 predicate names (6 inverse pairs
+    + 4 standalone), with 'SUPERSEDES' absent per TBU-109 regression guard."""
+    from ogham.entity_graph import V1_PREDICATES
+
+    required_predicates = [
+        "DEPENDS_ON",
+        "DEPENDED_ON_BY",
+        "OWNS",
+        "OWNED_BY",
+        "ASSIGNED_TO",
+        "HAS_ASSIGNEE",
+        "DECIDED",
+        "MENTIONS",
+        "BLOCKS",
+        "BLOCKED_BY",
+        "PART_OF",
+        "CONTAINS",
+        "SUPPORTS",
+        "CONTRADICTS",
+        "EVOLVED_INTO",
+        "RELATED_TO",
+    ]
+    # Regression guard: keep V1_PREDICATES aligned with the schema-parity list
+    # (TBU-114 amendment -- prevents silent drift between the Python constant
+    # and the SQL seed). Migration 042 remains the ultimate source of truth
+    # (checked by the loop below); this assertion just chains V1_PREDICATES
+    # to it so an edit to either list alone fails here.
+    assert set(required_predicates) == V1_PREDICATES, (
+        f"V1_PREDICATES drift: schema parity list = {sorted(required_predicates)!r}, "
+        f"V1_PREDICATES = {sorted(V1_PREDICATES)!r}. Update both in lockstep."
+    )
+    for schema in SCHEMA_FILES:
+        if not schema.exists():
+            continue
+        sql = schema.read_text()
+        for pred in required_predicates:
+            assert f"'{pred}'" in sql, f"predicate '{pred}' missing from {schema.name}"
+        assert "'SUPERSEDES'" not in sql, (
+            f"SUPERSEDES must not be seeded (dropped per TBU-109) in {schema.name}"
+        )
 
 
 # --- Column parity ---
@@ -294,6 +344,32 @@ def test_column_parity_across_schemas():
                 )
 
     assert not failures, "Column-parity divergences:\n" + "\n".join(failures)
+
+
+def test_no_hardcoded_vector_dim_in_shipping_schemas():
+    """Chronic-drift prevention (TBU-159): task #188 and v0.6 #149 both landed
+    partial dim-hardcode fixes, leaving pin sites behind. This test refuses any
+    commit that re-introduces a literal vector(N) or halfvec(N) in the shipping
+    schema files. New code must use vector(:embedding_dim) / halfvec(:embedding_dim)
+    -- the psql -v variable placeholder (Design Council Option A, 2026-07-02).
+
+    Migration files under sql/migrations/ are separately scoped -- restricted
+    to the top-level shipping schema files (SCHEMA_FILES, same 3-schema list
+    the column/function parity tests above already use).
+    """
+    pattern = re.compile(r"\b(vector|halfvec)\(\d+\)")
+    offenders = []
+    for schema in SCHEMA_FILES:
+        if not schema.exists():
+            continue
+        for i, line in enumerate(schema.read_text().splitlines(), start=1):
+            if pattern.search(line):
+                offenders.append(f"{schema}:{i}: {line.strip()}")
+    assert not offenders, (
+        "Re-introduced hardcoded vector/halfvec dim in shipping schema:\n"
+        + "\n".join(offenders)
+        + "\n\nUse vector(:embedding_dim) / halfvec(:embedding_dim) instead. See TBU-159."
+    )
 
 
 def test_whitelist_entries_are_actually_divergent():

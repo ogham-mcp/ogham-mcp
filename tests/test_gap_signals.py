@@ -190,6 +190,65 @@ def test_compute_deep_signals_coverage_degrades(monkeypatch):
     assert out.coverage == {"note": "wiki not enabled"}
 
 
+def test_parse_dt_accepts_datetime_object():
+    """TBU-162: Postgres backend (psycopg) returns created_at as a datetime,
+    not a str. _parse_dt must tolerate it instead of raising TypeError."""
+    dt = datetime(2026, 5, 20, 12, 30, tzinfo=timezone.utc)
+    out = gs._parse_dt(dt)
+    assert out == dt
+
+
+def test_parse_dt_datetime_object_naive_becomes_utc_aware():
+    dt = datetime(2026, 5, 20, 12, 30)  # naive
+    out = gs._parse_dt(dt)
+    assert out is not None
+    assert out.tzinfo == timezone.utc
+
+
+def test_parse_dt_accepts_iso_string_with_offset():
+    out = gs._parse_dt("2026-05-20T00:00:00+00:00")
+    assert out == datetime(2026, 5, 20, tzinfo=timezone.utc)
+
+
+def test_parse_dt_accepts_iso_string_with_trailing_z():
+    out = gs._parse_dt("2026-05-20T00:00:00Z")
+    assert out == datetime(2026, 5, 20, tzinfo=timezone.utc)
+
+
+def test_parse_dt_returns_none_for_none_and_garbage():
+    assert gs._parse_dt(None) is None
+    assert gs._parse_dt("not-a-date") is None
+    assert gs._parse_dt(12345) is None  # type: ignore[arg-type]
+
+
+def test_compute_in_result_signals_tolerates_datetime_created_at_rows():
+    """Reproduces the real TBU-162 crash: rows shaped like the Postgres
+    backend returns them (created_at is a datetime object, not a string).
+    Must not raise, and must still produce staleness signals."""
+    now = datetime(2026, 5, 27, tzinfo=timezone.utc)
+    rows = [
+        _row("a", created_at=datetime(2026, 5, 20, tzinfo=timezone.utc), confidence=0.4),
+        _row("b", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc), confidence=0.45),
+    ]
+    report = compute_in_result_signals(rows, now=now, stale_days=90, confidence_floor=0.5)
+    assert report.staleness["newest_write_days"] == 7
+    assert report.staleness["older_than_stale_days"] == 1
+    assert report.scope_size == 2
+
+
+def test_compute_in_result_signals_tolerates_mixed_str_and_datetime_rows():
+    """A hybrid_search result set could plausibly mix backends in theory;
+    at minimum the function must not care which shape each row is in."""
+    now = datetime(2026, 5, 27, tzinfo=timezone.utc)
+    rows = [
+        _row("a", created_at=datetime(2026, 5, 20, tzinfo=timezone.utc), confidence=0.4),
+        _row("b", created_at="2026-01-01T00:00:00+00:00", confidence=0.45),
+    ]
+    report = compute_in_result_signals(rows, now=now, stale_days=90, confidence_floor=0.5)
+    assert report.staleness["newest_write_days"] == 7
+    assert report.scope_size == 2
+
+
 def test_compute_deep_signals_no_result_ids_skips_lookup(monkeypatch):
     r = GapReport(scope_size=0)
     called = {"n": 0}

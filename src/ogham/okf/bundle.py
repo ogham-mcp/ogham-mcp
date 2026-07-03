@@ -42,10 +42,18 @@ def filter_expired(memories: list[dict]) -> list[dict]:
             kept.append(m)
             continue
         try:
-            ts = datetime.fromisoformat(expires.replace("Z", "+00:00"))
-        except (ValueError, AttributeError):
+            # Postgres backend (psycopg) returns expires_at as a real datetime
+            # object; the Supabase REST backend returns an ISO string (#TBU-162
+            # audit -- same root cause as the hybrid_search datetime crash).
+            if isinstance(expires, datetime):
+                ts = expires
+            else:
+                ts = datetime.fromisoformat(str(expires).replace("Z", "+00:00"))
+        except (ValueError, AttributeError, TypeError):
             kept.append(m)  # unparseable = keep (safe default)
             continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
         if ts > now:
             kept.append(m)
     return kept

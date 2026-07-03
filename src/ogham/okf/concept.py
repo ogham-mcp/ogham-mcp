@@ -1,5 +1,7 @@
 """Memory <-> OKF concept frontmatter marshalling."""
 
+from datetime import datetime
+
 DEFAULT_OKF_TYPE = "Memory"
 TYPE_TAG_PREFIX = "type:"
 
@@ -58,11 +60,20 @@ def memory_to_frontmatter(memory: dict) -> dict:
     them without knowing our convention.
     """
     tags = list(memory.get("tags") or [])
+    # created_at is a datetime on the Postgres backend, an ISO string on the
+    # Supabase REST backend (TBU-162 root cause). Coerce to a string so the
+    # exported frontmatter is backend-independent -- otherwise yaml.safe_dump
+    # writes it as an unquoted YAML timestamp scalar for one backend and a
+    # quoted string for the other. Match export_import.py's manifest
+    # timestamps (`datetime.now(timezone.utc).isoformat()`) so there's one
+    # ISO shape across the whole OKF bundle.
+    created_at = memory.get("created_at")
+    timestamp = created_at.isoformat() if isinstance(created_at, datetime) else created_at
     fm: dict = {
         "type": derive_okf_type(tags),
         "id": memory["id"],
         "tags": strip_type_tags(tags),
-        "timestamp": memory["created_at"],
+        "timestamp": timestamp,
     }
     source = memory.get("source")
     if source:

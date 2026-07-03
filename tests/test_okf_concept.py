@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from ogham.okf.concept import (
     derive_okf_type,
     frontmatter_to_memory,
@@ -57,6 +59,43 @@ def test_memory_to_frontmatter_required_and_recommended_fields():
     assert fm["tags"] == ["project:ogham"]
     assert fm["source"] == "claude-code"
     assert fm["timestamp"] == "2026-06-17T08:51:03.613750Z"
+
+
+def test_memory_to_frontmatter_timestamp_is_str_for_datetime_or_iso_string_created_at():
+    """TBU-162 audit: the Postgres backend returns created_at as a real
+    datetime object; the Supabase REST backend returns an ISO string.
+    Uncoerced, yaml.safe_dump would write these differently (unquoted YAML
+    timestamp scalar vs quoted string), making the exported OKF bundle
+    byte-dependent on which backend produced it. Both shapes must produce
+    the same str timestamp."""
+    base = {
+        "id": "7da3c025-fa77-4f0b-9d2e-1ab84e6c3f99",
+        "content": "x",
+        "tags": [],
+        "source": None,
+        "metadata": {},
+    }
+    iso_str = "2026-06-17T08:51:03.613750+00:00"
+    dt = datetime(2026, 6, 17, 8, 51, 3, 613750, tzinfo=timezone.utc)
+
+    fm_from_str = memory_to_frontmatter({**base, "created_at": iso_str})
+    fm_from_dt = memory_to_frontmatter({**base, "created_at": dt})
+
+    assert isinstance(fm_from_str["timestamp"], str)
+    assert isinstance(fm_from_dt["timestamp"], str)
+    assert fm_from_dt["timestamp"] == fm_from_str["timestamp"] == iso_str
+
+
+def test_memory_to_frontmatter_missing_created_at_is_none():
+    memory = {
+        "id": "11111111-2222-3333-4444-555555555555",
+        "content": "x",
+        "tags": [],
+        "source": None,
+        "metadata": {},
+    }
+    fm = memory_to_frontmatter(memory)
+    assert fm["timestamp"] is None
 
 
 def test_memory_to_frontmatter_title_from_first_line():

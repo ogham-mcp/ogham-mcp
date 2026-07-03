@@ -102,3 +102,61 @@ def test_invalid_backend_rejected():
             supabase_url="https://example.supabase.co",
             supabase_key="fake-key",
         )
+
+
+# --- TBU-159: boot-time schema-fingerprint guard ---
+
+
+def test_validate_schema_fingerprint_raises_on_mismatch():
+    """DB column dim disagreeing with settings.embedding_dim must raise RuntimeError
+    with an actionable message -- not silently degrade (writes succeed, reads fail)."""
+    mock_backend = MagicMock()
+    mock_backend._execute.return_value = 1024
+    mock_settings = MagicMock()
+    mock_settings.embedding_dim = 512
+
+    with pytest.raises(RuntimeError, match="Schema dim mismatch") as exc_info:
+        db._validate_schema_fingerprint(mock_backend, mock_settings)
+
+    msg = str(exc_info.value)
+    assert "vector(1024)" in msg
+    assert "settings.embedding_dim=512" in msg
+    assert "EMBEDDING_DIM=1024" in msg  # actionable fix (b)
+
+
+def test_validate_schema_fingerprint_passes_on_match():
+    """No exception when DB column dim matches settings.embedding_dim."""
+    mock_backend = MagicMock()
+    mock_backend._execute.return_value = 512
+    mock_settings = MagicMock()
+    mock_settings.embedding_dim = 512
+
+    db._validate_schema_fingerprint(mock_backend, mock_settings)
+
+
+def test_validate_schema_fingerprint_skips_backend_without_execute():
+    """Supabase/PostgREST + gateway backends have no raw SQL introspection path --
+    guard must skip (log + return) rather than raise AttributeError."""
+    mock_backend = MagicMock(spec=[])
+    mock_settings = MagicMock()
+    mock_settings.embedding_dim = 512
+
+    db._validate_schema_fingerprint(mock_backend, mock_settings)
+
+
+def test_validate_schema_fingerprint_skips_when_schema_not_applied():
+    """Fresh install with no schema applied yet -- don't block startup on a
+    guard that assumes the memories table already exists."""
+    mock_backend = MagicMock()
+    mock_backend._execute.side_effect = Exception('relation "memories" does not exist')
+    mock_settings = MagicMock()
+    mock_settings.embedding_dim = 512
+
+    db._validate_schema_fingerprint(mock_backend, mock_settings)
+
+
+def test_get_backend_runs_fingerprint_guard_for_supabase():
+    """get_backend() should call the guard on first construction; a SupabaseBackend
+    has no _execute so this is a no-op skip, but must not raise or block."""
+    backend = db.get_backend()
+    assert isinstance(backend, SupabaseBackend)

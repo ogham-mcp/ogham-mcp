@@ -20,12 +20,23 @@ from ogham.llm import synthesize
 logger = logging.getLogger(__name__)
 
 
-def _parse_dt(value: str | None) -> datetime | None:
+def _parse_dt(value: str | datetime | None) -> datetime | None:
+    """Normalize a DB-row date value to a tz-aware datetime.
+
+    The Postgres backend (psycopg) returns `created_at` as a `datetime`
+    object; the Supabase REST backend returns an ISO string. Accept both
+    (and reject anything else) so this never crashes hybrid_search.
+    """
     if value is None:
         return None
-    try:
-        dt = datetime.fromisoformat(value)
-    except ValueError:
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+    else:
         return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)

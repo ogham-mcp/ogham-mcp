@@ -48,6 +48,20 @@ def test_filter_expired_removes_past_expires_at():
     assert kept_ids == {"b", "c", "d"}
 
 
+def test_filter_expired_tolerates_datetime_expires_at():
+    """TBU-162 audit: the Postgres backend (psycopg) returns expires_at as a
+    real datetime object, not an ISO string. Must not raise."""
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    future = datetime.now(timezone.utc) + timedelta(days=1)
+    memories = [
+        {"id": "a", "expires_at": past},
+        {"id": "b", "expires_at": future},
+    ]
+    kept = filter_expired(memories)
+    kept_ids = {m["id"] for m in kept}
+    assert kept_ids == {"b"}
+
+
 def _make_memory(id_: str, content: str = "x", tags: list[str] | None = None) -> dict:
     return {
         "id": id_,

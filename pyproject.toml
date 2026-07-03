@@ -1,6 +1,6 @@
 [project]
 name = "ogham-mcp"
-version = "0.15.3"
+version = "0.16.0"
 description = "Shared memory MCP server — persistent, searchable, cross-client"
 requires-python = ">=3.13"
 dependencies = [
@@ -75,6 +75,11 @@ ignore = ["S608", "S104", "S101"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ogham"]
+# Defense-in-depth: keep the dev-only Agent Zero experiment out of the wheel if
+# it is ever synced into this repo. It is excluded from the dev->public mirror
+# via .syncignore, so it is normally absent here, but the exclude guarantees the
+# published artifact never carries it regardless of how the tree was populated.
+exclude = ["**/agent_zero_import.py"]
 
 # Phase B (v0.13): canonical migrations live at sql/migrations/ only. The wheel
 # ships them at ogham/sql/migrations/ via force-include so self-hosters keep
@@ -121,6 +126,11 @@ exclude = [
     "sql/migrations/rollback/",
     "sql/archive/",
     "demo-scripts/",
+    # Dev-only Agent Zero experiment (mirrors .syncignore + the wheel exclude).
+    "**/agent_zero_import.py",
+    "**/test_agent_zero_import.py",
+    "**/create_agent_zero_fixture.py",
+    "**/agent_zero_sample.pkl",
 ]
 
 [build-system]

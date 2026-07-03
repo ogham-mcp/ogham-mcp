@@ -4,6 +4,16 @@
 --
 -- memory_lifecycle + triggers + decay params incorporate migrations 025 + 026.
 -- Fresh installs land at post-026 state; upgraders from v0.10.x run ./sql/upgrade.sh.
+--
+-- TBU-159: vector/halfvec columns use a `:embedding_dim` placeholder instead
+-- of a hardcoded dimension. Substitute it with your embedding provider's
+-- output dimension (see EMBEDDING_DIM in src/ogham/config.py) before
+-- applying. Do NOT use raw `psql -v embedding_dim=N -f schema.sql` -- psql
+-- does not interpolate variables inside dollar-quoted (`$$ ... $$`) function
+-- bodies, so most of the halfvec(:embedding_dim) casts inside this file's
+-- functions would be left unsubstituted and fail with a syntax error.
+-- Preprocess the whole file as text first, e.g.:
+--   sed "s/:embedding_dim/$EMBEDDING_DIM/g" sql/schema_selfhost_supabase.sql | psql "$DATABASE_URL"
 
 -- Enable pgvector extension
 create extension if not exists vector with schema public;
@@ -12,7 +22,7 @@ create extension if not exists vector with schema public;
 create table if not exists memories (
     id uuid primary key default gen_random_uuid(),
     content text not null,
-    embedding vector(512),
+    embedding vector(:embedding_dim),
     metadata jsonb default '{}'::jsonb,
     source text,
     profile text not null default 'default',
@@ -50,7 +60,7 @@ create policy "Deny anon access" on memories
 
 -- HNSW index for fast cosine similarity search
 create index if not exists memories_embedding_idx
-    on memories using hnsw ((embedding::halfvec(512)) halfvec_cosine_ops)
+    on memories using hnsw ((embedding::halfvec(:embedding_dim)) halfvec_cosine_ops)
     with (m = 16, ef_construction = 64);
 
 -- GIN indexes for filtering
@@ -203,7 +213,7 @@ CREATE INDEX idx_relationships_auto
 -- RPC: auto-link a new memory to similar existing memories
 CREATE OR REPLACE FUNCTION auto_link_memory(
     new_memory_id uuid,
-    new_embedding vector(512),
+    new_embedding vector(:embedding_dim),
     link_threshold float DEFAULT 0.85,
     max_links int DEFAULT 5,
     filter_profile text DEFAULT 'default'
@@ -214,13 +224,13 @@ SECURITY INVOKER
 SET search_path = public, extensions
 AS $$
     WITH candidates AS (
-        SELECT m.id, (1 - (m.embedding::halfvec(512) <=> new_embedding::halfvec(512)))::float AS similarity
+        SELECT m.id, (1 - (m.embedding::halfvec(:embedding_dim) <=> new_embedding::halfvec(:embedding_dim)))::float AS similarity
         FROM memories m
         WHERE m.id != new_memory_id
           AND m.profile = filter_profile
           AND (m.expires_at IS NULL OR m.expires_at > now())
-          AND 1 - (m.embedding::halfvec(512) <=> new_embedding::halfvec(512)) > link_threshold
-        ORDER BY m.embedding::halfvec(512) <=> new_embedding::halfvec(512)
+          AND 1 - (m.embedding::halfvec(:embedding_dim) <=> new_embedding::halfvec(:embedding_dim)) > link_threshold
+        ORDER BY m.embedding::halfvec(:embedding_dim) <=> new_embedding::halfvec(:embedding_dim)
         LIMIT max_links
     ),
     inserted AS (
@@ -336,7 +346,7 @@ $$;
 
 -- RPC function for cosine similarity search with ACT-R temporal scoring
 create or replace function match_memories(
-    query_embedding vector(512),
+    query_embedding vector(:embedding_dim),
     match_threshold float default 0.7,
     match_count int default 10,
     filter_tags text[] default null,
@@ -371,13 +381,13 @@ begin
         m.source,
         m.profile,
         m.tags,
-        (1 - (m.embedding::halfvec(512) <=> query_embedding::halfvec(512)))::float as similarity,
+        (1 - (m.embedding::halfvec(:embedding_dim) <=> query_embedding::halfvec(:embedding_dim)))::float as similarity,
         -- Relevance = similarity * softplus(ACT-R) * confidence * graph_boost
         -- ACT-R: B(M) = ln(n+1) - 0.5 * ln(ageDays / (n+1))
         -- softplus: ln(1 + exp(B)) keeps score positive
         -- graph_boost: (1 + sum(relationship_strength) * 0.2)
         (
-            (1 - (m.embedding::halfvec(512) <=> query_embedding::halfvec(512))) *
+            (1 - (m.embedding::halfvec(:embedding_dim) <=> query_embedding::halfvec(:embedding_dim))) *
             ln(1.0 + exp(
                 ln(m.access_count + 1.0) -
                 0.5 * ln(
@@ -402,7 +412,7 @@ begin
         where r.target_id = m.id or r.source_id = m.id
     ) g on true
     where
-        1 - (m.embedding::halfvec(512) <=> query_embedding::halfvec(512)) > match_threshold
+        1 - (m.embedding::halfvec(:embedding_dim) <=> query_embedding::halfvec(:embedding_dim)) > match_threshold
         and (filter_tags is null or m.tags && filter_tags)
         and (filter_source is null or m.source = filter_source)
         and m.profile = filter_profile
@@ -415,7 +425,7 @@ $$;
 -- RPC: hybrid search combining semantic (pgvector) and keyword (tsvector) via RRF
 create or replace function hybrid_search_memories(
     query_text text,
-    query_embedding vector(512),
+    query_embedding vector(:embedding_dim),
     match_count int default 10,
     filter_profile text default 'default',
     filter_tags text[] default null,
@@ -423,7 +433,9 @@ create or replace function hybrid_search_memories(
     full_text_weight float default 1.0,
     semantic_weight float default 1.0,
     rrf_k int default 60,
-    filter_profiles text[] default null
+    filter_profiles text[] default null,
+    query_entity_tags text[] default null,
+    recency_decay float default 0.0
 )
 returns table (
     id uuid,
@@ -448,15 +460,15 @@ as $$
 with semantic as (
     select
         m.id,
-        row_number() over (order by m.embedding::halfvec(512) <=> query_embedding::halfvec(512)) as rank_ix,
-        (1 - (m.embedding::halfvec(512) <=> query_embedding::halfvec(512)))::float as similarity
+        row_number() over (order by m.embedding::halfvec(:embedding_dim) <=> query_embedding::halfvec(:embedding_dim)) as rank_ix,
+        (1 - (m.embedding::halfvec(:embedding_dim) <=> query_embedding::halfvec(:embedding_dim)))::float as similarity
     from memories m
     where (filter_profiles is not null and m.profile = any(filter_profiles)
            or filter_profiles is null and m.profile = filter_profile)
       and (filter_tags is null or m.tags && filter_tags)
       and (filter_source is null or m.source = filter_source)
       and (m.expires_at is null or m.expires_at > now())
-    order by m.embedding::halfvec(512) <=> query_embedding::halfvec(512)
+    order by m.embedding::halfvec(:embedding_dim) <=> query_embedding::halfvec(:embedding_dim)
     limit match_count * 2
 ),
 keyword as (
@@ -495,6 +507,7 @@ fused as (
     group by c.id
 )
 -- Relevance = rrf_score * softplus(ACT-R) * confidence * graph_boost
+--             * entity_overlap_boost * recency_decay
 -- graph_boost: (1 + sum(relationship_strength) * 0.2)
 select
     m.id,
@@ -518,6 +531,17 @@ select
         ))
         * m.confidence
         * (1.0 + g.graph_boost * 0.2)
+        -- Entity overlap boost: query-conditioned re-ranking via tag intersection.
+        -- Mirrors schema.sql's hybrid_search_memories (TBU-149 parity fix).
+        * (1.0 + case
+            when query_entity_tags is null or cardinality(query_entity_tags) = 0 then 0.0
+            else (select count(*)::float from unnest(query_entity_tags) qt
+                  where qt = any(m.tags))
+                 / cardinality(query_entity_tags) * 0.4
+          end)
+        -- Gated recency decay: exp(-decay * age_days). Only fires when
+        -- recency_decay > 0 (caller gates by query type). Default 0 = no effect.
+        * exp(-recency_decay * extract(epoch from (now() - m.created_at)) / 86400.0)
     )::float as relevance,
     m.access_count,
     m.last_accessed_at,
@@ -590,7 +614,7 @@ $$;
 -- RPC: batch update embeddings (reduces N+1 round trips in re_embed_all)
 create or replace function batch_update_embeddings(
     memory_ids uuid[],
-    new_embeddings vector(512)[]
+    new_embeddings vector(:embedding_dim)[]
 )
 returns integer
 language plpgsql
@@ -616,7 +640,7 @@ $$;
 -- indicating whether each embedding has a match above threshold.
 -- Uses a simple cosine similarity check (no ACT-R scoring needed for dedup).
 create or replace function batch_check_duplicates(
-    query_embeddings vector(512)[],
+    query_embeddings vector(:embedding_dim)[],
     match_threshold float default 0.8,
     filter_profile text default 'default'
 )
@@ -638,7 +662,7 @@ begin
             select 1 from memories m
             where m.profile = filter_profile
               and (m.expires_at is null or m.expires_at > now())
-              and 1 - (m.embedding::halfvec(512) <=> query_embeddings[i]::halfvec(512)) > match_threshold
+              and 1 - (m.embedding::halfvec(:embedding_dim) <=> query_embeddings[i]::halfvec(:embedding_dim)) > match_threshold
             limit 1
         ) into found;
         results := array_append(results, found);
@@ -760,7 +784,7 @@ $$;
 -- RPC: explore knowledge graph — hybrid search seeds + relationship traversal
 CREATE OR REPLACE FUNCTION explore_memory_graph(
     query_text text,
-    query_embedding vector(512),
+    query_embedding vector(:embedding_dim),
     filter_profile text DEFAULT 'default',
     match_count int DEFAULT 5,
     traversal_depth int DEFAULT 1,
@@ -1052,6 +1076,95 @@ $$;
 REVOKE EXECUTE ON FUNCTION refresh_entity_temporal_span(bigint) FROM anon, authenticated, PUBLIC;
 REVOKE EXECUTE ON FUNCTION spread_entity_activation_memories(text[], text, integer, double precision, double precision, integer) FROM anon, authenticated, PUBLIC;
 
+-- ── Typed entity edges (v0.16 typed-edge context graph, TBU-110) ──────
+-- See sql/migrations/041_entity_edges.sql, 042_entity_edge_predicates.sql,
+-- 043_entity_aliases.sql for design notes.
+
+CREATE TABLE IF NOT EXISTS entity_edges (
+    id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    subject_id    bigint NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    predicate     text NOT NULL,
+    object_id     bigint NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    profile       text NOT NULL,
+    fact_id       uuid,
+    strength      real NOT NULL DEFAULT 1.0,
+    metadata      jsonb NOT NULL DEFAULT '{}',
+    valid_from    timestamptz NOT NULL DEFAULT now(),
+    valid_to      timestamptz,
+    superseded_by bigint REFERENCES entity_edges(id),
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    CHECK (subject_id <> object_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS entity_edges_current_uq
+    ON entity_edges(subject_id, predicate, object_id, profile)
+    WHERE valid_to IS NULL;
+
+CREATE INDEX IF NOT EXISTS entity_edges_subject_pred_current
+    ON entity_edges(subject_id, predicate) WHERE valid_to IS NULL;
+
+CREATE INDEX IF NOT EXISTS entity_edges_object_pred_current
+    ON entity_edges(object_id, predicate) WHERE valid_to IS NULL;
+
+CREATE INDEX IF NOT EXISTS entity_edges_profile_current
+    ON entity_edges(profile) WHERE valid_to IS NULL;
+
+ALTER TABLE entity_edges ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entity_edges FORCE ROW LEVEL SECURITY;
+CREATE POLICY "Deny anon access" ON entity_edges
+    FOR ALL TO anon USING (false) WITH CHECK (false);
+
+CREATE TABLE IF NOT EXISTS entity_edge_predicates (
+    predicate   text PRIMARY KEY,
+    label       text NOT NULL,
+    description text,
+    inverse     text,
+    scope       text NOT NULL CHECK (scope IN ('entity','memory'))
+);
+
+-- v1 seed: 16 entity-scope predicate rows (6 inverse pairs + 4 standalone).
+-- SUPERSEDES intentionally omitted per TBU-109 (redundant with valid_to).
+INSERT INTO entity_edge_predicates(predicate, label, description, inverse, scope) VALUES
+    ('DEPENDS_ON',      'depends on',       'Subject requires object to function or complete',            'DEPENDED_ON_BY', 'entity'),
+    ('DEPENDED_ON_BY',  'depended on by',   'Inverse of DEPENDS_ON',                                       'DEPENDS_ON',     'entity'),
+    ('OWNS',            'owns',             'Subject has ownership or authority over object',              'OWNED_BY',       'entity'),
+    ('OWNED_BY',        'owned by',         'Inverse of OWNS',                                             'OWNS',           'entity'),
+    ('ASSIGNED_TO',     'assigned to',      'Subject is assigned to object (task -> person, item -> box)', 'HAS_ASSIGNEE',   'entity'),
+    ('HAS_ASSIGNEE',    'has assignee',     'Inverse of ASSIGNED_TO',                                      'ASSIGNED_TO',    'entity'),
+    ('DECIDED',         'decided',          'Subject decided on object (agent -> decision fact)',          NULL,             'entity'),
+    ('MENTIONS',        'mentions',         'Subject mentions object in a memory / message',               NULL,             'entity'),
+    ('BLOCKS',          'blocks',           'Subject blocks progress on object',                           'BLOCKED_BY',     'entity'),
+    ('BLOCKED_BY',      'blocked by',       'Inverse of BLOCKS',                                           'BLOCKS',         'entity'),
+    ('PART_OF',         'part of',          'Subject is a structural component of object',                 'CONTAINS',       'entity'),
+    ('CONTAINS',        'contains',         'Inverse of PART_OF',                                          'PART_OF',        'entity'),
+    ('SUPPORTS',        'supports',         'Subject provides evidence for object (entity-scope)',         'CONTRADICTS',    'entity'),
+    ('CONTRADICTS',     'contradicts',      'Subject provides counter-evidence to object (entity-scope)',  'SUPPORTS',       'entity'),
+    ('EVOLVED_INTO',    'evolved into',     'Object is a later version of subject (matches NATEOB1)',      NULL,             'entity'),
+    ('RELATED_TO',      'related to',       'Low-signal catchall -- prefer a specific predicate',          NULL,             'entity')
+ON CONFLICT (predicate) DO NOTHING;
+
+ALTER TABLE entity_edge_predicates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entity_edge_predicates FORCE ROW LEVEL SECURITY;
+CREATE POLICY "Deny anon access" ON entity_edge_predicates
+    FOR ALL TO anon USING (false) WITH CHECK (false);
+
+CREATE TABLE IF NOT EXISTS entity_aliases (
+    id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    entity_id  bigint NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    alias      text NOT NULL,
+    profile    text NOT NULL,
+    strength   real NOT NULL DEFAULT 1.0,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE(alias, profile)
+);
+
+CREATE INDEX IF NOT EXISTS entity_aliases_entity ON entity_aliases(entity_id);
+
+ALTER TABLE entity_aliases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE entity_aliases FORCE ROW LEVEL SECURITY;
+CREATE POLICY "Deny anon access" ON entity_aliases
+    FOR ALL TO anon USING (false) WITH CHECK (false);
+
 -- =====================================================
 -- PostgREST / Supabase Data API grants (added 2026-05)
 -- =====================================================
@@ -1075,5 +1188,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.memory_relationships TO service_r
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.audit_log            TO service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.entities             TO service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.memory_entities      TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.entity_edges         TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.entity_edge_predicates TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.entity_aliases       TO service_role;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO service_role;

@@ -34,6 +34,7 @@ concurrent sessions, does not leak.
 |------|---------|-------------|
 | `DANGER_025_memory_lifecycle.sql` | Forward migration 025 | Drops `memories.stage`, `memories.stage_entered_at`, `profile_settings.decay_lambda`, `profile_settings.decay_beta`. Data in those columns is lost. |
 | `DANGER_026_memory_lifecycle_split.sql` | Forward migration 026 | Re-adds stage cols to `memories`, backfills from `memory_lifecycle`, drops the `memory_lifecycle` table + triggers. Lifecycle history preserved via backfill. Python server v0.11.0+ will fail after this — downgrade the server to v0.10.x first. |
+| `DANGER_044_unforce_rls_non_supabase.sql` | Forward migration 044 | Re-applies `FORCE ROW LEVEL SECURITY` to `entities`/`memory_entities`/`entity_edges`/`entity_edge_predicates`/`entity_aliases`. On a non-Supabase install this **re-introduces the TBU-163 lockout** (deny-all for the non-superuser table owner) — no data is lost, but the tables become unreadable/unwritable again. No legitimate reason to run this outside testing the migration harness itself. |
 
 ## Recovering from an accidental rollback
 
