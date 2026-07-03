@@ -60,8 +60,12 @@ jobs:
 
       - name: Apply schema_postgres.sql
         run: |
-          psql -h localhost -U ogham -d ogham_test -v ON_ERROR_STOP=1 \
-            -f sql/schema_postgres.sql
+          # schema is dim-parameterized (:embedding_dim) since v0.16 (TBU-159).
+          # psql -v does not interpolate inside dollar-quoted function bodies,
+          # so substitute the token textually before applying, at the 512
+          # baseline dim. Mirrors the sed-based apply documented for operators.
+          sed 's/:embedding_dim/512/g' sql/schema_postgres.sql \
+            | psql -h localhost -U ogham -d ogham_test -v ON_ERROR_STOP=1
 
       - name: Verify hybrid_search_memories signature
         run: |
@@ -153,8 +157,12 @@ jobs:
 
       - name: Apply base schema + all migrations
         run: |
-          psql -h localhost -U ogham -d ogham_test -v ON_ERROR_STOP=1 \
-            -f sql/schema_postgres.sql
+          # Dim-parameterized since v0.16 (TBU-159): substitute :embedding_dim
+          # textually (psql -v can't reach inside dollar-quoted bodies) at the
+          # 512 baseline. Migrations 041-044 have no embedding columns, so they
+          # apply as-is below.
+          sed 's/:embedding_dim/512/g' sql/schema_postgres.sql \
+            | psql -h localhost -U ogham -d ogham_test -v ON_ERROR_STOP=1
           if [ -d sql/migrations ]; then
             for f in sql/migrations/[0-9]*.sql; do
               if [ -f "$f" ]; then
