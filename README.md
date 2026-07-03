@@ -403,6 +403,21 @@ Admin operations such as config, health, stats, audit, export, delete, and clean
 | `explore_knowledge` | Traverse the knowledge graph | `memory_id`, `depth`, `direction` |
 | `suggest_connections` | Find hidden connections via shared entities | `memory_id`, `min_shared_entities`, `limit` |
 
+### Typed-edge graph (v0.16)
+
+Structural, typed relationships for two-fact join queries. Full detail in [`/docs/typed-edges/`](https://ogham-mcp.dev/docs/typed-edges/).
+
+| Tool | Description | Key parameters |
+|------|-------------|----------------|
+| `store_triple` | Write a typed edge against a controlled predicate vocabulary; supersedes the prior current edge for the same subject + predicate + object | `subject`, `predicate`, `object`, `profile`, `source_memory_id` |
+| `query_join` | Walk a typed predicate path from a start entity; returns the entities (BFS order), edges, and citations along the path -- no fuzzy ranking | `start_entity`, `predicate_path[]`, `hop_limit` (required), `direction` |
+
+### Importers
+
+| Tool | Description | Key parameters |
+|------|-------------|----------------|
+| `import_linear` | Import Linear issues as memories, read-only, deduped by tracker id (v0.16) | see [`/docs/import-linear/`](https://ogham-mcp.dev/docs/import-linear/) |
+
 ### Profiles
 
 | Tool | Description | Key parameters |
