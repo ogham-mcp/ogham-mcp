@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.17.0] - Unreleased -- Ingestion adapters: capture from Obsidian, Telegram, and Slack
+
+### Added
+
+- **Obsidian / markdown vault capture.** `ogham ingest-obsidian <vault>` (CLI)
+  and `ingest_obsidian` (MCP tool) scan a local vault and store each note as a
+  memory tagged `source: obsidian`. YAML frontmatter tags become memory tags.
+  The scan is idempotent -- unchanged notes are skipped by a content
+  fingerprint -- so you can run it on a timer and re-runs never double-store.
+- **Telegram capture.** `ogham ingest-telegram` (CLI) and `ingest_telegram`
+  (MCP tool) pull messages from a Telegram bot with `getUpdates` and store them
+  tagged `source: telegram`. Deduped on the Telegram update id, with an optional
+  per-chat allowlist. Outbound-only -- the adapter calls out to Telegram; there
+  is no webhook and no public endpoint to expose.
+- **Slack capture.** `ogham ingest-slack` (CLI) and `ingest_slack` (MCP tool)
+  poll `conversations.history` for the channels you list and store their
+  messages tagged `source: slack`. Deduped on channel id + message timestamp.
+  Outbound-only (a bot token, no Socket Mode, no exposed endpoint); the bot must
+  be a member of each channel it reads.
+- **One shared ingestion path.** All three adapters forward to the same
+  server-side enrichment -- embedding, entity extraction, and store-side dedup --
+  so an adapter is a thin forwarder, not a re-implementation of the pipeline.
+  Each is a one-shot, idempotent poll designed to run under a timer
+  (launchd/cron); none runs as a daemon and none listens for inbound
+  connections, so your memory store is never exposed.
+
 ## [0.16.0] - 2026-07-03 -- Typed-edge context graph + Linear importer + dim-parameterized schemas
 
 ### Added

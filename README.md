@@ -219,6 +219,7 @@ Memories are stored as rows with vector embeddings. Search combines pgvector cos
 - **Entity enrichment** -- regex entity tags across 18 languages with no LLM in the write path; a timeline table; Lost-in-the-Middle reordering.
 - **Memory lifecycle** -- FRESH / STABLE / EDITING stages, ACT-R importance, Hebbian decay, and automatic condensing.
 - **Importers** -- Claude Code auto-memory, Claude.ai export, Linear issues, and JSON.
+- **Ingestion adapters (v0.17)** -- capture into memory from an Obsidian/markdown vault (`ingest-obsidian`), Telegram (`ingest-telegram`), and Slack (`ingest-slack`). Outbound-only, idempotent, and timer-friendly; all three share one server-side enrichment and dedup path.
 - **Lifecycle hooks** -- recall context at session start, inscribe signal (not noise) after tool use; secrets masked before storage.
 - **Skills** -- `ogham-research`, `ogham-recall`, `ogham-maintain`.
 - **Self-hoster options** -- ONNX local embeddings (BGE-M3), optional FlashRank reranking, five embedding providers.
