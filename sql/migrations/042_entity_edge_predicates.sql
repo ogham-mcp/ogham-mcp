@@ -39,7 +39,15 @@ CREATE TABLE IF NOT EXISTS entity_edge_predicates (
 
 -- v1 seed: 16 entity-scope predicate rows (6 inverse pairs + 4 standalone).
 -- SUPERSEDES intentionally omitted per TBU-109 (redundant with valid_to).
-INSERT INTO entity_edge_predicates(predicate, label, description, inverse, scope) VALUES
+--
+-- Re-run-safe seed: only inserts when the table is empty. This keeps the
+-- migration idempotent even when replayed against a schema that has since
+-- gained NOT NULL columns the original 5-column seed doesn't supply (e.g.
+-- ogham_uri from migration 045). ON CONFLICT alone is insufficient there --
+-- the NOT NULL check fires before conflict resolution -- so we guard with
+-- WHERE NOT EXISTS. (Caught by the ogham-mcp schema-smoke upgrade-path CI.)
+INSERT INTO entity_edge_predicates(predicate, label, description, inverse, scope)
+SELECT * FROM (VALUES
     ('DEPENDS_ON',      'depends on',       'Subject requires object to function or complete',            'DEPENDED_ON_BY', 'entity'),
     ('DEPENDED_ON_BY',  'depended on by',   'Inverse of DEPENDS_ON',                                       'DEPENDS_ON',     'entity'),
     ('OWNS',            'owns',             'Subject has ownership or authority over object',              'OWNED_BY',       'entity'),
@@ -56,6 +64,8 @@ INSERT INTO entity_edge_predicates(predicate, label, description, inverse, scope
     ('CONTRADICTS',     'contradicts',      'Subject provides counter-evidence to object (entity-scope)',  'SUPPORTS',       'entity'),
     ('EVOLVED_INTO',    'evolved into',     'Object is a later version of subject',                        NULL,             'entity'),
     ('RELATED_TO',      'related to',       'Low-signal catchall -- prefer a specific predicate',          NULL,             'entity')
+) AS seed(predicate, label, description, inverse, scope)
+WHERE NOT EXISTS (SELECT 1 FROM entity_edge_predicates)
 ON CONFLICT (predicate) DO NOTHING;
 
 -- RLS: deny anon access. Guarded the same way as migration 041 -- FORCE
