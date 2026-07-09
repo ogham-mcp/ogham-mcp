@@ -401,3 +401,83 @@ def test_whitelist_entries_are_actually_divergent():
             f"    -> update whitelist or align schemas"
         )
     assert not stale, "Stale whitelist entries:\n" + "\n".join(stale)
+
+
+_PREDICATE_ROW_URI_RE = (
+    r"\('{pred}',.*?'(https://ogham-mcp\.dev/vocab#[^']*)',"
+    r"\s*(?:'(https://schema\.org/[^']*)'|NULL),\s*NULL\)"
+)
+
+
+def test_predicate_uri_seed_present():
+    """Every schema file must seed ogham_uri for all 16 predicates and the
+    five verified schema.org alignments (TBU-129). Guards SQL-side drift.
+
+    Uses a per-row regex (not a file-wide substring check) so a
+    transposition -- e.g. OWNS and OWNED_BY swapping their schema.org URIs,
+    or any ogham_uri landing on the wrong predicate's row -- fails the test
+    instead of passing because the string merely appears somewhere in the
+    file.
+    """
+    schema_dir = Path(__file__).resolve().parents[1] / "sql"
+    schemas = [
+        schema_dir / "schema.sql",
+        schema_dir / "schema_selfhost_supabase.sql",
+        schema_dir / "schema_postgres.sql",
+    ]
+    predicates = [
+        "DEPENDS_ON",
+        "DEPENDED_ON_BY",
+        "OWNS",
+        "OWNED_BY",
+        "ASSIGNED_TO",
+        "HAS_ASSIGNEE",
+        "DECIDED",
+        "MENTIONS",
+        "BLOCKS",
+        "BLOCKED_BY",
+        "PART_OF",
+        "CONTAINS",
+        "SUPPORTS",
+        "CONTRADICTS",
+        "EVOLVED_INTO",
+        "RELATED_TO",
+    ]
+    schema_org = {
+        "OWNS": "https://schema.org/owns",
+        "OWNED_BY": "https://schema.org/owner",
+        "MENTIONS": "https://schema.org/mentions",
+        "PART_OF": "https://schema.org/isPartOf",
+        "CONTAINS": "https://schema.org/hasPart",
+    }
+    for schema in schemas:
+        sql = schema.read_text()
+        # the columns must exist on the table
+        assert "ogham_uri" in sql and "schema_org_uri" in sql and "iirds_uri" in sql, (
+            f"URI columns missing from entity_edge_predicates in {schema.name}"
+        )
+        for pred in predicates:
+            pattern = _PREDICATE_ROW_URI_RE.format(pred=re.escape(pred))
+            match = re.search(pattern, sql)
+            assert match, f"seed row for '{pred}' not found (or malformed) in {schema.name}"
+            ogham_uri, row_schema_org = match.group(1), match.group(2)
+            assert ogham_uri == f"https://ogham-mcp.dev/vocab#{pred}", (
+                f"'{pred}' row has ogham_uri={ogham_uri!r} in {schema.name}"
+            )
+            expected_schema_org = schema_org.get(pred)
+            assert row_schema_org == expected_schema_org, (
+                f"'{pred}' row has schema_org_uri={row_schema_org!r}, "
+                f"expected {expected_schema_org!r} in {schema.name}"
+            )
+
+
+def test_derived_from_column_and_index_present():
+    """entity_edges must have derived_from jsonb + GIN index in all 3 schemas (TBU-124)."""
+    from pathlib import Path
+
+    schema_dir = Path(__file__).resolve().parents[1] / "sql"
+    for name in ("schema.sql", "schema_selfhost_supabase.sql", "schema_postgres.sql"):
+        sql = (schema_dir / name).read_text()
+        assert "derived_from jsonb" in sql, f"derived_from column missing from {name}"
+        assert "entity_edges_derived_from_gin" in sql, f"GIN index missing from {name}"
+        assert "USING gin (derived_from)" in sql, f"GIN index def missing from {name}"

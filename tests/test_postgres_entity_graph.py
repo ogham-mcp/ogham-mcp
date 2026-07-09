@@ -164,12 +164,14 @@ def _edge_row(
     metadata: dict,
     valid_from: str,
     valid_to,
+    derived_from: list | None = None,
 ) -> dict:
     """Builds an entity_edges dict row matching the dict_row column shape.
 
     Column order mirrors the query_join edge SELECT in
     src/ogham/postgres/entity_graph.py: id, subject_id, predicate,
-    object_id, profile, fact_id, strength, metadata, valid_from, valid_to.
+    object_id, profile, fact_id, strength, metadata, derived_from,
+    valid_from, valid_to.
     """
     return {
         "id": id,
@@ -180,6 +182,7 @@ def _edge_row(
         "fact_id": fact_id,
         "strength": strength,
         "metadata": metadata,
+        "derived_from": derived_from or [],
         "valid_from": valid_from,
         "valid_to": valid_to,
     }
@@ -220,7 +223,7 @@ def test_store_triple_new_edge_returns_id_and_commits(router, fake_pool, graph):
     # INSERT + both UPDATE (supersede + wire superseded_by) all issued.
     insert_calls = [c for c in router.calls if c[0].startswith("INSERT INTO entity_edges(")]
     assert len(insert_calls) == 1
-    (subj_id, predicate, obj_id, profile, fact_id, strength, _md) = insert_calls[0][1]
+    (subj_id, predicate, obj_id, profile, fact_id, strength, _md, _df) = insert_calls[0][1]
     assert (subj_id, predicate, obj_id, profile) == (1, "KNOWS", 2, "work")
     assert fact_id is None
     assert strength == 1.0

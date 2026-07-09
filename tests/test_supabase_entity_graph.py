@@ -15,6 +15,7 @@ via constructor injection (see ``inspect.signature`` test in
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any, cast
 from uuid import uuid4
@@ -82,6 +83,10 @@ class _FakeBuilder:
         return self
 
     def limit(self, n):
+        return self
+
+    def contains(self, col: str, val: Any):
+        self._filters[f"{col}__contains"] = val
         return self
 
     @property
@@ -193,12 +198,34 @@ class _Harness:
                 "fact_id": payload["fact_id"],
                 "strength": payload["strength"],
                 "metadata": payload["metadata"],
+                "derived_from": payload.get("derived_from", []),
                 "valid_from": "2026-07-02T00:00:00+00:00",
                 "valid_to": None,
                 "superseded_by": None,
             }
             self.edges.append(row)
             return _Result([row])
+
+        if (
+            b._table == "entity_edges"
+            and b._op == "select"
+            and "derived_from__contains" in b._filters
+        ):
+            needle = b._filters["derived_from__contains"]
+            profile = b._filters.get("profile")
+            rows = [
+                r
+                for r in self.edges
+                if r["profile"] == profile
+                and self._derived_from_contains(r["derived_from"], needle)
+            ]
+            return _Result(rows)
+
+        if b._table == "entity_edges" and b._op == "select" and "id" in b._filters:
+            eid = b._filters.get("id")
+            profile = b._filters.get("profile")
+            rows = [r for r in self.edges if r["id"] == eid and r["profile"] == profile]
+            return _Result(rows)
 
         if b._table == "entity_edges" and b._op == "select":
             subj_id = b._filters.get("subject_id")
@@ -219,6 +246,16 @@ class _Harness:
         raise AssertionError(
             f"unrouted call: table={b._table!r} op={b._op!r} filters={b._filters!r}"
         )
+
+    @staticmethod
+    def _derived_from_contains(derived_from: list[dict[str, Any]], needle: Any) -> bool:
+        # Production code sends the needle JSON-encoded (a str) so postgrest-py's
+        # .contains() takes its string branch instead of ",".join()-ing a list of
+        # dicts (that TypeError is exactly what Fix 1 patches). Decode it here the
+        # same way Postgres would interpret the `cs.<value>` filter server-side.
+        parsed = json.loads(needle) if isinstance(needle, str) else needle
+        (want,) = parsed
+        return any(all(el.get(k) == v for k, v in want.items()) for el in derived_from)
 
     @staticmethod
     def _matches_triple_filter(row: dict[str, Any], filters: dict[str, Any]) -> bool:
@@ -464,3 +501,123 @@ def test_resolve_alias_by_int_id_skips_name_lookup(harness, graph):
     entity = graph.resolve_alias(2, "work")
     assert entity is not None
     assert entity.canonical_name == "Bob"
+
+
+# ── provenance (TBU-124/125/126) ────────────────────────────────────
+
+
+def test_store_triple_writes_derived_from(harness, graph):
+    graph.store_triple(
+        "Alice", Predicate("KNOWS"), "Bob", None, "work", derived_from=[{"source_edge_id": 5}]
+    )
+
+    assert harness.edges[0]["derived_from"] == [{"source_edge_id": 5}]
+
+
+def test_store_triple_defaults_derived_from_to_empty_list(harness, graph):
+    graph.store_triple("Alice", Predicate("KNOWS"), "Bob", None, "work")
+
+    assert harness.edges[0]["derived_from"] == []
+
+
+def test_fetch_edge_returns_edge_with_derived_from(harness, graph):
+    new_id = graph.store_triple(
+        "Alice", Predicate("KNOWS"), "Bob", None, "work", derived_from=[{"source_edge_id": 5}]
+    )
+
+    edge = graph.fetch_edge(new_id, "work")
+
+    assert edge is not None
+    assert edge.id == new_id
+    assert edge.derived_from == [{"source_edge_id": 5}]
+
+    call = next(
+        c for c in harness.calls if c[0] == "entity_edges" and c[1] == "select" and c[2].get("id")
+    )
+    assert call[2]["id"] == new_id
+    assert call[2]["profile"] == "work"
+
+
+def test_fetch_edge_missing_returns_none(harness, graph):
+    assert graph.fetch_edge(9999, "work") is None
+
+
+def test_fetch_edge_ignores_valid_to(harness, graph):
+    """Provenance is historical -- fetch_edge must return a superseded edge too."""
+    first_id = graph.store_triple("Alice", Predicate("KNOWS"), "Bob", None, "work")
+    graph.store_triple("Alice", Predicate("KNOWS"), "Bob", None, "work")  # supersedes first_id
+
+    edge = graph.fetch_edge(first_id, "work")
+
+    assert edge is not None
+    assert edge.valid_to is not None
+
+
+def test_find_citing_edges_by_source_edge_id(harness, graph):
+    parent_id = graph.store_triple("Alice", Predicate("KNOWS"), "Bob", None, "work")
+    child_id = graph.store_triple(
+        "Bob",
+        Predicate("WORKS_WITH"),
+        "Carol",
+        None,
+        "work",
+        derived_from=[{"source_edge_id": parent_id}],
+    )
+
+    edges = graph.find_citing_edges(source_edge_id=parent_id, source_memory_id=None, profile="work")
+
+    assert [e.id for e in edges] == [child_id]
+
+    call = next(
+        c
+        for c in harness.calls
+        if c[0] == "entity_edges" and c[1] == "select" and "derived_from__contains" in c[2]
+    )
+    # JSON-encoded (str), not a raw list -- see Fix 1: postgrest-py's
+    # .contains() only json.dumps() a dict; a list gets ",".join()-ed, which
+    # crashes on a list of dicts. The needle is pre-encoded to take the
+    # string branch instead.
+    needle = call[2]["derived_from__contains"]
+    assert isinstance(needle, str)
+    assert json.loads(needle) == [{"source_edge_id": parent_id}]
+    assert call[2]["profile"] == "work"
+
+
+def test_find_citing_edges_by_source_memory_id(harness, graph):
+    graph.store_triple(
+        "Alice",
+        Predicate("KNOWS"),
+        "Bob",
+        None,
+        "work",
+        derived_from=[{"source_memory_id": "mem-1"}],
+    )
+
+    edges = graph.find_citing_edges(source_edge_id=None, source_memory_id="mem-1", profile="work")
+
+    assert len(edges) == 1
+    assert edges[0].derived_from == [{"source_memory_id": "mem-1"}]
+
+
+def test_find_citing_edges_no_source_returns_empty(harness, graph):
+    assert graph.find_citing_edges(source_edge_id=None, source_memory_id=None, profile="work") == []
+
+
+def test_real_postgrest_contains_accepts_json_encoded_needle():
+    """Regression guard for Fix 1 -- uses the REAL postgrest-py library, not
+    the mocked fake (which stores the raw value and would mask this).
+
+    postgrest-py v2.31.0's `.contains()` only `json.dumps()`s a `dict`
+    value; for a `list` it assumes a native Postgres array column and does
+    `",".join(value)`, which raises `TypeError: sequence item 0: expected
+    str instance, dict found` on a list of dicts like
+    `[{"source_edge_id": 5}]`. `.contains()` builds the query string before
+    any network call, so this needs no real server -- a dummy URL is enough
+    to prove the call constructs without raising.
+    """
+    needle = json.dumps([{"source_edge_id": 5}])
+    client = SyncPostgrestClient("http://localhost")
+
+    # Must not raise -- this is exactly the call SupabaseEntityGraph.find_citing_edges
+    # issues. Before Fix 1 (passing the raw list), this raised TypeError.
+    client.table("entity_edges").select("*").eq("profile", "work").contains("derived_from", needle)

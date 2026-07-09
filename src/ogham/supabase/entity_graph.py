@@ -18,6 +18,7 @@ partial-failure scenario if this needs hardening later.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -66,6 +67,7 @@ class SupabaseEntityGraph:
         source_memory_id: UUID | None,
         profile: str,
         metadata: dict | None = None,
+        derived_from: list[dict] | None = None,
     ) -> int:
         subj_id = self._resolve_to_id(subject, profile)
         obj_id = self._resolve_to_id(object_, profile)
@@ -75,6 +77,7 @@ class SupabaseEntityGraph:
             raise ValueError("self-referential edges are not allowed")
 
         md = metadata or {}
+        df = derived_from or []
         # Supersede current row -- update valid_to on existing match.
         #
         # NOTE: value is computed client-side (not the SQL literal "now()").
@@ -108,6 +111,7 @@ class SupabaseEntityGraph:
                     "fact_id": str(source_memory_id) if source_memory_id else None,
                     "strength": 1.0,
                     "metadata": md,
+                    "derived_from": df,
                     # valid_from defaults to now(); valid_to null
                 }
             )
@@ -161,7 +165,8 @@ class SupabaseEntityGraph:
             next_ids: list[int] = []
             for cur_id in current_ids:
                 q = self._client.table("entity_edges").select(
-                    "id,subject_id,predicate,object_id,profile,fact_id,strength,metadata,valid_from,valid_to"
+                    "id,subject_id,predicate,object_id,profile,fact_id,strength,metadata,"
+                    "derived_from,valid_from,valid_to"
                 )
                 if direction == "outgoing":
                     q = q.eq("subject_id", cur_id)
@@ -180,6 +185,7 @@ class SupabaseEntityGraph:
                         metadata=row["metadata"] or {},
                         valid_from=row["valid_from"],
                         valid_to=row["valid_to"],
+                        derived_from=row.get("derived_from") or [],
                     )
                     edges.append(edge)
                     if edge.fact_id is not None:
@@ -235,6 +241,58 @@ class SupabaseEntityGraph:
         if entity_id is None:
             return None
         return self._fetch_entity(entity_id)
+
+    # -- provenance (TBU-124/125/126) ---------------------------------
+
+    def _row_to_edge(self, row: dict[str, Any]) -> EntityEdge:
+        return EntityEdge(
+            id=int(row["id"]),
+            subject_id=int(row["subject_id"]),
+            predicate=Predicate(row["predicate"]),
+            object_id=int(row["object_id"]),
+            profile=row["profile"],
+            fact_id=UUID(row["fact_id"]) if row["fact_id"] else None,
+            strength=float(row["strength"]),
+            metadata=row["metadata"] or {},
+            valid_from=row["valid_from"],
+            valid_to=row["valid_to"],
+            derived_from=row.get("derived_from") or [],
+        )
+
+    def fetch_edge(self, edge_id: int, profile: str) -> EntityEdge | None:
+        result = (
+            self._client.table("entity_edges")
+            .select("*")
+            .eq("id", edge_id)
+            .eq("profile", profile)
+            .execute()
+        )
+        rows = _rows(result.data)
+        return self._row_to_edge(rows[0]) if rows else None
+
+    def find_citing_edges(
+        self, *, source_edge_id: int | None, source_memory_id: str | None, profile: str
+    ) -> list[EntityEdge]:
+        if source_edge_id is not None:
+            needle: list[dict[str, Any]] = [{"source_edge_id": source_edge_id}]
+        elif source_memory_id is not None:
+            needle = [{"source_memory_id": source_memory_id}]
+        else:
+            return []
+        # JSON-encode the needle before .contains(): postgrest-py's
+        # .contains() only json.dumps() a dict value; for a list it assumes
+        # a native Postgres array column and does ",".join(value), which
+        # raises TypeError on a list of dicts. Pre-encoding to a string
+        # takes the string branch instead, sending `cs.<value>` verbatim --
+        # matching the spec's intended `derived_from=cs.[...]` filter.
+        result = (
+            self._client.table("entity_edges")
+            .select("*")
+            .eq("profile", profile)
+            .contains("derived_from", json.dumps(needle))
+            .execute()
+        )
+        return [self._row_to_edge(row) for row in _rows(result.data)]
 
     # -- helpers -----------------------------------------------------
 

@@ -1110,6 +1110,7 @@ CREATE TABLE IF NOT EXISTS entity_edges (
     fact_id       uuid,
     strength      real NOT NULL DEFAULT 1.0,
     metadata      jsonb NOT NULL DEFAULT '{}',
+    derived_from jsonb NOT NULL DEFAULT '[]',
     valid_from    timestamptz NOT NULL DEFAULT now(),
     valid_to      timestamptz,
     superseded_by bigint REFERENCES entity_edges(id),
@@ -1130,38 +1131,44 @@ CREATE INDEX IF NOT EXISTS entity_edges_object_pred_current
 CREATE INDEX IF NOT EXISTS entity_edges_profile_current
     ON entity_edges(profile) WHERE valid_to IS NULL;
 
+CREATE INDEX IF NOT EXISTS entity_edges_derived_from_gin
+    ON entity_edges USING gin (derived_from);
+
 ALTER TABLE entity_edges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE entity_edges FORCE ROW LEVEL SECURITY;
 CREATE POLICY "Deny anon access" ON entity_edges
     FOR ALL TO anon USING (false) WITH CHECK (false);
 
 CREATE TABLE IF NOT EXISTS entity_edge_predicates (
-    predicate   text PRIMARY KEY,
-    label       text NOT NULL,
-    description text,
-    inverse     text,
-    scope       text NOT NULL CHECK (scope IN ('entity','memory'))
+    predicate      text PRIMARY KEY,
+    label          text NOT NULL,
+    description    text,
+    inverse        text,
+    scope          text NOT NULL CHECK (scope IN ('entity','memory')),
+    ogham_uri      text NOT NULL,
+    schema_org_uri text,
+    iirds_uri      text
 );
 
 -- v1 seed: 16 entity-scope predicate rows (6 inverse pairs + 4 standalone).
 -- SUPERSEDES intentionally omitted per TBU-109 (redundant with valid_to).
-INSERT INTO entity_edge_predicates(predicate, label, description, inverse, scope) VALUES
-    ('DEPENDS_ON',      'depends on',       'Subject requires object to function or complete',            'DEPENDED_ON_BY', 'entity'),
-    ('DEPENDED_ON_BY',  'depended on by',   'Inverse of DEPENDS_ON',                                       'DEPENDS_ON',     'entity'),
-    ('OWNS',            'owns',             'Subject has ownership or authority over object',              'OWNED_BY',       'entity'),
-    ('OWNED_BY',        'owned by',         'Inverse of OWNS',                                             'OWNS',           'entity'),
-    ('ASSIGNED_TO',     'assigned to',      'Subject is assigned to object (task -> person, item -> box)', 'HAS_ASSIGNEE',   'entity'),
-    ('HAS_ASSIGNEE',    'has assignee',     'Inverse of ASSIGNED_TO',                                      'ASSIGNED_TO',    'entity'),
-    ('DECIDED',         'decided',          'Subject decided on object (agent -> decision fact)',          NULL,             'entity'),
-    ('MENTIONS',        'mentions',         'Subject mentions object in a memory / message',               NULL,             'entity'),
-    ('BLOCKS',          'blocks',           'Subject blocks progress on object',                           'BLOCKED_BY',     'entity'),
-    ('BLOCKED_BY',      'blocked by',       'Inverse of BLOCKS',                                           'BLOCKS',         'entity'),
-    ('PART_OF',         'part of',          'Subject is a structural component of object',                 'CONTAINS',       'entity'),
-    ('CONTAINS',        'contains',         'Inverse of PART_OF',                                          'PART_OF',        'entity'),
-    ('SUPPORTS',        'supports',         'Subject provides evidence for object (entity-scope)',         'CONTRADICTS',    'entity'),
-    ('CONTRADICTS',     'contradicts',      'Subject provides counter-evidence to object (entity-scope)',  'SUPPORTS',       'entity'),
-    ('EVOLVED_INTO',    'evolved into',     'Object is a later version of subject (matches NATEOB1)',      NULL,             'entity'),
-    ('RELATED_TO',      'related to',       'Low-signal catchall -- prefer a specific predicate',          NULL,             'entity')
+INSERT INTO entity_edge_predicates(predicate, label, description, inverse, scope, ogham_uri, schema_org_uri, iirds_uri) VALUES
+    ('DEPENDS_ON',      'depends on',       'Subject requires object to function or complete',            'DEPENDED_ON_BY', 'entity', 'https://ogham-mcp.dev/vocab#DEPENDS_ON',     NULL,                            NULL),
+    ('DEPENDED_ON_BY',  'depended on by',   'Inverse of DEPENDS_ON',                                       'DEPENDS_ON',     'entity', 'https://ogham-mcp.dev/vocab#DEPENDED_ON_BY', NULL,                            NULL),
+    ('OWNS',            'owns',             'Subject has ownership or authority over object',              'OWNED_BY',       'entity', 'https://ogham-mcp.dev/vocab#OWNS',           'https://schema.org/owns',       NULL),
+    ('OWNED_BY',        'owned by',         'Inverse of OWNS',                                             'OWNS',           'entity', 'https://ogham-mcp.dev/vocab#OWNED_BY',       'https://schema.org/owner',      NULL),
+    ('ASSIGNED_TO',     'assigned to',      'Subject is assigned to object (task -> person, item -> box)', 'HAS_ASSIGNEE',   'entity', 'https://ogham-mcp.dev/vocab#ASSIGNED_TO',    NULL,                            NULL),
+    ('HAS_ASSIGNEE',    'has assignee',     'Inverse of ASSIGNED_TO',                                      'ASSIGNED_TO',    'entity', 'https://ogham-mcp.dev/vocab#HAS_ASSIGNEE',   NULL,                            NULL),
+    ('DECIDED',         'decided',          'Subject decided on object (agent -> decision fact)',          NULL,             'entity', 'https://ogham-mcp.dev/vocab#DECIDED',        NULL,                            NULL),
+    ('MENTIONS',        'mentions',         'Subject mentions object in a memory / message',               NULL,             'entity', 'https://ogham-mcp.dev/vocab#MENTIONS',       'https://schema.org/mentions',   NULL),
+    ('BLOCKS',          'blocks',           'Subject blocks progress on object',                           'BLOCKED_BY',     'entity', 'https://ogham-mcp.dev/vocab#BLOCKS',         NULL,                            NULL),
+    ('BLOCKED_BY',      'blocked by',       'Inverse of BLOCKS',                                           'BLOCKS',         'entity', 'https://ogham-mcp.dev/vocab#BLOCKED_BY',     NULL,                            NULL),
+    ('PART_OF',         'part of',          'Subject is a structural component of object',                 'CONTAINS',       'entity', 'https://ogham-mcp.dev/vocab#PART_OF',        'https://schema.org/isPartOf',   NULL),
+    ('CONTAINS',        'contains',         'Inverse of PART_OF',                                          'PART_OF',        'entity', 'https://ogham-mcp.dev/vocab#CONTAINS',       'https://schema.org/hasPart',    NULL),
+    ('SUPPORTS',        'supports',         'Subject provides evidence for object (entity-scope)',         'CONTRADICTS',    'entity', 'https://ogham-mcp.dev/vocab#SUPPORTS',       NULL,                            NULL),
+    ('CONTRADICTS',     'contradicts',      'Subject provides counter-evidence to object (entity-scope)',  'SUPPORTS',       'entity', 'https://ogham-mcp.dev/vocab#CONTRADICTS',    NULL,                            NULL),
+    ('EVOLVED_INTO',    'evolved into',     'Object is a later version of subject',      NULL,             'entity', 'https://ogham-mcp.dev/vocab#EVOLVED_INTO',   NULL,                            NULL),
+    ('RELATED_TO',      'related to',       'Low-signal catchall -- prefer a specific predicate',          NULL,             'entity', 'https://ogham-mcp.dev/vocab#RELATED_TO',     NULL,                            NULL)
 ON CONFLICT (predicate) DO NOTHING;
 
 ALTER TABLE entity_edge_predicates ENABLE ROW LEVEL SECURITY;

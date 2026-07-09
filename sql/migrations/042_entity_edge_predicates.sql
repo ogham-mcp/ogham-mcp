@@ -54,7 +54,7 @@ INSERT INTO entity_edge_predicates(predicate, label, description, inverse, scope
     ('CONTAINS',        'contains',         'Inverse of PART_OF',                                          'PART_OF',        'entity'),
     ('SUPPORTS',        'supports',         'Subject provides evidence for object (entity-scope)',         'CONTRADICTS',    'entity'),
     ('CONTRADICTS',     'contradicts',      'Subject provides counter-evidence to object (entity-scope)',  'SUPPORTS',       'entity'),
-    ('EVOLVED_INTO',    'evolved into',     'Object is a later version of subject (matches NATEOB1)',      NULL,             'entity'),
+    ('EVOLVED_INTO',    'evolved into',     'Object is a later version of subject',                        NULL,             'entity'),
     ('RELATED_TO',      'related to',       'Low-signal catchall -- prefer a specific predicate',          NULL,             'entity')
 ON CONFLICT (predicate) DO NOTHING;
 

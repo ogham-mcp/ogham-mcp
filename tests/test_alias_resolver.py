@@ -14,6 +14,12 @@ class _FakeGraph:
     def query_join(self, *args, **kwargs):
         raise NotImplementedError
 
+    def fetch_edge(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def find_citing_edges(self, *args, **kwargs):
+        raise NotImplementedError
+
     def add_alias(self, entity_id, alias, profile):
         self._aliases[(alias, profile)] = entity_id
 

@@ -5,8 +5,8 @@
 -- at retrieval" pattern without sacrificing Ogham's multi-agent safety.
 --
 -- Design decisions (see docs/plans/2026-04-23-wiki-hybrid-tier1-spec.md):
---   * Dedicated table (not shared with memories) -- avoids the Mem0
---     mistake where summary rows rank against raw facts in search.
+--   * Dedicated table (not shared with memories) -- avoids the failure
+--     mode where summary rows rank against raw facts in search.
 --   * source_hash (BYTEA, sha256 of sorted source ids) + source_cursor
 --     (UUID of newest included memory) detect both "new memories
 --     arrived" (cursor moved) and "existing memories edited/deleted"

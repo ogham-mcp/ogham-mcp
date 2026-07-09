@@ -50,6 +50,33 @@ V1_PREDICATES: frozenset[str] = frozenset(
     }
 )
 
+# Portable URIs for the v1 predicates (TBU-129). Mirrors the seed in
+# sql/migrations/045_predicate_uris.sql + the three schema files. Every
+# predicate has a stable ogham_uri identity; schema_org_uri is populated ONLY
+# where a Schema.org property is a genuine equivalent (WebFetch-verified
+# 2026-07-06); iirds_uri is reserved for TBU-128 (all None here). Kept in
+# Python (not queried from the DB) for the same reason V1_PREDICATES is:
+# no server-boot round-trip. Drift is caught by
+# tests/test_predicate_uris.py + tests/test_schema_parity.py.
+_OGHAM_VOCAB_NS = "https://ogham-mcp.dev/vocab#"
+
+_SCHEMA_ORG_URIS: dict[str, str] = {
+    "OWNS": "https://schema.org/owns",
+    "OWNED_BY": "https://schema.org/owner",
+    "MENTIONS": "https://schema.org/mentions",
+    "PART_OF": "https://schema.org/isPartOf",
+    "CONTAINS": "https://schema.org/hasPart",
+}
+
+PREDICATE_URIS: dict[str, dict[str, str | None]] = {
+    pred: {
+        "ogham": f"{_OGHAM_VOCAB_NS}{pred}",
+        "schema_org": _SCHEMA_ORG_URIS.get(pred),
+        "iirds": None,
+    }
+    for pred in V1_PREDICATES
+}
+
 
 def make_predicate(value: str, allowed: Iterable[str]) -> Predicate:
     """Construct a Predicate after validating against the vocabulary.
@@ -87,6 +114,7 @@ class EntityEdge:
     metadata: dict
     valid_from: datetime
     valid_to: datetime | None
+    derived_from: list[dict] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -107,6 +135,52 @@ class JoinResult:
     citations: list[UUID] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ProvenanceTree:
+    """Result of trace_provenance -- the derivation lineage of an edge.
+
+    nodes: every edge visited (start edge first, then ancestors in BFS order).
+    links: derivation links followed -- {"from_edge_id": int, "to_edge_id": int,
+        "reasoning": str | None}.
+    root_memories: deduped source_memory_ids + fact_ids reached at the leaves (uuid strings).
+    """
+
+    nodes: list[EntityEdge]
+    links: list[dict]
+    root_memories: list[str] = field(default_factory=list)
+
+
+def validate_derived_from(value: list[dict] | None) -> list[dict]:
+    """Validate + normalize a derived_from array. None -> []. Each element must
+    have at least one of source_edge_id (int) / source_memory_id (str);
+    reasoning (str) is optional. Shape-only -- no FK / existence check."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("derived_from must be a list of objects")
+    out: list[dict] = []
+    for i, el in enumerate(value):
+        if not isinstance(el, dict):
+            raise ValueError(f"derived_from[{i}] must be an object")
+        se = el.get("source_edge_id")
+        sm = el.get("source_memory_id")
+        if se is None and sm is None:
+            raise ValueError(f"derived_from[{i}] needs source_edge_id or source_memory_id")
+        if se is not None and (isinstance(se, bool) or not isinstance(se, int)):
+            raise ValueError(f"derived_from[{i}].source_edge_id must be an int")
+        if sm is not None and not isinstance(sm, str):
+            raise ValueError(f"derived_from[{i}].source_memory_id must be a uuid string")
+        norm: dict = {}
+        if se is not None:
+            norm["source_edge_id"] = se
+        if sm is not None:
+            norm["source_memory_id"] = sm
+        if el.get("reasoning") is not None:
+            norm["reasoning"] = str(el["reasoning"])
+        out.append(norm)
+    return out
+
+
 @runtime_checkable
 class EntityGraph(Protocol):
     """Contract implemented by concrete backends (PostgresEntityGraph, SupabaseEntityGraph)."""
@@ -119,11 +193,22 @@ class EntityGraph(Protocol):
         source_memory_id: UUID | None,
         profile: str,
         metadata: dict | None = None,
+        derived_from: list[dict] | None = None,
     ) -> int:
         """Insert a new edge, superseding any current (subject, predicate, *, profile).
 
         Returns the new edge id.
         """
+        ...
+
+    def fetch_edge(self, edge_id: int, profile: str) -> EntityEdge | None:
+        """Fetch an edge by id, IGNORING valid_to (provenance is historical). None if absent."""
+        ...
+
+    def find_citing_edges(
+        self, *, source_edge_id: int | None, source_memory_id: str | None, profile: str
+    ) -> list[EntityEdge]:
+        """Edges whose derived_from cites the given source (containment). Current + historical."""
         ...
 
     def query_join(

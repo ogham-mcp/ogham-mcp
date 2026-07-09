@@ -78,12 +78,19 @@ def test_join_result_shape():
 
 
 def test_entity_graph_protocol_signature():
-    """Any class implementing the four methods should satisfy the Protocol."""
+    """Any class implementing the six methods should satisfy the Protocol."""
     from ogham.entity_graph import EntityGraph
 
     class Dummy:
         def store_triple(
-            self, subject, predicate, object_, source_memory_id, profile, metadata=None
+            self,
+            subject,
+            predicate,
+            object_,
+            source_memory_id,
+            profile,
+            metadata=None,
+            derived_from=None,
         ):
             return 1
 
@@ -97,6 +104,12 @@ def test_entity_graph_protocol_signature():
 
         def resolve_alias(self, name_or_id, profile):
             return None
+
+        def fetch_edge(self, edge_id, profile):
+            return None
+
+        def find_citing_edges(self, *, source_edge_id, source_memory_id, profile):
+            return []
 
     # runtime_checkable Protocol lets us assert this cheaply
     assert isinstance(Dummy(), EntityGraph)

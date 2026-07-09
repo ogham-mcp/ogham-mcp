@@ -36,6 +36,7 @@ class PostgresEntityGraph:
         source_memory_id: UUID | None,
         profile: str,
         metadata: dict | None = None,
+        derived_from: list[dict] | None = None,
     ) -> int:
         subj_id = self._resolve_to_id(subject, profile)
         obj_id = self._resolve_to_id(object_, profile)
@@ -45,6 +46,7 @@ class PostgresEntityGraph:
             raise ValueError("self-referential edges are not allowed")
 
         md = metadata or {}
+        df = derived_from or []
         with self._pool.connection() as conn, conn.cursor() as cur:
             # Supersede any current row with same (subject, predicate, object, profile).
             cur.execute(
@@ -61,11 +63,20 @@ class PostgresEntityGraph:
                 """
                 INSERT INTO entity_edges(
                     subject_id, predicate, object_id, profile,
-                    fact_id, strength, metadata, valid_from, valid_to
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, now(), NULL)
+                    fact_id, strength, metadata, derived_from, valid_from, valid_to
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, now(), NULL)
                 RETURNING id
                 """,
-                (subj_id, str(predicate), obj_id, profile, source_memory_id, 1.0, Jsonb(md)),
+                (
+                    subj_id,
+                    str(predicate),
+                    obj_id,
+                    profile,
+                    source_memory_id,
+                    1.0,
+                    Jsonb(md),
+                    Jsonb(df),
+                ),
             )
             row = cur.fetchone()
             if row is None:
@@ -119,7 +130,7 @@ class PostgresEntityGraph:
                         cur.execute(
                             """
                             SELECT id, subject_id, predicate, object_id, profile,
-                                   fact_id, strength, metadata, valid_from, valid_to
+                                   fact_id, strength, metadata, derived_from, valid_from, valid_to
                               FROM entity_edges
                              WHERE subject_id = %s AND predicate = %s
                                AND profile = %s AND valid_to IS NULL
@@ -130,7 +141,7 @@ class PostgresEntityGraph:
                         cur.execute(
                             """
                             SELECT id, subject_id, predicate, object_id, profile,
-                                   fact_id, strength, metadata, valid_from, valid_to
+                                   fact_id, strength, metadata, derived_from, valid_from, valid_to
                               FROM entity_edges
                              WHERE object_id = %s AND predicate = %s
                                AND profile = %s AND valid_to IS NULL
@@ -149,6 +160,7 @@ class PostgresEntityGraph:
                             metadata=row["metadata"] or {},
                             valid_from=row["valid_from"],
                             valid_to=row["valid_to"],
+                            derived_from=row["derived_from"] or [],
                         )
                         edges.append(edge)
                         if edge.fact_id is not None:
@@ -194,6 +206,52 @@ class PostgresEntityGraph:
         if entity_id is None:
             return None
         return self._fetch_entity(entity_id)
+
+    # -- provenance (TBU-124/125/126) ---------------------------------
+
+    def _row_to_edge(self, row: Any) -> EntityEdge:
+        return EntityEdge(
+            id=row["id"],
+            subject_id=row["subject_id"],
+            predicate=Predicate(row["predicate"]),
+            object_id=row["object_id"],
+            profile=row["profile"],
+            fact_id=row["fact_id"],
+            strength=row["strength"],
+            metadata=row["metadata"] or {},
+            valid_from=row["valid_from"],
+            valid_to=row["valid_to"],
+            derived_from=row["derived_from"] or [],
+        )
+
+    def fetch_edge(self, edge_id: int, profile: str) -> EntityEdge | None:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, subject_id, predicate, object_id, profile, fact_id, strength,
+                          metadata, derived_from, valid_from, valid_to
+                     FROM entity_edges WHERE id = %s AND profile = %s""",
+                (edge_id, profile),
+            )
+            row = cur.fetchone()
+            return self._row_to_edge(row) if row is not None else None
+
+    def find_citing_edges(
+        self, *, source_edge_id: int | None, source_memory_id: str | None, profile: str
+    ) -> list[EntityEdge]:
+        if source_edge_id is not None:
+            needle: Any = Jsonb([{"source_edge_id": source_edge_id}])
+        elif source_memory_id is not None:
+            needle = Jsonb([{"source_memory_id": source_memory_id}])
+        else:
+            return []
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, subject_id, predicate, object_id, profile, fact_id, strength,
+                          metadata, derived_from, valid_from, valid_to
+                     FROM entity_edges WHERE profile = %s AND derived_from @> %s""",
+                (profile, needle),
+            )
+            return [self._row_to_edge(r) for r in cur.fetchall()]
 
     # -- helpers -----------------------------------------------------
 

@@ -3,9 +3,17 @@
 Covers the Python apply layer (`ogham.schema_apply.render_schema_sql`) --
 the piece that substitutes the `:embedding_dim` psql placeholder for
 callers that send SQL text via psycopg rather than the `psql` CLI.
+
+Note: a one-time characterization test (`test_render_at_512_matches_pre_tbu159_shipping_state`)
+that diffed the rendered schema against a frozen pre-TBU-159 commit was
+retired post-TBU-159 -- it proved the dim-parameterization refactor was a
+behavioral no-op at the time, but a frozen baseline can never accommodate
+legitimate schema growth after that point (e.g. TBU-129's predicate URI
+columns). Dim-substitution correctness is still guarded going forward by
+`test_render_substitutes_every_placeholder` below and by
+`tests/test_schema_parity.py::test_no_hardcoded_vector_dim_in_shipping_schemas`.
 """
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -18,53 +26,6 @@ SCHEMA_FILES = [
     REPO_ROOT / "sql" / "schema_postgres.sql",
     REPO_ROOT / "sql" / "schema_selfhost_supabase.sql",
 ]
-
-
-# Last commit on main shipping literal vector(512)/halfvec(512) before the
-# TBU-159 dim-parameterization landed (TBU-149, merged 2026-07-02). Pinned
-# rather than "HEAD" so this characterization stays meaningful after the
-# TBU-159 branch itself is committed and merged -- "HEAD" would then already
-# be post-substitution and the comparison would be a no-op.
-_PRE_TBU159_COMMIT = "775a6c2"
-
-
-def _pre_tbu159_schema(schema_name: str) -> str:
-    """Return the schema file's content at the pinned pre-TBU-159 commit."""
-    result = subprocess.run(
-        ["git", "show", f"{_PRE_TBU159_COMMIT}:sql/{schema_name}"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        pytest.skip(f"{_PRE_TBU159_COMMIT} not reachable in this checkout: {result.stderr.strip()}")
-    return result.stdout
-
-
-def _strip_comment_lines(sql: str) -> str:
-    """Drop whole-line `--` comments and blank lines.
-
-    TBU-159 added explanatory header comments (the psql dollar-quote gotcha,
-    the sed-preprocessing instructions) that don't exist in the pre-refactor
-    file and don't affect what gets executed. The characterization test below
-    cares about executable-SQL equivalence, not comment-for-comment identity.
-    """
-    return "\n".join(
-        line for line in sql.splitlines() if line.strip() and not line.strip().startswith("--")
-    )
-
-
-@pytest.mark.parametrize("schema_path", SCHEMA_FILES, ids=lambda p: p.name)
-def test_render_at_512_matches_pre_tbu159_shipping_state(schema_path):
-    """Characterization test: existing v0.15 installs (vector(512) hardcoded)
-    must continue to work unchanged. Applying the new parameterized schema
-    with embedding_dim=512 must produce the same *executable* SQL that
-    shipped before TBU-159 (modulo added explanatory `--` comments) -- i.e.
-    this refactor is a behavioral no-op at the default dim.
-    """
-    pre = _strip_comment_lines(_pre_tbu159_schema(schema_path.name))
-    rendered = _strip_comment_lines(render_schema_sql(schema_path.read_text(), 512))
-    assert rendered == pre
 
 
 @pytest.mark.parametrize("schema_path", SCHEMA_FILES, ids=lambda p: p.name)

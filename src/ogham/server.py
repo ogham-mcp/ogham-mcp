@@ -17,7 +17,12 @@ logging.basicConfig(
 import ogham.prompts  # noqa: F401, E402
 import ogham.tools.dashboard  # noqa: F401, E402
 import ogham.tools.entity_graph  # noqa: F401, E402
+import ogham.tools.import_beads  # noqa: F401, E402
+import ogham.tools.import_github  # noqa: F401, E402
 import ogham.tools.import_linear  # noqa: F401, E402
+import ogham.tools.import_obsidian  # noqa: F401, E402
+import ogham.tools.import_slack  # noqa: F401, E402
+import ogham.tools.import_telegram  # noqa: F401, E402
 import ogham.tools.memory  # noqa: F401, E402
 import ogham.tools.stats  # noqa: F401, E402
 import ogham.tools.wiki  # noqa: F401, E402

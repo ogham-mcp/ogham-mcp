@@ -7,6 +7,12 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from ogham.importers.beads import BeadsClient  # re-exported for CLI test monkeypatch
+from ogham.importers.github_issues import GitHubClient  # re-exported for CLI test monkeypatch
+from ogham.importers.slack import SlackClient  # re-exported for CLI test monkeypatch
+from ogham.importers.telegram import TelegramClient  # re-exported for CLI test monkeypatch
+from ogham.ingest import DefaultIngestService  # re-exported for CLI test monkeypatch
+
 app = typer.Typer(
     name="ogham",
     help="Ogham Shared Memory — persistent memory for AI clients.",
@@ -833,6 +839,245 @@ def import_linear_cmd(
         f"[green]imported={result['imported']} skipped={result['skipped']} "
         f"disabled={result['disabled']}[/green]"
     )
+
+
+@app.command(name="ingest-obsidian")
+def ingest_obsidian_cmd(
+    vault: str = typer.Argument(..., help="Path to the Obsidian vault root"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Ogham profile to store into"),
+    source: str = typer.Option("obsidian", "--source", help="Source label stored on each memory"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report what would store without storing"
+    ),
+):
+    """Ingest an Obsidian vault into Ogham. Idempotent -- safe to run on a timer."""
+    from ogham.tools.import_obsidian import DefaultIngestService, ingest_obsidian_impl
+    from ogham.tools.memory import get_active_profile
+
+    target = profile or get_active_profile()
+    try:
+        result = ingest_obsidian_impl(
+            vault_path=vault,
+            service=DefaultIngestService(),
+            profile=target,
+            source=source,
+            dry_run=dry_run,
+        )
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+    console.print(
+        f"[green]scanned={result['scanned']} stored={result['stored']} "
+        f"dup={result['skipped_duplicate']} ignored={result['skipped_ignored']} "
+        f"disabled={result['disabled']} errors={result['errors']}[/green]"
+    )
+
+
+@app.command(name="ingest-telegram")
+def ingest_telegram_cmd(
+    profile: Optional[str] = typer.Option(None, "--profile", help="Ogham profile to store into"),
+    source: str = typer.Option("telegram", "--source", help="Source label stored on each memory"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report what would store without storing"
+    ),
+):
+    """Ingest Telegram messages into Ogham (outbound getUpdates). Idempotent -- safe on a timer."""
+    import os
+
+    from ogham.tools.import_telegram import _allowed_chat_ids_from_env, ingest_telegram_impl
+    from ogham.tools.memory import get_active_profile
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        console.print("[red]TELEGRAM_BOT_TOKEN not set[/red]")
+        raise typer.Exit(code=1)
+
+    target = profile or get_active_profile()
+    try:
+        allowed = _allowed_chat_ids_from_env()
+        result = ingest_telegram_impl(
+            client=TelegramClient(token=token),
+            service=DefaultIngestService(),
+            profile=target,
+            source=source,
+            allowed_chat_ids=allowed,
+            dry_run=dry_run,
+        )
+    except (RuntimeError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print(
+        f"[green]scanned={result['scanned']} stored={result['stored']} "
+        f"dup={result['skipped_duplicate']} ignored={result['skipped_ignored']} "
+        f"disabled={result['disabled']} errors={result['errors']}[/green]"
+    )
+
+
+@app.command(name="ingest-slack")
+def ingest_slack_cmd(
+    profile: Optional[str] = typer.Option(None, "--profile", help="Ogham profile to store into"),
+    source: str = typer.Option("slack", "--source", help="Source label stored on each memory"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report what would store without storing"
+    ),
+):
+    """Ingest Slack channel messages into Ogham (poll conversations.history). Idempotent."""
+    import os
+
+    from ogham.tools.import_slack import _channels_from_env, ingest_slack_impl
+    from ogham.tools.memory import get_active_profile
+
+    token = os.environ.get("SLACK_BOT_TOKEN")
+    if not token:
+        console.print("[red]SLACK_BOT_TOKEN not set[/red]")
+        raise typer.Exit(code=1)
+
+    target = profile or get_active_profile()
+    try:
+        channels = _channels_from_env()
+        result = ingest_slack_impl(
+            client=SlackClient(token=token),
+            service=DefaultIngestService(),
+            profile=target,
+            channels=channels,
+            source=source,
+            dry_run=dry_run,
+        )
+    except (RuntimeError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print(
+        f"[green]scanned={result['scanned']} stored={result['stored']} "
+        f"dup={result['skipped_duplicate']} ignored={result['skipped_ignored']} "
+        f"disabled={result['disabled']} errors={result['errors']}[/green]"
+    )
+
+
+@app.command(name="import-github")
+def import_github_cmd(
+    since_days: int = typer.Option(
+        30, "--since-days", help="Import issues updated in the last N days"
+    ),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Ogham profile to store into"),
+    source: str = typer.Option("github", "--source", help="Source label stored on each memory"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report what would store without storing"
+    ),
+):
+    """Import GitHub issues + comments into Ogham (REST). Idempotent -- safe on a timer."""
+    import os
+
+    from ogham.tools.import_github import _repos_from_env, import_github_impl
+    from ogham.tools.memory import get_active_profile
+
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        console.print("[red]GITHUB_TOKEN not set[/red]")
+        raise typer.Exit(code=1)
+
+    target = profile or get_active_profile()
+    try:
+        repos = _repos_from_env()
+        result = import_github_impl(
+            client=GitHubClient(token=token),
+            service=DefaultIngestService(),
+            profile=target,
+            repos=repos,
+            since_days=since_days,
+            source=source,
+            dry_run=dry_run,
+        )
+    except (RuntimeError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print(
+        f"[green]scanned={result['scanned']} stored={result['stored']} "
+        f"dup={result['skipped_duplicate']} ignored={result['skipped_ignored']} "
+        f"disabled={result['disabled']} errors={result['errors']}[/green]"
+    )
+
+
+@app.command(name="import-beads")
+def import_beads_cmd(
+    profile: Optional[str] = typer.Option(None, "--profile", help="Ogham profile to store into"),
+    source: str = typer.Option("beads", "--source", help="Source label stored on each memory"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report what would store without storing"
+    ),
+):
+    """Import Beads issues + comments into Ogham (via the `bd` CLI). Idempotent."""
+    from ogham.tools.import_beads import _beads_dir_from_env, import_beads_impl
+    from ogham.tools.memory import get_active_profile
+
+    target = profile or get_active_profile()
+    try:
+        beads_dir = _beads_dir_from_env()
+        result = import_beads_impl(
+            client=BeadsClient(beads_dir=beads_dir),
+            service=DefaultIngestService(),
+            profile=target,
+            source=source,
+            dry_run=dry_run,
+        )
+    except (RuntimeError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print(
+        f"[green]scanned={result['scanned']} stored={result['stored']} "
+        f"dup={result['skipped_duplicate']} ignored={result['skipped_ignored']} "
+        f"disabled={result['disabled']} errors={result['errors']}[/green]"
+    )
+
+
+@app.command(name="predicates")
+def predicates_cmd():
+    """List the typed-edge predicate vocabulary with their portable URIs."""
+    from ogham.entity_graph import PREDICATE_URIS
+    from ogham.tools.entity_graph import describe_predicates_impl
+
+    for row in describe_predicates_impl(uris=PREDICATE_URIS):
+        schema_org = row["schema_org_uri"] or "-"
+        iirds = row["iirds_uri"] or "-"
+        console.print(
+            f"{row['predicate']:16} {row['ogham_uri']}  schema.org={schema_org}  iirds={iirds}"
+        )
+
+
+@app.command(name="trace-provenance")
+def trace_provenance_cmd(
+    edge_id: int = typer.Argument(..., help="Edge id to trace"),
+    max_depth: int = typer.Option(10, help="Maximum BFS depth"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Ogham profile"),
+):
+    """Walk an edge's derivation lineage back to root evidence (memories)."""
+    from ogham.database import get_entity_graph_and_vocab
+    from ogham.tools.entity_graph import trace_provenance_impl
+    from ogham.tools.memory import get_active_profile
+
+    target = profile or get_active_profile()
+    graph, _allowed = get_entity_graph_and_vocab()
+    result = trace_provenance_impl(
+        graph=graph, edge_id=edge_id, profile=target, max_depth=max_depth
+    )
+    print(json.dumps(result, default=str))
+
+
+@app.command(name="find-derivatives")
+def find_derivatives_cmd(
+    source_id: str = typer.Argument(..., help="Edge id or memory uuid to check impact for"),
+    max_depth: int = typer.Option(10, help="Maximum BFS depth"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Ogham profile"),
+):
+    """Find every edge that (transitively) cites source_id -- impact analysis."""
+    from ogham.database import get_entity_graph_and_vocab
+    from ogham.tools.entity_graph import find_derivatives_impl
+    from ogham.tools.memory import get_active_profile
+
+    target = profile or get_active_profile()
+    graph, _allowed = get_entity_graph_and_vocab()
+    sid: int | str = int(source_id) if source_id.isdigit() else source_id
+    result = find_derivatives_impl(graph=graph, source_id=sid, profile=target, max_depth=max_depth)
+    print(json.dumps(result, default=str))
 
 
 @app.command(name="backfill-entities")

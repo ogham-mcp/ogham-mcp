@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.17.0] - Unreleased -- Ingestion adapters: capture from Obsidian, Telegram, and Slack
+## [0.17.0] - Unreleased -- Ingestion adapters, portable predicate URIs, and provenance chains
 
 ### Added
 
@@ -29,6 +29,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Each is a one-shot, idempotent poll designed to run under a timer
   (launchd/cron); none runs as a daemon and none listens for inbound
   connections, so your memory store is never exposed.
+- **GitHub Issues capture.** `ogham import-github` (CLI) and `import_github`
+  (MCP tool) fetch issues and their comments from the repositories you list and
+  store them tagged `source: github`. Each issue and each comment becomes its
+  own memory; re-runs dedup on a stable id so nothing double-stores.
+- **Beads capture.** `ogham import-beads` (CLI) and `import_beads` (MCP tool)
+  read issues and comments from a local Beads project via the `bd` CLI and store
+  them tagged `source: beads`. No network and no token -- a local command over a
+  local database.
+- **Portable predicate URIs.** Every predicate in the typed-edge vocabulary now
+  carries a stable URI, plus a Schema.org alignment where a standard property
+  genuinely matches -- five of them (`OWNS`, `OWNED_BY`, `MENTIONS`, `PART_OF`,
+  `CONTAINS`). The rest are left unmapped rather than forced onto an approximate
+  term. `describe_predicates` (MCP tool) and `ogham predicates` (CLI) list the
+  vocabulary with its URIs.
+- **Provenance chains.** `store_triple` now accepts a `derived_from` argument
+  recording the evidence an edge was built from -- other edges and/or source
+  memories. Two new tools walk that lineage: `trace_provenance` follows an edge
+  back to its root evidence, and `find_derivatives` walks forward to everything
+  that depends on a fact ("if this is retracted, what breaks?").
+
+### Migrations
+
+- `045_predicate_uris.sql` -- adds URI columns to the predicate vocabulary.
+- `046_edge_provenance.sql` -- adds a `derived_from` column + index to the edge
+  table. Both are additive and idempotent; safe to apply to an existing v0.16
+  install.
 
 ## [0.16.0] - 2026-07-03 -- Typed-edge context graph + Linear importer + dim-parameterized schemas
 
