@@ -32,7 +32,7 @@ uvx --from 'ogham-mcp[postgres]' ogham init
 Then tell your agent to remember something and ask about it later -- from the same client or a different one. They share the database, so the memory follows you.
 
 <details>
-<summary><b>Manual setup, other install methods (Docker, source), SSE multi-agent mode</b></summary>
+<summary><b>Manual setup, other install methods (Docker, source), HTTP multi-agent mode</b></summary>
 
 ### Manual setup
 
@@ -107,29 +107,42 @@ uv sync
 uv run ogham --help
 ```
 
-### SSE transport (multi-agent)
+### HTTP transport (multi-agent)
 
-By default, Ogham runs in stdio mode -- each MCP client spawns its own server process. For multiple agents sharing one server, use SSE mode:
+By default, Ogham runs in stdio mode -- each MCP client spawns its own server process. To let several agents share one server, run it over HTTP:
 
 ```bash
-ogham serve --transport sse --port 8742
+ogham serve --transport streamable-http --port 8742
 ```
 
 The server runs as a persistent background process. All clients connect to the same instance -- one database pool, one embedding cache, shared memory.
 
-Client config for SSE (any MCP client):
+Client config (any MCP client):
 
 ```json
 {
   "mcpServers": {
     "ogham": {
-      "url": "http://127.0.0.1:8742/sse"
+      "url": "http://127.0.0.1:8742/mcp"
     }
   }
 }
 ```
 
-Health check at `http://127.0.0.1:8742/health` (cached, sub-10ms). Configure via env vars (`OGHAM_TRANSPORT=sse`, `OGHAM_HOST`, `OGHAM_PORT`) or CLI flags. The init wizard (`ogham init`) walks through SSE setup if you choose it.
+Health check at `http://127.0.0.1:8742/health` (cached, sub-10ms). Configure via env vars (`OGHAM_TRANSPORT=streamable-http`, `OGHAM_HOST`, `OGHAM_PORT`) or CLI flags. `http` is accepted as an alias for `streamable-http`.
+
+**In Docker, bind to all interfaces.** The default host is `127.0.0.1`, which inside a container means the container itself -- publishing the port will not reach it:
+
+```bash
+docker run -p 8742:8742 ghcr.io/ogham-mcp/ogham-mcp:latest \
+  serve --transport streamable-http --host 0.0.0.0 --port 8742
+```
+
+#### SSE (legacy)
+
+Ogham still accepts `--transport sse` and serves that endpoint at `/sse`. It works, and it stays for existing deployments, but new setups should use streamable-http.
+
+The MCP specification now defines two standard transports, stdio and Streamable HTTP, and treats HTTP+SSE as deprecated. The difference that matters is what happens when a session is lost. Streamable HTTP assigns an `Mcp-Session-Id` and defines the way back: the server answers a dead session with HTTP 404, and the client starts a fresh one. SSE defines no recovery at all, so a session that loses its initialized state rejects every later request with `-32602`, and the client cannot tell a lifecycle problem from a bad argument. One dropped connection can leave an agent failing every call until someone restarts it.
 
 ### Entry points
 
@@ -314,7 +327,7 @@ ogham hooks recall              # Read from the stone (load project context)
 ogham hooks inscribe            # Carve into the stone (capture activity)
 ogham hooks inscribe --dry-run  # Preview hook memory without storing
 ogham serve                     # Start MCP server (stdio, default)
-ogham serve --transport sse     # Start SSE server on port 8742
+ogham serve --transport http    # Start HTTP server on port 8742
 ogham openapi                   # Generate OpenAPI spec
 ```
 
