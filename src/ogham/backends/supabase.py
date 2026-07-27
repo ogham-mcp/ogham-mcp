@@ -381,6 +381,18 @@ class SupabaseBackend:
         )
         return len(_rows(result.data)) > 0
 
+    def find_memory_ids_by_prefix(self, prefix: str, profile: str, limit: int = 10) -> list[str]:
+        """Not expressible over PostgREST.
+
+        Prefix matching needs `id::text LIKE ...`, and PostgreSQL will not
+        implicitly cast uuid to text for LIKE. PostgREST exposes no cast in its
+        filter syntax, so supporting this would require a SQL function on the
+        database (a migration). Until then, callers must supply a full UUID.
+        """
+        raise NotImplementedError(
+            "prefix lookup is not supported on the Supabase backend; use a full memory ID"
+        )
+
     def update_memory(
         self, memory_id: str, updates: dict[str, Any], profile: str
     ) -> dict[str, Any]:

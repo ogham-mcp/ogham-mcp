@@ -1,3 +1,7 @@
+import os
+from pathlib import Path
+
+from dotenv import dotenv_values
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -26,8 +30,6 @@ PROVIDER_DEFAULT_DIMS: dict[str, int] = {
 
 def _find_env_files() -> tuple[str, ...]:
     """Find env files: project .env first, then ~/.ogham/config.env as fallback."""
-    from pathlib import Path
-
     files = []
     # Project-level .env (highest priority)
     if Path(".env").exists():
@@ -39,9 +41,34 @@ def _find_env_files() -> tuple[str, ...]:
     return tuple(files) if files else (".env",)
 
 
+def _export_env_files(files: tuple[str, ...]) -> None:
+    """Copy env-file values into os.environ so direct readers can see them.
+
+    pydantic-settings parses env files into the Settings object only -- it never
+    touches os.environ. The ingestion adapters (Telegram, Slack, GitHub, Beads)
+    read their credentials straight from os.environ, so a token placed in
+    ~/.ogham/config.env (where the docs say to put it) was invisible to them and
+    the adapter reported the credential as unset.
+
+    Uses setdefault so a real environment variable always wins, matching
+    pydantic-settings' own precedence. Files are applied in order, so the first
+    file listed takes priority over later fallbacks.
+    """
+    for path in files:
+        if not Path(path).exists():
+            continue
+        for key, value in dotenv_values(path).items():
+            if value is not None:
+                os.environ.setdefault(key, value)
+
+
+_ENV_FILES = _find_env_files()
+_export_env_files(_ENV_FILES)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=_find_env_files(),
+        env_file=_ENV_FILES,
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -164,7 +191,10 @@ class Settings(BaseSettings):
     @field_validator("server_transport")
     @classmethod
     def check_transport(cls, v: str) -> str:
-        allowed = {"stdio", "sse"}
+        # Mirrors FastMCP's supported transports. "http" is FastMCP's alias for
+        # "streamable-http". SSE is retained for existing deployments but is the
+        # deprecated MCP transport -- see server.main().
+        allowed = {"stdio", "sse", "http", "streamable-http"}
         if v not in allowed:
             raise ValueError(f"server_transport must be one of {allowed}, got {v!r}")
         return v

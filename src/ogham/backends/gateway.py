@@ -121,6 +121,12 @@ class GatewayBackend:
         except httpx.HTTPStatusError:
             return False
 
+    def find_memory_ids_by_prefix(self, prefix: str, profile: str, limit: int = 10) -> list[str]:
+        """The gateway API exposes no prefix-lookup endpoint."""
+        raise NotImplementedError(
+            "prefix lookup is not supported on the gateway backend; use a full memory ID"
+        )
+
     # ── Search & Retrieval ───────────────────────────────────────────
 
     def search_memories(

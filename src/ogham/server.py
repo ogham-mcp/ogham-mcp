@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import threading
+from typing import Any, cast
 
 from ogham.app import mcp
 from ogham.config import settings
@@ -85,6 +86,11 @@ def _warm_hybrid_search() -> None:
         )
 
 
+# Transports that bind a host/port. "http" is FastMCP's alias for
+# "streamable-http"; both are passed through to FastMCP unchanged.
+_NETWORK_TRANSPORTS = frozenset({"sse", "http", "streamable-http"})
+
+
 def main(
     transport: str | None = None,
     host: str | None = None,
@@ -105,9 +111,21 @@ def main(
     if os.environ.get("OGHAM_BOOT_WARMUP", "true").lower() not in {"false", "0", "no"}:
         _warm_hybrid_search()
 
-    if actual_transport == "sse":
-        logger.info("Starting SSE server on %s:%s", actual_host, actual_port)
-        mcp.run(transport="sse", host=actual_host, port=actual_port)
+    if actual_transport in _NETWORK_TRANSPORTS:
+        if actual_transport == "sse":
+            # HTTP+SSE is the deprecated MCP transport and, unlike streamable
+            # HTTP, defines no session-recovery path. When a session loses its
+            # initialized state (a reconnect, a dropped link), every subsequent
+            # request is rejected with -32602 and the client has no defined way
+            # to recover -- it just keeps failing. See ogham-mcp#71.
+            logger.warning(
+                "SSE transport is deprecated and cannot recover a lost session; "
+                "prefer --transport streamable-http for remote deployments"
+            )
+        logger.info("Starting %s server on %s:%s", actual_transport, actual_host, actual_port)
+        # Settings.check_transport already restricts this to FastMCP's Transport
+        # literals, but the value arrives here as a plain str.
+        mcp.run(transport=cast(Any, actual_transport), host=actual_host, port=actual_port)
     else:
         if settings.enable_http_health:
             from ogham.http_health import start_health_server

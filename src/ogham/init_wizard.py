@@ -288,23 +288,30 @@ def _prompt_embeddings() -> dict:
 def _prompt_transport() -> tuple[str, str, int]:
     """Ask transport mode. Returns (transport, host, port)."""
     console.print("\n[bold]3. Server transport[/bold]")
-    console.print("   [bold]1)[/bold] Stdio  -- spawned per session (default, works everywhere)")
     console.print(
-        "   [bold]2)[/bold] SSE    -- persistent background server (better for multiple agents)\n"
+        "   [bold]1)[/bold] Stdio           -- spawned per session (default, works everywhere)"
+    )
+    console.print(
+        "   [bold]2)[/bold] Streamable HTTP -- persistent background server "
+        "(best for multiple agents)"
+    )
+    console.print(
+        "   [bold]3)[/bold] SSE             -- legacy, deprecated; cannot recover a lost session\n"
     )
 
     choice = Prompt.ask(
         "   Choose",
-        choices=["1", "2", "stdio", "sse"],
+        choices=["1", "2", "3", "stdio", "streamable-http", "http", "sse"],
         default="1",
     )
 
-    if choice in ("2", "sse"):
-        host = Prompt.ask("   SSE bind host", default="127.0.0.1")
-        port_str = Prompt.ask("   SSE port", default="8742")
-        return "sse", host, int(port_str)
+    if choice in ("1", "stdio"):
+        return "stdio", "127.0.0.1", 8742
 
-    return "stdio", "127.0.0.1", 8742
+    transport = "sse" if choice in ("3", "sse") else "streamable-http"
+    host = Prompt.ask("   Bind host", default="127.0.0.1")
+    port_str = Prompt.ask("   Port", default="8742")
+    return transport, host, int(port_str)
 
 
 def _prompt_execution_mode() -> str:
@@ -325,12 +332,14 @@ def _build_mcp_entry(
     env_vars: dict,
     mode: str,
     transport: str = "stdio",
-    sse_host: str = "127.0.0.1",
-    sse_port: int = 8742,
+    server_host: str = "127.0.0.1",
+    server_port: int = 8742,
 ) -> dict:
     """Build the MCP server config entry for Ogham."""
+    if transport in ("streamable-http", "http"):
+        return {"url": f"http://{server_host}:{server_port}/mcp"}
     if transport == "sse":
-        return {"url": f"http://{sse_host}:{sse_port}/sse"}
+        return {"url": f"http://{server_host}:{server_port}/sse"}
 
     env = dict(env_vars)
 
@@ -573,8 +582,8 @@ def _configure_clients(
     env_vars: dict,
     mode: str,
     transport: str = "stdio",
-    sse_host: str = "127.0.0.1",
-    sse_port: int = 8742,
+    server_host: str = "127.0.0.1",
+    server_port: int = 8742,
 ) -> list[str]:
     """Write MCP config to detected AI clients."""
     step = "5" if transport == "stdio" else "4"
@@ -589,12 +598,13 @@ def _configure_clients(
         return []
 
     console.print(f"   Found {len(detected)} client(s) on your machine.\n")
-    if transport == "sse":
-        console.print(f"   SSE mode: clients will connect to http://{sse_host}:{sse_port}/sse\n")
+    if transport != "stdio":
+        endpoint = "/sse" if transport == "sse" else "/mcp"
+        console.print(f"   Clients will connect to http://{server_host}:{server_port}{endpoint}\n")
     else:
         console.print("   For each one, we'll add Ogham to its MCP config.\n")
 
-    mcp_entry = _build_mcp_entry(env_vars, mode, transport, sse_host, sse_port)
+    mcp_entry = _build_mcp_entry(env_vars, mode, transport, server_host, server_port)
     configured = []
 
     for client in detected:
@@ -785,17 +795,17 @@ def run_init(
             # provider-aware default above.
             env_vars["EMBEDDING_DIM"] = str(dim or 512)
         exec_mode = mode or "uvx"
-        transport, sse_host, sse_port = "stdio", "127.0.0.1", 8742
+        transport, server_host, server_port = "stdio", "127.0.0.1", 8742
     else:
         # Interactive mode — embeddings first so we know the dimension for schema
         env_vars = _prompt_embeddings()
         env_vars.update(_prompt_database())
-        transport, sse_host, sse_port = _prompt_transport()
-        if transport == "sse":
-            exec_mode = "uvx"  # irrelevant for SSE but needs a value
-            env_vars["OGHAM_TRANSPORT"] = "sse"
-            env_vars["OGHAM_HOST"] = sse_host
-            env_vars["OGHAM_PORT"] = str(sse_port)
+        transport, server_host, server_port = _prompt_transport()
+        if transport != "stdio":
+            exec_mode = "uvx"  # irrelevant for a network transport, but needs a value
+            env_vars["OGHAM_TRANSPORT"] = transport
+            env_vars["OGHAM_HOST"] = server_host
+            env_vars["OGHAM_PORT"] = str(server_port)
         else:
             exec_mode = _prompt_execution_mode()
 
@@ -806,7 +816,7 @@ def run_init(
     # Configure MCP clients
     configured = []
     if not skip_clients:
-        configured = _configure_clients(env_vars, exec_mode, transport, sse_host, sse_port)
+        configured = _configure_clients(env_vars, exec_mode, transport, server_host, server_port)
 
     # Test connection
     if not skip_test:
@@ -816,11 +826,11 @@ def run_init(
     _write_env_file(env_vars)
 
     # Summary
-    if transport == "sse":
-        mode_str = f"SSE server on {sse_host}:{sse_port}"
+    if transport != "stdio":
+        mode_str = f"{transport} server on {server_host}:{server_port}"
         start_hint = (
             "[cyan]Start the server with:[/cyan] "
-            "[bold]ogham serve --transport sse[/bold]\n"
+            f"[bold]ogham serve --transport {transport}[/bold]\n"
             "[cyan]Then restart your MCP client(s) to connect.[/cyan]"
         )
     else:

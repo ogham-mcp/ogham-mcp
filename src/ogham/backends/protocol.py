@@ -70,6 +70,19 @@ class DatabaseBackend(Protocol):
         profile: str,
     ) -> bool: ...
 
+    def find_memory_ids_by_prefix(
+        self,
+        prefix: str,
+        profile: str,
+        limit: int = 10,
+    ) -> list[str]:
+        """Resolve a short id prefix to full memory UUIDs.
+
+        Raises NotImplementedError on backends that cannot express the query
+        (PostgREST has no uuid-to-text cast for LIKE).
+        """
+        ...
+
     # ── Search & Retrieval ───────────────────────────────────────────
 
     def search_memories(

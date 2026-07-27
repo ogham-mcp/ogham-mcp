@@ -379,6 +379,10 @@ def delete_memory(memory_id: str, profile: str) -> bool:
     return get_backend().delete_memory(memory_id, profile)
 
 
+def find_memory_ids_by_prefix(prefix: str, profile: str, limit: int = 10) -> list[str]:
+    return get_backend().find_memory_ids_by_prefix(prefix, profile, limit)
+
+
 def update_memory(memory_id: str, updates: dict[str, Any], profile: str) -> dict[str, Any]:
     return get_backend().update_memory(memory_id, updates, profile)
 

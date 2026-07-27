@@ -1,6 +1,7 @@
 """CLI interface for Ogham memory operations."""
 
 import json
+import re
 from typing import Optional
 
 import typer
@@ -19,6 +20,51 @@ app = typer.Typer(
     invoke_without_command=True,
 )
 console = Console()
+
+
+_UUID_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+
+def _resolve_memory_id(value: str, profile: str) -> str:
+    """Return a full memory UUID for `value`, which may be a short ID prefix.
+
+    `list` and `search` render only the first 8 characters of an ID, so a
+    prefix is what users actually have to hand. Resolving it here keeps the
+    backends dealing only in full UUIDs, and an ambiguous prefix is reported
+    rather than guessed at -- deleting the wrong memory is unrecoverable.
+    """
+    import ogham.database as db
+
+    if _UUID_RE.fullmatch(value):
+        return value
+
+    if not re.fullmatch(r"[0-9a-fA-F]{4,}", value.replace("-", "")):
+        console.print(f"[red]{value!r} is not a memory ID or ID prefix.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        matches = db.find_memory_ids_by_prefix(value, profile)
+    except NotImplementedError:
+        console.print("[red]This backend cannot resolve ID prefixes.[/red]")
+        console.print("Pass a full memory ID -- get one with: [cyan]ogham list --full-id[/cyan]")
+        raise typer.Exit(1) from None
+
+    if not matches:
+        console.print(
+            f"[red]Memory with ID prefix {value!r} not found in profile {profile!r}.[/red]"
+        )
+        raise typer.Exit(1)
+
+    if len(matches) > 1:
+        console.print(f"[yellow]Prefix {value!r} matches {len(matches)} memories:[/yellow]")
+        for match in matches:
+            console.print(f"  {match}")
+        console.print("[yellow]Use a longer prefix, or the full ID.[/yellow]")
+        raise typer.Exit(1)
+
+    return matches[0]
 
 
 def _safe_text(value: object, limit: int | None = None) -> str:
@@ -49,9 +95,11 @@ def main_callback(ctx: typer.Context):
 
 @app.command()
 def serve(
-    transport: Optional[str] = typer.Option(None, help="Transport: stdio or sse"),
-    host: Optional[str] = typer.Option(None, help="SSE bind host (default 127.0.0.1)"),
-    port: Optional[int] = typer.Option(None, help="SSE port (default 8742)"),
+    transport: Optional[str] = typer.Option(
+        None, help="Transport: stdio, streamable-http (recommended for remote), or sse (deprecated)"
+    ),
+    host: Optional[str] = typer.Option(None, help="Network bind host (default 127.0.0.1)"),
+    port: Optional[int] = typer.Option(None, help="Network port (default 8742)"),
     recall: Optional[bool] = typer.Option(
         None,
         "--recall/--no-recall",
@@ -273,6 +321,7 @@ def search(
     tags: Optional[list[str]] = typer.Option(None, "--tag", help="Filter by tag"),
     tags_csv: Optional[str] = typer.Option(None, "--tags", help="Comma-separated tags"),
     output_json: bool = typer.Option(False, "--json", help="Output JSON instead of rich table"),
+    full_id: bool = typer.Option(False, "--full-id", help="Show full memory UUIDs"),
     extract: bool = typer.Option(False, "--extract", help="Extract query-relevant facts via LLM"),
     recall: Optional[bool] = typer.Option(
         None,
@@ -291,7 +340,7 @@ def search(
                 console.print(f"[yellow]{disabled_message('recall')}[/yellow]")
             return
 
-        _search_impl(query, limit, profile, tags, tags_csv, output_json, extract)
+        _search_impl(query, limit, profile, tags, tags_csv, output_json, extract, full_id)
 
 
 def _search_impl(
@@ -302,6 +351,7 @@ def _search_impl(
     tags_csv: str | None,
     output_json: bool,
     extract: bool,
+    full_id: bool = False,
 ) -> None:
     from ogham.config import settings
 
@@ -346,13 +396,13 @@ def _search_impl(
         return
 
     table = Table(title=f"Search Results ({len(results)} matches)")
-    table.add_column("ID", width=8)
+    table.add_column("ID", width=36 if full_id else 8)
     table.add_column("Relevance", justify="right", width=10)
     table.add_column("Content")
     table.add_column("Tags")
 
     for r in results:
-        mem_id = str(r.get("id", ""))[:8]
+        mem_id = str(r.get("id", "")) if full_id else str(r.get("id", ""))[:8]
         relevance = f"{r.get('relevance', 0):.3f}"
         content = r["content"][:120]
         tags_str = ", ".join(r.get("tags", []))
@@ -369,6 +419,7 @@ def list_memories(
     tags_csv: Optional[str] = typer.Option(None, "--tags", help="Comma-separated tags"),
     source: Optional[str] = typer.Option(None, help="Filter by source"),
     output_json: bool = typer.Option(False, "--json", help="Output JSON instead of rich table"),
+    full_id: bool = typer.Option(False, "--full-id", help="Show full memory UUIDs"),
 ):
     """List recent memories."""
     from ogham.config import settings
@@ -395,7 +446,7 @@ def list_memories(
         return
 
     table = Table(title=f"Recent Memories ({len(results)})")
-    table.add_column("ID", width=8)
+    table.add_column("ID", width=36 if full_id else 8)
     table.add_column("Created", width=20)
     table.add_column("Content")
     table.add_column("Tags")
@@ -403,7 +454,7 @@ def list_memories(
 
     for r in results:
         table.add_row(
-            _safe_text(r.get("id", ""), 8),
+            _safe_text(r.get("id", ""), None if full_id else 8),
             _safe_text(r.get("created_at", ""), 19),
             _safe_text(r.get("content", ""), 100),
             ", ".join(r.get("tags", [])),
@@ -415,27 +466,27 @@ def list_memories(
 
 @app.command()
 def delete(
-    memory_id: str = typer.Argument(help="Memory ID (full UUID or prefix)"),
+    memory_id: str = typer.Argument(help="Memory ID (full UUID, or a unique ID prefix)"),
     profile: str = typer.Option(None, help="Profile the memory belongs to"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ):
     """Delete a memory by ID."""
+    import ogham.database as db
     from ogham.config import settings
-    from ogham.database import delete_memory as db_delete
 
     target = profile or settings.default_profile
+    resolved = _resolve_memory_id(memory_id, target)
 
     if not yes:
-        confirm = typer.confirm(f"Delete memory {memory_id[:8]}... from '{target}'?")
+        confirm = typer.confirm(f"Delete memory {resolved[:8]}... from '{target}'?")
         if not confirm:
             console.print("[yellow]Aborted.[/yellow]")
             return
 
-    deleted = db_delete(memory_id, target)
-    if deleted:
-        console.print(f"[green]Deleted memory {memory_id[:8]}...[/green]")
+    if db.delete_memory(resolved, target):
+        console.print(f"[green]Deleted memory {resolved[:8]}...[/green]")
     else:
-        console.print(f"[red]Memory {memory_id[:8]}... not found in profile '{target}'.[/red]")
+        console.print(f"[red]Memory {resolved[:8]}... not found in profile '{target}'.[/red]")
 
 
 @app.command()
@@ -1153,6 +1204,95 @@ def init(
         skip_clients=skip_clients,
         skip_test=skip_test,
     )
+
+
+@app.command(name="download-model")
+def download_model(
+    model: str = typer.Argument("bge-m3", help="Model to download (only bge-m3 supported)"),
+    path: str = typer.Option(
+        None, "--path", help="Download directory (default: ~/.cache/ogham/bge-m3-onnx)"
+    ),
+):
+    """Download ONNX model files for local embedding."""
+    import os
+    import shutil
+    import tempfile
+    import urllib.request
+    import zipfile
+    from pathlib import Path
+
+    from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
+
+    models = {
+        "bge-m3": {
+            "url": "https://github.com/yuniko-software/bge-m3-onnx/releases/download/1.01/onnx.zip",
+            "default_dir": Path.home() / ".cache" / "ogham" / "bge-m3-onnx",
+            "expected_files": ["bge_m3_model.onnx", "bge_m3_model.onnx_data"],
+        },
+    }
+
+    if model not in models:
+        console.print(f"[red]Unknown model {model!r}. Available: {', '.join(models)}[/red]")
+        raise typer.Exit(1)
+
+    info = models[model]
+    dest = Path(path) if path else info["default_dir"]
+
+    if all((dest / f).exists() for f in info["expected_files"]):
+        console.print(f"[green]Model {model!r} already exists at {dest}[/green]")
+        raise typer.Exit(0)
+
+    console.print(f"Downloading [bold]{model}[/bold] to {dest}...")
+
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Downloading...", total=None)
+
+        def _reporthook(block_num, block_size, total_size):
+            if total_size > 0 and progress.tasks[task].total is None:
+                progress.update(task, total=total_size)
+            downloaded = block_num * block_size
+            if total_size > 0:
+                downloaded = min(downloaded, total_size)
+            progress.update(task, completed=downloaded)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = Path(tmpdir) / "model.zip"
+            # S310: the URL is a fixed https GitHub release asset defined above,
+            # never user input, so no scheme-injection surface exists.
+            urllib.request.urlretrieve(info["url"], zip_path, reporthook=_reporthook)  # noqa: S310
+
+            progress.update(task, description="Extracting...")
+            with zipfile.ZipFile(zip_path) as zf:
+                # Refuse archive members that would escape the extraction root.
+                for member in zf.namelist():
+                    if os.path.isabs(member) or ".." in member.split("/"):
+                        console.print(f"[red]Unsafe zip member: {member}[/red]")
+                        raise typer.Exit(1)
+                zf.extractall(tmpdir)
+
+            # Members may sit at the archive root or under a subdirectory, so
+            # locate each expected file rather than assuming a layout.
+            dest.mkdir(parents=True, exist_ok=True)
+            try:
+                for expected in info["expected_files"]:
+                    candidates = list(Path(tmpdir).rglob(expected))
+                    if not candidates:
+                        console.print(f"[red]Expected file {expected!r} not found in archive[/red]")
+                        raise typer.Exit(1)
+                    shutil.copy2(candidates[0], dest / expected)
+            except Exception:
+                # Never leave a half-installed model behind.
+                for f in info["expected_files"]:
+                    (dest / f).unlink(missing_ok=True)
+                raise
+
+    console.print(f"[green]Model {model!r} downloaded to {dest}[/green]")
 
 
 @app.command()

@@ -455,6 +455,22 @@ class PostgresBackend:
         )
         return row is not None
 
+    def find_memory_ids_by_prefix(self, prefix: str, profile: str, limit: int = 10) -> list[str]:
+        """Resolve a short id prefix to full memory UUIDs.
+
+        The cast to text is load-bearing: PostgreSQL has no implicit uuid-to-text
+        coercion for LIKE, so comparing the uuid column directly would raise
+        rather than match.
+        """
+        rows = self._execute(
+            "SELECT id::text AS id FROM memories "
+            "WHERE id::text LIKE %(prefix)s || '%%' AND profile = %(profile)s "
+            "ORDER BY id LIMIT %(limit)s",
+            {"prefix": prefix, "profile": profile, "limit": limit},
+            fetch="all",
+        )
+        return [str(r["id"]) for r in (rows or [])]
+
     # ── Hebbian Decay ──────────────────────────────────────────────────
 
     def apply_hebbian_decay(self, profile: str, batch_size: int = 1000) -> int:
