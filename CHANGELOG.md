@@ -4,7 +4,67 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.17.0] - Unreleased -- Ingestion adapters, portable predicate URIs, and provenance chains
+## [0.17.1] - 2026-07-27 -- Streamable HTTP transport, adapter credentials, CLI fixes
+
+### Added
+
+- **Streamable HTTP transport.** `ogham serve --transport streamable-http`
+  (`http` works as an alias), with the endpoint at `/mcp`. The MCP
+  specification defines stdio and Streamable HTTP as its two standard
+  transports and treats HTTP+SSE as deprecated. The difference that matters is
+  session recovery: Streamable HTTP assigns an `Mcp-Session-Id` and defines the
+  way back when a session is gone (HTTP 404, then re-initialize), whereas
+  HTTP+SSE defines none -- a session that loses its initialized state rejects
+  every later request with `-32602`, and the client cannot tell a lifecycle
+  problem from a bad argument. One dropped connection can leave an agent
+  failing every call until someone restarts it, which is what @mAAdhaTTah ran
+  into in #71. Remote and containerised deployments should prefer
+  streamable-http. `--transport sse` still works and now logs a deprecation
+  warning naming the replacement.
+
+  Running a network transport in Docker needs `--host 0.0.0.0`; the default
+  `127.0.0.1` is only reachable from inside the container. The README now
+  covers this.
+
+### Fixed
+
+- **Credentials in `~/.ogham/config.env` now reach the ingestion adapters.**
+  The Telegram, Slack, GitHub and Beads adapters read their tokens from the
+  process environment, but env-file values were only ever loaded into Ogham's
+  settings object -- so a token placed exactly where the adapter docs say to
+  put it was invisible, and the adapter reported it as unset. Env-file values
+  are now exported to the environment, with a real environment variable still
+  taking precedence. Obsidian was unaffected, since it takes a path rather than
+  a credential.
+
+- **`ogham download-model` exists again.** With `EMBEDDING_PROVIDER=onnx` and no
+  model present, Ogham tells you to run `ogham download-model bge-m3` -- but the
+  command had been dropped in v0.8.5, while the error message and the README
+  kept pointing at it. Restored, so there is once more a working way to fetch
+  the BGE-M3 model instead of unpacking the release archive by hand. Reported by
+  @mAAdhaTTah (#68).
+
+- **`ogham delete` accepts a short ID prefix.** `--help` promised "full UUID or
+  prefix", but passing a prefix failed against the database -- and since `list`
+  and `search` display only the first 8 characters, there was no straightforward
+  way to obtain the full UUID the command actually wanted. Prefixes now resolve
+  to a full ID, and an ambiguous prefix lists its candidates and stops rather
+  than guessing. `list` and `search` also gain `--full-id` for copyable UUIDs.
+  Prefix resolution requires a Postgres-side cast, so it works on the Postgres
+  backend and reports clearly on the others. Reported by @mAAdhaTTah (#70).
+
+- **`ogham init` can configure the recommended transport.** The setup wizard
+  offered only stdio and SSE and always wrote an SSE client URL, so anyone
+  choosing the multi-agent option during setup was placed on the deprecated
+  transport. It now offers Streamable HTTP as the multi-agent choice, keeps SSE
+  as a labelled legacy option, and writes the endpoint matching whichever you
+  pick.
+
+### Notes
+
+- No migrations. v0.17.1 is safe to install over any v0.17.0 database.
+
+## [0.17.0] - 2026-07-09 -- Ingestion adapters, portable predicate URIs, and provenance chains
 
 ### Added
 
