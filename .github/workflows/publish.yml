@@ -63,8 +63,10 @@ jobs:
       - name: Import smoke against the built wheel
         run: |
           set -euo pipefail
-          python3 -m venv /tmp/v
-          /tmp/v/bin/pip -q install "$(ls dist/*.whl | head -1)[postgres]"
+          # The runner's system python3 is 3.12; this package needs >=3.13,
+          # so build the venv with uv, which fetches the right interpreter.
+          uv venv --python 3.13 /tmp/v
+          uv pip install --python /tmp/v/bin/python "$(ls dist/*.whl | head -1)[postgres]"
           /tmp/v/bin/python - <<'PY'
           import importlib.metadata as md
           import ogham.cli, ogham.server, ogham.config  # noqa: F401
