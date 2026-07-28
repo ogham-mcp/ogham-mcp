@@ -8,18 +8,13 @@ name: Publish
 # never reach the artifact (TBU-197). Building and publishing from this repo
 # fixes both by construction.
 #
-# Dry-run first: `workflow_dispatch` publishes to TestPyPI. Only a v* tag
-# publishes to the real index, and only after the environment approval.
+# workflow_dispatch runs the build and its gates and publishes NOTHING -- use it
+# to verify an artifact on demand. Only a v* tag reaches PyPI, and only after the
+# `pypi` environment's required reviewer approves, so the upload is never the
+# first anyone hears of it.
 
 on:
   workflow_dispatch:
-    inputs:
-      target:
-        description: "Where to publish"
-        required: true
-        default: testpypi
-        type: choice
-        options: [testpypi]
   push:
     tags: ["v*"]
 
@@ -82,29 +77,11 @@ jobs:
           name: dist
           path: dist/
 
-  testpypi:
-    # Dry run. Proves the OIDC path works without touching the real index.
-    if: github.event_name == 'workflow_dispatch'
-    needs: build
-    runs-on: ubuntu-latest
-    environment: testpypi
-    permissions:
-      id-token: write # the whole point: short-lived OIDC, no stored token
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
-
   pypi:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
-    environment: pypi # add a required reviewer here to gate every real publish
+    environment: pypi # required reviewer configured -- gates every real publish
     permissions:
       id-token: write
     steps:
