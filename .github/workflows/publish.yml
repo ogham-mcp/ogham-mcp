@@ -1,0 +1,113 @@
+name: Publish
+
+# Trusted Publishing (OIDC) -- no PyPI token anywhere. See TBU-198.
+#
+# The wheel has always been built on the maintainer's laptop from the PRIVATE
+# dev repo, which meant nobody could verify that what shipped matched the source
+# people could read. It also let two contributor migrations live only here and
+# never reach the artifact (TBU-197). Building and publishing from this repo
+# fixes both by construction.
+#
+# Dry-run first: `workflow_dispatch` publishes to TestPyPI. Only a v* tag
+# publishes to the real index, and only after the environment approval.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to publish"
+        required: true
+        default: testpypi
+        type: choice
+        options: [testpypi]
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v5.4.2
+
+      - name: Build wheel + sdist
+        run: uv build
+
+      # The artifact audit runs HERE, against the files that will actually be
+      # uploaded -- not against a build that never ships.
+      - name: Leak audit
+        run: |
+          set -euo pipefail
+          WHL=$(ls dist/*.whl | head -1)
+          SDIST=$(ls dist/*.tar.gz | head -1)
+          echo "wheel: $(basename "$WHL")"
+          echo "sdist: $(basename "$SDIST")"
+          NAMES=$(python3 -c "import zipfile,sys;print(chr(10).join(zipfile.ZipFile(sys.argv[1]).namelist()))" "$WHL")
+          TARS=$(tar tzf "$SDIST")
+          FAIL=0
+          for pat in '\.claude/' 'benchmarks/' '^docs/' 'extras/' 'superpowers' 'memory/' 'agent_zero'; do
+            HITS=$(printf '%s\n%s\n' "$NAMES" "$TARS" | grep -E "$pat" | grep -v '\.env\.example' || true)
+            if [ -n "$HITS" ]; then
+              echo "::error::forbidden path in artifact ($pat)"; printf '%s\n' "$HITS" | head -5; FAIL=1
+            fi
+          done
+          COUNT=$(printf '%s\n' "$NAMES" | grep -c '\.py$')
+          echo "python files in wheel: $COUNT"
+          [ "$COUNT" -ge 50 ] || { echo "::error::only $COUNT .py files -- wheel looks wrong"; FAIL=1; }
+          exit $FAIL
+
+      - name: Import smoke against the built wheel
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/v
+          /tmp/v/bin/pip -q install "$(ls dist/*.whl | head -1)[postgres]"
+          /tmp/v/bin/python - <<'PY'
+          import importlib.metadata as md
+          import ogham.cli, ogham.server, ogham.config  # noqa: F401
+          from ogham.config import Settings
+          assert Settings(server_transport="streamable-http")
+          print("ok", md.version("ogham-mcp"))
+          PY
+          /tmp/v/bin/ogham --help > /dev/null
+          /tmp/v/bin/ogham download-model --help > /dev/null
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist
+          path: dist/
+
+  testpypi:
+    # Dry run. Proves the OIDC path works without touching the real index.
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write # the whole point: short-lived OIDC, no stored token
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  pypi:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi # add a required reviewer here to gate every real publish
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
