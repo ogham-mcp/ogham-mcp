@@ -81,6 +81,50 @@ jobs:
           /tmp/v/bin/ogham --help > /dev/null
           /tmp/v/bin/ogham download-model --help > /dev/null
 
+      # The PyPI page IS the shopfront, and until 0.17.1 it was empty (TBU-201).
+      # tests/test_packaging_metadata.py guards the pyproject side; only a build
+      # can prove the fields survive into METADATA, so that check lives here,
+      # against the artifact that will actually be uploaded.
+      - name: PyPI page metadata
+        run: |
+          set -euo pipefail
+          python3 - "$(ls dist/*.whl | head -1)" <<'PY'
+          import email, re, sys, zipfile
+
+          z = zipfile.ZipFile(sys.argv[1])
+          name = [n for n in z.namelist() if n.endswith(".dist-info/METADATA")][0]
+          msg = email.message_from_string(z.read(name).decode())
+          body = msg.get_payload()
+          urls = msg.get_all("Project-URL") or []
+
+          problems = []
+          if msg["Description-Content-Type"] != "text/markdown":
+              problems.append(f"Description-Content-Type is {msg['Description-Content-Type']!r}")
+          if len(body) < 2000:
+              problems.append(f"description body is {len(body)} chars -- README did not make it in")
+          if not msg["Keywords"]:
+              problems.append("Keywords absent")
+          if not msg["License-Expression"]:
+              problems.append("License-Expression absent")
+          if not any(u.startswith("Repository,") for u in urls):
+              problems.append(f"no Repository project URL (got {urls})")
+
+          # PyPI renders the description off pypi.org, so a relative link 404s
+          # there. In-page anchors (#section) are fine.
+          relative = sorted({
+              m.group(1) for m in re.finditer(r"\]\(([^)#][^)]*)\)", body)
+              if not m.group(1).startswith(("http://", "https://", "mailto:"))
+          })
+          if relative:
+              problems.append(f"relative links will not resolve on PyPI: {relative}")
+
+          for p in problems:
+              print(f"::error::{p}")
+          if problems:
+              sys.exit(1)
+          print(f"ok -- {len(body)} chars, {len(urls)} project URLs, no relative links")
+          PY
+
       # Recorded BEFORE upload, so `verify-handoff` compares against what this
       # job actually produced rather than against the transported copy checking
       # itself. Emitted in `sha256sum -c` format, which names the offending file

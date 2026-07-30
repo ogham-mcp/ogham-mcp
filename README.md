@@ -524,7 +524,7 @@ Admin operations such as config, health, stats, audit, export, delete, and clean
 | `export_profile` | Export all memories in active profile | `format` (`json`, `markdown`, or `okf`), `include_viewer` (default true for OKF) |
 | `import_memories_tool` | Import a JSON export string OR auto-detect an OKF bundle directory by path | `data`, `dedup_threshold` |
 
-**`--format okf`** writes an [Open Knowledge Format v0.1](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing) conformant bundle: a directory of one-markdown-file-per-memory with YAML frontmatter, a bundle-root `index.md` declaring `okf_version: "0.1"`, and a self-contained `viewer.html` (Cytoscape.js graph, opens with `file://`, no server or CDN needed). Round-trip preserves UUID, content, tags, source, and metadata; the embedding is regenerated on import. Pass `include_viewer=false` to skip the HTML graph. See [docs/okf-format.md](docs/okf-format.md) for the round-trip contract.
+**`--format okf`** writes an [Open Knowledge Format v0.1](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing) conformant bundle: a directory of one-markdown-file-per-memory with YAML frontmatter, a bundle-root `index.md` declaring `okf_version: "0.1"`, and a self-contained `viewer.html` (Cytoscape.js graph, opens with `file://`, no server or CDN needed). Round-trip preserves UUID, content, tags, source, and metadata; the embedding is regenerated on import. Pass `include_viewer=false` to skip the HTML graph. See the [OKF round-trip write-up](https://ogham-mcp.dev/blog/okf-round-trip-v015/) for the background.
 
 **Maintenance**
 
@@ -612,7 +612,7 @@ Import behaviour:
 - Memories without `id:` insert as new; the count surfaces as `missing_id_count` in the result.
 - The importer requires a bundle-root `index.md` with `okf_version` declared so pointing it at a random directory fails fast.
 
-User-facing docs: [docs/okf-format.md](docs/okf-format.md).
+User-facing write-up: [Ogham v0.15 speaks Open Knowledge Format](https://ogham-mcp.dev/blog/okf-round-trip-v015/).
 
 </details>
 
@@ -773,7 +773,7 @@ make test-external
 
 **Upgrading an existing Ogham database**
 
-For v0.10.x → v0.11.0 (memory lifecycle release), see [UPGRADING.md](UPGRADING.md). The short version:
+For v0.10.x → v0.11.0 (memory lifecycle release), see [UPGRADING.md](https://github.com/ogham-mcp/ogham-mcp/blob/main/UPGRADING.md). The short version:
 
 ```bash
 ./sql/upgrade.sh $DATABASE_URL     # applies 025 + 026 + 027 idempotently
@@ -795,7 +795,7 @@ For older versions (v0.4.x through v0.10.x), the same `upgrade.sh` script walks 
 Selected migration highlights:
 - **016** adds the `sparse_embedding` column for ONNX BGE-M3 sparse vectors.
 - **017** upgrades the search function to true Reciprocal Rank Fusion with length-normalised keyword scoring ([Cormack et al., 2009](https://doi.org/10.1145/1571941.1572114)).
-- **025 / 026** add the memory lifecycle table + triggers (see [UPGRADING.md](UPGRADING.md)).
+- **025 / 026** add the memory lifecycle table + triggers (see [UPGRADING.md](https://github.com/ogham-mcp/ogham-mcp/blob/main/UPGRADING.md)).
 - **027** backfills the `audit_log` table for installs that predate it.
 
 **Rollback scripts** live under `sql/migrations/rollback/` with a `DANGER_` prefix and require explicit session-variable opt-in before they do anything. See `sql/migrations/rollback/README.md`.
