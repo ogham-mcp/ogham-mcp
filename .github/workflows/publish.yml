@@ -12,6 +12,13 @@ name: Publish
 # to verify an artifact on demand. Only a v* tag reaches PyPI, and only after the
 # `pypi` environment's required reviewer approves, so the upload is never the
 # first anyone hears of it.
+#
+# `verify-handoff` (dispatch only) exists because the upload -> download step pair
+# is otherwise reachable ONLY from a v* tag: its first real execution would be the
+# same run as the first real OIDC publish. See TBU-204. It downloads the artifact
+# through the same pin the `pypi` job uses and checks the files against digests
+# recorded before upload, so a green dispatch is evidence about the release path
+# and not about a copy of it.
 
 on:
   workflow_dispatch:
@@ -24,6 +31,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      manifest: ${{ steps.manifest.outputs.manifest }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -72,10 +81,53 @@ jobs:
           /tmp/v/bin/ogham --help > /dev/null
           /tmp/v/bin/ogham download-model --help > /dev/null
 
+      # Recorded BEFORE upload, so `verify-handoff` compares against what this
+      # job actually produced rather than against the transported copy checking
+      # itself. Emitted in `sha256sum -c` format, which names the offending file
+      # on mismatch instead of just disagreeing about one opaque hash.
+      - name: Record artifact digests
+        id: manifest
+        run: |
+          set -euo pipefail
+          MANIFEST=$(cd dist && sha256sum -- * | sort)
+          [ -n "$MANIFEST" ] || { echo "::error::dist/ is empty -- nothing to record"; exit 1; }
+          printf '%s\n' "$MANIFEST"
+          {
+            echo "manifest<<MANIFEST_EOF"
+            printf '%s\n' "$MANIFEST"
+            echo "MANIFEST_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
           path: dist/
+
+  # Dispatch only. Deliberately has NO `id-token: write` and NO `environment:`,
+  # so it cannot reach PyPI even if someone later pastes a publish step into it.
+  verify-handoff:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+
+      - name: Verify the downloaded files match what was built
+        env:
+          MANIFEST: ${{ needs.build.outputs.manifest }}
+        run: |
+          set -euo pipefail
+          [ -n "${MANIFEST:-}" ] || { echo "::error::build recorded no manifest"; exit 1; }
+          printf '%s\n' "$MANIFEST" > "$RUNNER_TEMP/manifest.sha256"
+          COUNT=$(grep -c . "$RUNNER_TEMP/manifest.sha256" || true)
+          [ "$COUNT" -ge 2 ] || { echo "::error::manifest lists $COUNT files, expected wheel + sdist"; exit 1; }
+          ls -l dist/
+          (cd dist && sha256sum -c "$RUNNER_TEMP/manifest.sha256")
+          ls dist/*.whl >/dev/null && ls dist/*.tar.gz >/dev/null
+          echo "upload -> download handoff verified across $COUNT files"
 
   pypi:
     if: startsWith(github.ref, 'refs/tags/v')
