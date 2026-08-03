@@ -89,7 +89,14 @@ def test_successful_download_extracts_expected_files(tmp_path):
                 zf.write(archive_src / name, arcname=f"onnx/{name}")
         return filename, None
 
-    with patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve):
+    # A stub archive cannot match the pinned digest, so the integrity gate is
+    # bypassed here: this test covers EXTRACTION. Verification has its own
+    # coverage in test_download_model_integrity.py, including the negative case
+    # that a failing digest extracts nothing.
+    with (
+        patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve),
+        patch("ogham.cli.verify_archive", return_value=[]),
+    ):
         result = runner.invoke(app, ["download-model", "bge-m3", "--path", str(dest)])
 
     assert result.exit_code == 0
@@ -108,7 +115,10 @@ def test_path_traversal_member_is_rejected(tmp_path):
             zf.writestr("../escaped.onnx", "payload")
         return filename, None
 
-    with patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve):
+    with (
+        patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve),
+        patch("ogham.cli.verify_archive", return_value=[]),
+    ):
         result = runner.invoke(app, ["download-model", "bge-m3", "--path", str(dest)])
 
     assert result.exit_code == 1
@@ -126,7 +136,10 @@ def test_missing_expected_file_cleans_up_partials(tmp_path):
             zf.writestr("bge_m3_model.onnx", "payload")  # _data absent
         return filename, None
 
-    with patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve):
+    with (
+        patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve),
+        patch("ogham.cli.verify_archive", return_value=[]),
+    ):
         result = runner.invoke(app, ["download-model", "bge-m3", "--path", str(dest)])
 
     assert result.exit_code == 1

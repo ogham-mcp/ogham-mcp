@@ -1414,6 +1414,20 @@ class PostgresBackend:
         count, sample = self._split_count_sample(rows or [])
         return {"count": count, "sample": sample}
 
+    def in_result_contradictions(self, profile: str, memory_ids: list[str]) -> list[dict[str, Any]]:
+        """Contradiction pairs with BOTH endpoints inside memory_ids.
+
+        Complements gap_out_of_result_contradictions, which by design covers
+        only pairs reaching outside the set. Oriented stale -> newer by
+        created_at (migration 047). See TBU-207.
+        """
+        rows = self._execute(
+            "SELECT * FROM in_result_contradictions(%(p)s, %(ids)s::uuid[])",
+            {"p": profile, "ids": [str(m) for m in memory_ids]},
+            fetch="all",
+        )
+        return [dict(r) for r in (rows or [])]
+
     def gap_out_of_result_contradictions(
         self, profile: str, memory_ids: list[str], *, sample_size: int = 10
     ) -> dict[str, Any]:

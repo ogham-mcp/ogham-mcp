@@ -12,6 +12,7 @@ import hashlib
 import logging
 import math
 import os
+import re
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -479,11 +480,63 @@ def _generate_batch_uncached(
             raise ValueError(f"Unknown embedding provider: {provider}")
 
 
+def _order_by_index(provider: str, items: list, expected: int) -> list:
+    """Return `items` in request order, using each item's `index` when it has one.
+
+    The caller pairs texts to vectors POSITIONALLY, so array order is
+    load-bearing. OpenAI models `index` as a REQUIRED field on every embedding
+    precisely because position in `data` is not the contract -- the index is.
+    We used to read the array in whatever order it arrived, which is fine right
+    up until it isn't, and the failure is silent: each memory gets its
+    neighbour's vector, cached under its own key, with nothing downstream able
+    to notice. (TBU-209)
+
+    Providers whose responses carry no index (ollama and voyage return bare
+    lists) fall through unchanged -- there is nothing better available, and
+    saying so here beats leaving the assumption unwritten.
+    """
+    # `isinstance(..., int)` rather than a None check: list, tuple and str all
+    # carry an `.index` METHOD, so a bare list of vectors would otherwise look
+    # indexed and blow up in sorted(). Caught by the ollama/voyage passthrough
+    # test, which is the whole reason it exists.
+    indices = [getattr(item, "index", None) for item in items]
+    if not all(isinstance(i, int) and not isinstance(i, bool) for i in indices):
+        return items
+    if sorted(indices) != list(range(expected)):
+        raise RuntimeError(
+            f"{provider} returned indices {sorted(indices)} for {expected} inputs -- "
+            "cannot establish request order, refusing to guess"
+        )
+    return [item for _, item in sorted(zip(indices, items), key=lambda pair: pair[0])]
+
+
+def _assert_full_batch(provider: str, texts: list[str], embeddings: list) -> None:
+    """A batch must return exactly one embedding per input, in order.
+
+    The caller pairs the two lists POSITIONALLY with zip() and writes the result
+    into the embedding cache under each text's key. A short response therefore
+    does not merely lose data -- if a provider drops an item from the middle,
+    every text after it is paired with its neighbour's vector and that
+    mispairing is cached. Nothing downstream can detect it.
+
+    Until 2026-07-30 only Gemini checked this, because issue #60 forced it. The
+    other providers relied on `any(result is None)` further up, which fires
+    after the fact, cannot say which provider misbehaved, and catches only the
+    short case -- never a wrong-order response of the right length.
+    """
+    if len(embeddings) != len(texts):
+        raise RuntimeError(
+            f"{provider} returned {len(embeddings)} embeddings for {len(texts)} inputs -- "
+            "refusing to pair texts with the wrong vectors"
+        )
+
+
 def _embed_onnx_batch(
     texts: list[str],
     usage_out: EmbeddingUsage | None = None,
 ) -> list[list[float]]:
     embeddings = [_embed_onnx(t) for t in texts]
+    _assert_full_batch("onnx", texts, embeddings)
     _set_usage_out(usage_out, _model_only_usage("onnx"))
     return embeddings
 
@@ -497,7 +550,10 @@ def _embed_ollama_batch(
     if settings.embedding_dim:
         kwargs["dimensions"] = settings.embedding_dim
     response = client.embed(**kwargs)
+    # Ollama returns a bare list with no per-item index, so request order is
+    # the only signal available. See TBU-209.
     embeddings = response["embeddings"]
+    _assert_full_batch("ollama", texts, embeddings)
     for emb in embeddings:
         _validate_dim(emb)
     _set_usage_out(usage_out, _model_only_usage("ollama"))
@@ -517,7 +573,9 @@ def _embed_openai_batch(
         input=texts,
         dimensions=settings.embedding_dim,
     )
-    embeddings = [d.embedding for d in response.data]
+    ordered = _order_by_index("openai", list(response.data), len(texts))
+    embeddings = [d.embedding for d in ordered]
+    _assert_full_batch("openai", texts, embeddings)
     for emb in embeddings:
         _validate_dim(emb)
     _set_usage_out(usage_out, _extract_openai_usage(response))
@@ -535,7 +593,11 @@ def _embed_mistral_batch(
         model=settings.mistral_embed_model,
         inputs=texts,
     )
-    embeddings = [d.embedding for d in response.data]
+    # Mistral mirrors the OpenAI response shape; _order_by_index is a no-op
+    # if this SDK turns out not to expose `index`.
+    ordered = _order_by_index("mistral", list(response.data), len(texts))
+    embeddings = [d.embedding for d in ordered]
+    _assert_full_batch("mistral", texts, embeddings)
     for emb in embeddings:
         _validate_dim(emb)
     _set_usage_out(usage_out, _model_only_usage("mistral"))
@@ -559,8 +621,10 @@ def _embed_voyage_batch(
             model=settings.voyage_embed_model,
             output_dimension=settings.embedding_dim,
         )
+        # Voyage returns a bare list per chunk -- no index to reorder by.
         all_embeddings.extend(response.embeddings)
         total_usage = _merge_usage(total_usage, _extract_voyage_usage(response))
+    _assert_full_batch("voyage", texts, all_embeddings)
     for emb in all_embeddings:
         _validate_dim(emb)
     _set_usage_out(usage_out, total_usage)
@@ -575,21 +639,63 @@ class _GeminiShortResponseError(RuntimeError):
     """
 
 
+# HTTP statuses where another attempt is genuinely expected to help. Anything
+# else from the 4xx range is the caller's problem and will fail identically on
+# every retry -- a bad key, a disabled API, a model that does not exist.
+_RETRYABLE_HTTP_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+
+
 def _is_rate_limit_error(exc: BaseException) -> bool:
-    """Detect Gemini 429/quota/503 errors that are worth retrying."""
+    """Is another attempt worth making? Classified by status, not by prose.
+
+    `google.genai.errors.APIError` carries `.code` (the HTTP status), so use
+    it. The previous version matched substrings against the whole message,
+    which was wrong in both directions (TBU-210):
+
+    - `"quota" in msg.lower()` retried PERMANENT failures. Billing disabled and
+      a disabled API both return 403 and both say "quota", so an outcome fixed
+      from the first call cost six attempts and 93s of backoff before surfacing
+      the real cause -- buried under the retry noise.
+    - `"429" in msg` matched anywhere in the text, so a request id or a token
+      count containing those digits read as a rate limit.
+
+    Bare "quota" is deliberately gone from the fallback. `RESOURCE_EXHAUSTED`
+    is the status string that actually accompanies a retryable 429, and it does
+    not appear on the terminal 403s.
+    """
+    code = getattr(exc, "code", None)
+    if isinstance(code, int) and not isinstance(code, bool):
+        return code in _RETRYABLE_HTTP_STATUS
+
+    # No typed status: a raw transport error, or a provider that does not carry
+    # one. Match whole tokens so a number embedded in prose cannot trigger it.
     msg = str(exc)
-    return (
-        "429" in msg
-        or "RESOURCE_EXHAUSTED" in msg
-        or "quota" in msg.lower()
-        or "503" in msg
-        or "UNAVAILABLE" in msg
-    )
+    if re.search(r"\b(?:408|429|500|502|503|504)\b", msg):
+        return True
+    return "RESOURCE_EXHAUSTED" in msg or "UNAVAILABLE" in msg
 
 
-def _is_transient_gemini_error(exc: BaseException) -> bool:
-    """Tenacity predicate: rate-limit OR transient short-response failure."""
-    return isinstance(exc, _GeminiShortResponseError) or _is_rate_limit_error(exc)
+# Models observed to ignore multi-input batching in this process. Populated at
+# runtime, never persisted -- if Google fixes the model, a restart re-probes.
+#
+# `gemini-embedding-2` began returning exactly ONE embedding for any number of
+# inputs (verified 2026-07-30: batch 2, 3 and 5 all returned 1, while
+# `gemini-embedding-001` returned the full count). That is not the flaky short
+# response of issue #60 -- it is deterministic, so retrying can never win, and
+# every batched caller (re_embed_all, adapter ingestion, importers, benchmarks)
+# failed hard after exhausting its attempts. Interactive use never noticed
+# because storing one memory embeds one input. See TBU-208.
+_GEMINI_NO_BATCH: set[str] = set()
+
+# A genuine flake resolves on the next call; anything beyond that is a provider
+# that does not batch, and further attempts just add latency before the
+# fallback. Rate limits keep the full attempt budget separately.
+_GEMINI_SHORT_RESPONSE_ATTEMPTS = 2
+
+
+def _reset_gemini_batch_support() -> None:
+    """Forget which models were observed not to batch. For tests."""
+    _GEMINI_NO_BATCH.clear()
 
 
 def _embed_gemini_batch(
@@ -617,33 +723,75 @@ def _embed_gemini_batch(
         else wait_exponential(multiplier=3, min=3, max=90)
     )
 
+    model = settings.gemini_embed_model
+
     @retry(
-        retry=retry_if_exception(_is_transient_gemini_error),
+        retry=retry_if_exception(_is_rate_limit_error),
         wait=_wait,
         stop=stop_after_attempt(6),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    def _call():
+    def _call(batch: list[str], sink: EmbeddingUsage | None) -> list[list[float]]:
+        """One provider call. Raises _GeminiShortResponseError on a count mismatch.
+
+        The count check is a hard assertion, not a nicety: accepting a response
+        with fewer embeddings than inputs would silently pair text with the
+        WRONG vector, which is far worse than an error.
+        """
         response = client.models.embed_content(
-            model=settings.gemini_embed_model,
-            contents=texts,
+            model=model,
+            contents=batch,
             config={"output_dimensionality": settings.embedding_dim},
         )
-        if len(response.embeddings) != len(texts):
+        returned = len(response.embeddings or [])
+        if returned != len(batch):
             raise _GeminiShortResponseError(
-                f"Gemini returned {len(response.embeddings)} embeddings for "
-                f"{len(texts)} inputs -- short response, retrying"
+                f"Gemini returned {returned} embeddings for {len(batch)} inputs"
             )
         embeddings = [e.values for e in response.embeddings]
         for emb in embeddings:
             _validate_dim(emb)
         if settings.embedding_dim < 3072 and not _gemini_model_pre_normalizes():
             embeddings = [_l2_normalize(emb) for emb in embeddings]
-        _set_usage_out(usage_out, _extract_gemini_usage(response))
+        _set_usage_out(sink, _extract_gemini_usage(response))
         return embeddings
 
-    return _call()
+    def _one_at_a_time() -> list[list[float]]:
+        """Degrade to single-input calls, which the provider does honour."""
+        embeddings: list[list[float]] = []
+        total: EmbeddingUsage | None = None
+        for text in texts:
+            per_call: EmbeddingUsage = {}
+            embeddings.extend(_call([text], per_call))
+            total = _merge_usage(total, per_call or None)
+        _set_usage_out(usage_out, total)
+        return embeddings
+
+    if model in _GEMINI_NO_BATCH and len(texts) > 1:
+        return _one_at_a_time()
+
+    last: _GeminiShortResponseError | None = None
+    for attempt in range(_GEMINI_SHORT_RESPONSE_ATTEMPTS):
+        try:
+            return _call(texts, usage_out)
+        except _GeminiShortResponseError as exc:
+            last = exc
+            logger.warning(
+                "gemini: %s (attempt %d/%d)", exc, attempt + 1, _GEMINI_SHORT_RESPONSE_ATTEMPTS
+            )
+            if len(texts) == 1:
+                # Nothing left to degrade to -- a single input already failed.
+                raise
+
+    _GEMINI_NO_BATCH.add(model)
+    logger.warning(
+        "gemini: model %r does not honour multi-input batching (%s) -- falling back to "
+        "one request per input for the rest of this process. See TBU-208.",
+        model,
+        last,
+    )
+    return _one_at_a_time()
 
 
 def clear_embedding_cache() -> int:

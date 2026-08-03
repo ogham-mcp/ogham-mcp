@@ -379,6 +379,11 @@ class GatewayBackend:
         self._wiki_unsupported("wiki_lint_contradictions")
         return {"count": 0, "sample": []}
 
+    def in_result_contradictions(self, profile: str, memory_ids: list[str]) -> list[dict[str, Any]]:
+        # not offered over the gateway in v1. Supersession demotion degrades to
+        # out-of-result pairs only rather than failing the search.
+        return []
+
     def gap_out_of_result_contradictions(
         self, profile: str, memory_ids: list[str], *, sample_size: int = 10
     ) -> dict[str, Any]:

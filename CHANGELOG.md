@@ -4,6 +4,67 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.17.2] - 2026-08-03 -- Supersession ranking, embedding batch integrity, quieter hooks
+
+### Added
+
+- **Corrections now outrank what they supersede.** When a memory is contradicted
+  by a newer one, it is pushed below the correction in search results and
+  marked with `superseded_by` so callers can see it is stale without opting
+  into `gap="deep"`. Previously Ogham recorded the contradiction, reported it in
+  `gap_note`, and then ranked as if it did not exist -- so asking about a topic
+  you had explicitly corrected could return the stale answer above the
+  correction. Requires migration `047_in_result_contradictions.sql`.
+- `ogham download-model` verifies the downloaded archive against a pinned
+  SHA-256 and size before extracting anything. A truncated transfer, a
+  corrupted proxy cache, or a changed upstream asset is now rejected instead of
+  unpacked and used to generate embeddings.
+
+### Fixed
+
+- **Gemini batch embedding.** `gemini-embedding-2` began returning a single
+  embedding regardless of how many inputs were sent, which made every batched
+  path fail after exhausting its retries -- `re_embed_all`, adapter ingestion,
+  importers and benchmarks. Ogham now detects this and falls back to one
+  request per input. Interactive use was unaffected, which is why it went
+  unnoticed.
+- **Every provider now asserts one embedding per input.** Only Gemini checked
+  this before. Because results are paired with their input texts by position, a
+  provider dropping an item from the middle of a batch would have paired every
+  later text with its neighbour's vector -- and cached it.
+- **Batch order is taken from the response index** rather than assumed from
+  array order, for providers that supply one.
+- **Retryable errors are classified by HTTP status, not by matching words in
+  the message.** A permanently exhausted quota or a disabled API used to be
+  retried six times before surfacing the real cause.
+- Two migrations (`008a_ccf_search`, `016_sparse_embedding`) that existed only
+  in the GitHub repository are now included in the published package. Every
+  previous release shipped without them; `016` backs the ONNX sparse-vector
+  path.
+
+### Changed
+
+- **PostToolUse hooks capture far less.** The importance floor was set at the
+  score most trivial captures produce, so it filtered almost nothing, and the
+  edit summariser applied a code-constant heuristic to prose -- turning an edit
+  to a Markdown file into `NOTES.md: changed TBU`, an acronym lifted out of the
+  surrounding text. Measured against a real store, roughly 84% of what the hook
+  used to write is now dropped, while error captures are kept in full.
+- The PyPI project page now carries the README, license, keywords, classifiers
+  and links to the repository, documentation and changelog. Previous releases
+  published a one-line summary and nothing else.
+
+### Upgrading
+
+Apply `sql/migrations/047_in_result_contradictions.sql`. It is additive --
+`CREATE OR REPLACE FUNCTION` only, no changes to any table -- and safe to run
+more than once. Without it, supersession still works for corrections that fall
+outside the result set; the migration extends it to corrections returned
+alongside what they supersede, which is the more common case.
+
+Backends that cannot express the lookup (Supabase REST, gateway) degrade to the
+narrower behaviour rather than failing.
+
 ## [0.17.1] - 2026-07-27 -- Streamable HTTP transport, adapter credentials, CLI fixes
 
 ### Added

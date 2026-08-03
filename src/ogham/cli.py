@@ -27,6 +27,54 @@ _UUID_RE = re.compile(
 )
 
 
+# Downloadable model archives, pinned by digest. `sha256` and `size` are the
+# values GitHub itself publishes for the release asset, so anyone can check
+# them independently:
+#
+#   gh api repos/yuniko-software/bge-m3-onnx/releases/tags/1.01 \
+#     --jq '.assets[] | "\(.name) \(.size) \(.digest)"'
+#
+# Both were also verified locally by downloading the archive and hashing it.
+# Without this, `download-model` fetches 1.3 GB over the network and extracts it
+# with no integrity check at all -- a tampered or truncated archive would be
+# unpacked and used to generate embeddings.
+MODEL_REGISTRY: dict[str, dict] = {
+    "bge-m3": {
+        "url": "https://github.com/yuniko-software/bge-m3-onnx/releases/download/1.01/onnx.zip",
+        "sha256": "fef1d045ace47593bd7f149be2bfd72658625ad2786b0d3a79a90d48f7e5ed8e",
+        "size": 1322654161,
+        "expected_files": ["bge_m3_model.onnx", "bge_m3_model.onnx_data"],
+    },
+}
+
+
+def verify_archive(path, expected_sha256: str, expected_size: int) -> list[str]:
+    """Return integrity violations for a downloaded archive; empty means good.
+
+    Size is checked first because it is free and catches the common case -- a
+    truncated download -- without hashing 1.3 GB to find out.
+    """
+    import hashlib
+    from pathlib import Path
+
+    path = Path(path)
+    if not path.exists():
+        return [f"{path} does not exist"]
+
+    actual_size = path.stat().st_size
+    if actual_size != expected_size:
+        return [f"size mismatch: expected {expected_size} bytes, got {actual_size}"]
+
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual != expected_sha256:
+        return [f"sha256 mismatch: expected {expected_sha256}, got {actual}"]
+    return []
+
+
 def _resolve_memory_id(value: str, profile: str) -> str:
     """Return a full memory UUID for `value`, which may be a short ID prefix.
 
@@ -1223,20 +1271,15 @@ def download_model(
 
     from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
 
-    models = {
-        "bge-m3": {
-            "url": "https://github.com/yuniko-software/bge-m3-onnx/releases/download/1.01/onnx.zip",
-            "default_dir": Path.home() / ".cache" / "ogham" / "bge-m3-onnx",
-            "expected_files": ["bge_m3_model.onnx", "bge_m3_model.onnx_data"],
-        },
-    }
+    models = MODEL_REGISTRY
 
     if model not in models:
         console.print(f"[red]Unknown model {model!r}. Available: {', '.join(models)}[/red]")
         raise typer.Exit(1)
 
     info = models[model]
-    dest = Path(path) if path else info["default_dir"]
+    default_dir = Path.home() / ".cache" / "ogham" / "bge-m3-onnx"
+    dest = Path(path) if path else default_dir
 
     if all((dest / f).exists() for f in info["expected_files"]):
         console.print(f"[green]Model {model!r} already exists at {dest}[/green]")
@@ -1266,6 +1309,19 @@ def download_model(
             # S310: the URL is a fixed https GitHub release asset defined above,
             # never user input, so no scheme-injection surface exists.
             urllib.request.urlretrieve(info["url"], zip_path, reporthook=_reporthook)  # noqa: S310
+
+            # Integrity gate: refuse to extract an archive we cannot vouch for.
+            progress.update(task, description="Verifying...")
+            problems = verify_archive(zip_path, info["sha256"], info["size"])
+            if problems:
+                console.print(f"[red]Downloaded archive failed verification: {problems[0]}[/red]")
+                console.print(
+                    "The download was discarded and nothing was extracted. This usually means "
+                    "a truncated or interrupted transfer -- try again. If it repeats, the "
+                    "upstream release asset may have changed and the pinned digest in "
+                    "MODEL_REGISTRY needs review before trusting it."
+                )
+                raise typer.Exit(1)
 
             progress.update(task, description="Extracting...")
             with zipfile.ZipFile(zip_path) as zf:

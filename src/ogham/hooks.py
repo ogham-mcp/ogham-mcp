@@ -59,6 +59,16 @@ _ALWAYS_SKIP_TOOLS = frozenset(
 )
 
 _DEFAULT_RESPONSE_GATED_TOOLS = frozenset({"Edit", "Write"})
+
+# Tags that skip the importance floor entirely.
+#
+# `type:code-change` stays. Gating it was tried on 2026-07-30 and was the
+# WRONG fix: `compute_importance` keys on verb vocabulary, not on how much
+# the text actually says, so it scores "config.py: changed x from 1 to 2"
+# (file, symbol, before and after) at 0.20 -- identical to the contentless
+# "MEMORY.md: changed TBU". Gating on that score discards the informative
+# captures along with the empty ones. The empty ones are a defect in the
+# SUMMARY GENERATOR, fixed at source in `_summarise_edit`. (TBU-202)
 _HIGH_SIGNAL_TAGS = frozenset(
     {
         "type:code-change",
@@ -72,6 +82,22 @@ _HIGH_SIGNAL_TAGS = frozenset(
         "type:preference",
     }
 )
+
+# Floor for hook captures with no high-signal tag.
+#
+# The reader honours an `importance_floor` key in hooks_config.yaml, but that
+# key is NOT in the shipped file yet: hooks_config.yaml is canonical shared
+# data consumed by ogham-cli too, and tests/test_shared_data.py pins its
+# sha256, so adding a key there needs a coordinated shared-data bump across
+# both consumers. Until then this default is the only value in play.
+#
+# Was 0.30, which did nothing: 47% of real captures score EXACTLY 0.30 and
+# cleared it by a margin of zero, while 35% scored 0.20 and were admitted
+# anyway through the tag bypass above. Measured on 800 random stored rows,
+# raising it to 0.35 blocks 82% of what the hook currently writes. Nothing
+# in the corpus scores between 0.30 and 0.40, so the exact value anywhere
+# in that gap is equivalent; 0.35 says "strictly above trivial".
+_DEFAULT_IMPORTANCE_FLOOR = 0.35
 _QUESTION_STARTS = (
     "what ",
     "how ",
@@ -609,11 +635,26 @@ def _extract_edit_memory(tool_input: dict[str, Any], cwd: str) -> _HookMemory | 
     if _diff_change_size(old, new) < 20:
         return None
 
+    # The ALL_CAPS alternative is meant to catch a module constant, so it must
+    # look like a DEFINITION -- `NAME =` or `NAME:` at the start of a line --
+    # not merely an uppercase word somewhere in the text.
+    #
+    # Without that anchor it matched any 3+ char uppercase run, which in prose,
+    # Markdown, YAML and SQL means an acronym or a hex blob. That is where the
+    # single most common row in the store came from: an edit to MEMORY.md
+    # produced "MEMORY.md: changed TBU" -- TBU lifted out of a Linear issue key
+    # -- and thousands of siblings like "changed NEW", "changed DONE",
+    # "changed SUPERSEDES", "changed B92DE9F9F3C4B7C0". A code-identifier
+    # heuristic applied to a non-code file yields a summary with no information
+    # in it, and `type:code-change` then carried it past the importance floor.
+    # (TBU-202)
     name_match = re.search(
-        r"\b(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)|([A-Z_][A-Z0-9_]{2,})",
+        r"\b(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)"
+        r"|^[ \t]*([A-Z_][A-Z0-9_]{2,})[ \t]*(?==|:)",
         new,
+        re.MULTILINE,
     )
-    subject = name_match.group(1) or name_match.group(2) if name_match else ""
+    subject = (name_match.group(1) or name_match.group(2)) if name_match else ""
     if subject:
         content = f"{basename}: changed {subject}"
     else:
@@ -854,6 +895,21 @@ def _extract_user_prompt_memory(prompt: str, cwd: str) -> _HookMemory | None:
     return _HookMemory(prompt, tags=tags)
 
 
+def _get_importance_floor() -> float:
+    """Get the hook-capture importance floor from config or the default."""
+    cfg = _load_config()
+    if cfg and "importance_floor" in cfg:
+        try:
+            return float(cfg["importance_floor"])
+        except (TypeError, ValueError):
+            logger.warning(
+                "hooks: importance_floor %r is not a number; using %s",
+                cfg["importance_floor"],
+                _DEFAULT_IMPORTANCE_FLOOR,
+            )
+    return _DEFAULT_IMPORTANCE_FLOOR
+
+
 def _passes_importance_gate(content: str, tags: list[str]) -> bool:
     """Reuse Ogham's existing no-LLM importance heuristic for hook captures."""
     if any(tag in _HIGH_SIGNAL_TAGS for tag in tags):
@@ -861,7 +917,7 @@ def _passes_importance_gate(content: str, tags: list[str]) -> bool:
     try:
         from ogham.extraction import compute_importance
 
-        return compute_importance(content) >= 0.3
+        return compute_importance(content) >= _get_importance_floor()
     except Exception:
         return True
 

@@ -611,10 +611,77 @@ def search_memories_enriched(
         _lifecycle_submit(open_editing_window, ids)
         _lifecycle_submit(strengthen_edges, ids)
 
+    # Demote memories a NEWER memory contradicts, before any caller reads the
+    # ranking. This lives here rather than in the MCP tool because the CLI,
+    # the hooks and the benchmarks all come through this function and none of
+    # them go through that tool -- wiring it one layer up silently fixed
+    # nothing for most callers. See TBU-207.
+    if results and not extract_facts:
+        results = _demote_superseded(results, profile)
+
     if extract_facts and results:
         results = _read_time_extract(query, results)
 
     return results
+
+
+def _demote_superseded(results: list[dict[str, Any]], profile: str) -> list[dict[str, Any]]:
+    """Push results contradicted by a newer memory to the bottom, and mark them.
+
+    Deliberately fail-open: a supersession lookup that errors must never take
+    down a search. The worst case without it is the ranking we already had.
+    """
+    from ogham.database import (
+        gap_out_of_result_contradictions,
+        get_memory_by_id,
+        in_result_contradictions,
+    )
+    from ogham.supersession import apply_supersession
+
+    try:
+        ids = [str(r["id"]) for r in results]
+
+        # Two lookups, because they cover disjoint halves of the same question.
+        # gap_contradictions_for_ids EXCLUDES pairs with both endpoints inside
+        # the result set -- correct for "what is missing from these results",
+        # wrong for "which of these is stale". Migration 047 supplies the
+        # complement, which is the more common shape: a correction and the
+        # memory it supersedes usually match the same query and arrive
+        # together. See TBU-207.
+        found = gap_out_of_result_contradictions(profile, ids, sample_size=len(ids) * 2)
+        pairs = list(found.get("pairs") or [])
+
+        # Already oriented stale -> newer by the SQL, so no date lookup needed.
+        row_dates = {str(r["id"]): r.get("created_at") for r in results}
+        for edge in in_result_contradictions(profile, ids):
+            pairs.append(
+                {
+                    "in_result_id": edge["stale_id"],
+                    "other_id": edge["newer_id"],
+                    "other_created_at": row_dates.get(edge["newer_id"]),
+                    "strength": edge.get("strength"),
+                }
+            )
+
+        if not pairs:
+            return results
+
+        # The scoped lookup returns endpoints but not their dates, so resolve
+        # only the handful actually involved rather than widening the query.
+        dates: dict[str, Any] = {}
+        for pair in pairs:
+            if pair.get("other_created_at") is not None:
+                continue  # in-result pair, date already in hand
+            other = str(pair.get("other_id") or "")
+            if other and other not in dates:
+                row = get_memory_by_id(other, profile)
+                dates[other] = (row or {}).get("created_at")
+            pair["other_created_at"] = dates.get(other)
+
+        return apply_supersession(results, pairs)
+    except Exception as exc:  # noqa: BLE001 -- never fail a search over this
+        logger.warning("supersession demotion skipped: %s", exc)
+        return results
 
 
 def build_timeline_table(

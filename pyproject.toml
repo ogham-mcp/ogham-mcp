@@ -1,6 +1,6 @@
 [project]
 name = "ogham-mcp"
-version = "0.17.1"
+version = "0.17.2"
 description = "Shared memory MCP server — persistent, searchable, cross-client"
 # Without `readme` the published METADATA carries a zero-byte description, so
 # the PyPI page shows the one-line summary and no route to the repo or docs.

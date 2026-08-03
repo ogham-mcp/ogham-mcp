@@ -769,6 +769,12 @@ class SupabaseBackend:
         count, sample = self._split_count_sample(_rows(result.data))
         return {"count": count, "sample": sample}
 
+    def in_result_contradictions(self, profile: str, memory_ids: list[str]) -> list[dict[str, Any]]:
+        # PostgREST cannot express the both-endpoints-inside filter.
+        # Supersession demotion degrades to out-of-result pairs only
+        # rather than failing the search.
+        return []
+
     def gap_out_of_result_contradictions(
         self, profile: str, memory_ids: list[str], *, sample_size: int = 10
     ) -> dict[str, Any]:

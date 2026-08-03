@@ -503,6 +503,15 @@ def get_related_memories(
     )
 
 
+def in_result_contradictions(profile: str, memory_ids: list[str]) -> list[dict[str, Any]]:
+    """Contradiction pairs with BOTH endpoints inside memory_ids (migration 047).
+
+    Returns [{"stale_id": .., "newer_id": .., "strength": ..}], oriented by
+    created_at. Backends that cannot express the filter return [].
+    """
+    return cast(Any, get_backend()).in_result_contradictions(profile, memory_ids)
+
+
 def gap_out_of_result_contradictions(
     profile: str, memory_ids: list[str], *, sample_size: int = 10
 ) -> dict[str, Any]:
