@@ -1,5 +1,7 @@
 # Ogham MCP
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fogham-mcp.svg)](https://mcptoplist.com/server/glama%2Fogham-mcp)
+
 *Ogham* (pronounced "OH-um") -- persistent, searchable shared memory for AI coding agents. Works across clients.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
