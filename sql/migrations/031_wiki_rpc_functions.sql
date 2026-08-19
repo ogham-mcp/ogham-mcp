@@ -43,6 +43,20 @@ BEGIN;
 SET LOCAL search_path = public, extensions, pg_catalog;
 
 -- 1. Vector search over fresh topic summaries.
+--
+-- The DROP is load-bearing on the fresh-install-then-replay path. Since the
+-- v0.18.0 backport, all three schema files ship migration 034's version of
+-- this function, which returns two extra tldr columns. CREATE OR REPLACE
+-- cannot change a function's return type, so replaying 031 onto such a
+-- database used to fail hard with "cannot change return type of existing
+-- function" -- exactly what Postgres's own HINT tells you to do about it.
+--
+-- Dropping is safe because migrations replay in order: 031 puts the function
+-- back to its own shape, and 034 restores the tldr version a few steps later.
+-- The end state is identical either way, and a database upgrading normally
+-- already has 031's shape when 031 runs, so the DROP is a no-op there.
+DROP FUNCTION IF EXISTS public.wiki_topic_search(text, vector, integer, double precision);
+
 CREATE OR REPLACE FUNCTION wiki_topic_search(
     p_profile text,
     p_query_embedding vector,
