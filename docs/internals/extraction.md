@@ -1,6 +1,6 @@
 # Ogham MCP — Extraction & Enrichment
 
-`extraction.py` provides all NLP enrichment at store time. Everything is pure regex + dictionary lookup — no LLM calls, no NLP libraries beyond `parsedatetime` and `stop-words`.
+`extraction.py` provides all NLP enrichment at store time. Everything is pure regex + dictionary lookup — no LLM calls, no NLP libraries beyond `parsedatetime` and `geotext`.
 
 ## Date Extraction (`extract_dates`)
 
@@ -22,7 +22,16 @@ Extracts named entities and returns prefixed tags (capped at 15):
 | `entity:CamelCase` | Regex: `[A-Z][a-z]+([A-Z][a-zA-Z]*)+` |
 | `file:path/to/file.ext` | Regex: path-like patterns (max 5) |
 | `error:SomeError` | Regex: words ending in `Error` or `Exception` |
-| `person:First Last` | Two consecutive capitalised words not in stopwords (34-language stopword set) |
+
+Every class kept here has an unambiguous syntactic marker: interior
+capitalisation, a path separator, an `Error`/`Exception` suffix.
+
+**Removed in v0.18.0: `person:First Last`.** It matched two consecutive
+capitalised words that were not stopwords, which cannot distinguish a name from
+a product name -- to a shape rule, `Kevin Burns` and `Durable Objects` are
+identical. Existing `person:` tags remain in your database and stay searchable;
+no new ones are written. If you filter searches on a `person:` tag, that filter
+will not match memories stored from v0.18.0 onward.
 
 ## Importance Scoring (`compute_importance`)
 
@@ -45,7 +54,10 @@ Maximum score is capped at 1.0.
 
 The keyword dictionaries cover **16 languages**: English, German, French, Italian, Spanish, Portuguese, Dutch, Polish, Turkish, Russian, Ukrainian, Irish, Arabic, Chinese, Japanese, Korean, Hindi.
 
-The stopword set for person name extraction covers **34 languages** (via the `stop-words` library).
+The `stop-words` library is no longer a dependency. It backed only the removed
+person-name classifier, where it contributed a 33-language stopword union of
+12,705 entries applied to every memory regardless of the language it was
+written in.
 
 Day name recognition for recurrence extraction covers all 16 languages plus adverbial forms (e.g., German "montags" = "on Mondays").
 
