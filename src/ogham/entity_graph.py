@@ -195,7 +195,14 @@ class EntityGraph(Protocol):
         metadata: dict | None = None,
         derived_from: list[dict] | None = None,
     ) -> int:
-        """Insert a new edge, superseding any current (subject, predicate, *, profile).
+        """Insert a new edge, superseding any current (subject, predicate, object, profile).
+
+        The supersession key includes the OBJECT, matching the
+        ``entity_edges_current_uq`` partial unique index -- so one subject may
+        hold several current objects under the same predicate. (This docstring
+        previously claimed a wildcard on the object, which contradicted both
+        backends and the index, and would have made list-valued predicates
+        impossible to round-trip through an OKF bundle.)
 
         Returns the new edge id.
         """
@@ -232,4 +239,32 @@ class EntityGraph(Protocol):
 
     def resolve_alias(self, name_or_id: str | int, profile: str) -> Entity | None:
         """Look up an Entity by canonical name, alias, or id. Returns None if unresolvable."""
+        ...
+
+    # -- enumeration (TBU-130) ---------------------------------------
+    # query_join walks and fetch_edge fetches one; nothing could list a whole
+    # profile. OKF export needs that.
+
+    def list_entities(self, profile: str) -> list[Entity]:
+        """Every entity reachable in ``profile``, ordered by id.
+
+        ``entities`` has no profile column -- it is global, scoped only through
+        ``memory_entities`` and ``entity_edges``. So this is the union of both,
+        not a table scan. The union is load-bearing for OKF export: because it
+        includes every edge subject AND object, every endpoint of every listed
+        edge is guaranteed to be a listed entity, which is what makes dangling
+        links structurally impossible in an exported bundle.
+        """
+        ...
+
+    def list_edges(self, profile: str, *, current_only: bool = True) -> list[EntityEdge]:
+        """Every edge in ``profile``, ordered by id.
+
+        ``current_only`` keeps to ``valid_to IS NULL``, matching
+        ``entity_edges_current_uq``. Pass False to include superseded history.
+        """
+        ...
+
+    def list_aliases(self, profile: str) -> dict[int, list[str]]:
+        """entity_id -> its aliases in ``profile``. Entities with none are absent."""
         ...

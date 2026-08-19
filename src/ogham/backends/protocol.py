@@ -300,6 +300,19 @@ class DatabaseBackend(Protocol):
     Returns the number of new (memory, entity) edges inserted (0 on a
     re-run since memory_entities has a unique constraint)."""
 
+    # ── Entity graph reads (v0.18, OKF export) ────────────────────────
+
+    def get_memory_entities(
+        self,
+        profile: str,
+    ) -> dict[str, list[int]]: ...
+
+    """The read side of ``link_memory_entities``: memory id -> the entity ids
+    it links to in ``profile``. Keys are strings, not UUIDs -- the postgres
+    driver would otherwise hand back ``uuid.UUID`` and no caller keyed on
+    ``memory["id"]`` would match. Memories with no entities are absent rather
+    than mapped to an empty list."""
+
     # ── Hidden-link suggestions (v0.13.1) ─────────────────────────────
 
     def suggest_unlinked_by_shared_entities(
@@ -334,3 +347,23 @@ class DatabaseBackend(Protocol):
         limit: int = 50,
         operation: str | None = None,
     ) -> list[dict[str, Any]]: ...
+
+    # ── Contradictions / supersession ────────────────────────────────
+    #
+    # Both feed supersession demotion in the retrieval path. Declared
+    # here so a new backend cannot look complete to a type checker while
+    # missing methods that path calls at runtime (TBU-217).
+    #
+    # Divergence is intentional and worth recording: PostgresBackend
+    # implements both; SupabaseBackend returns [] for the in-result case
+    # because PostgREST cannot express the both-endpoints-inside filter;
+    # GatewayBackend returns [] for both, not offered in v1. Each
+    # degrades rather than failing the search.
+
+    def in_result_contradictions(
+        self, profile: str, memory_ids: list[str]
+    ) -> list[dict[str, Any]]: ...
+
+    def gap_out_of_result_contradictions(
+        self, profile: str, memory_ids: list[str], *, sample_size: int = 10
+    ) -> dict[str, Any]: ...

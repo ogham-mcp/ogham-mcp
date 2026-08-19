@@ -32,6 +32,12 @@ def make_filename(memory: dict) -> str:
     Locked in the v0.15 design plan; do not change without a migration.
     """
     slug = slugify(memory.get("content", ""))
-    memory_id = memory["id"]
+    # str() because the two backends disagree on this column's Python type:
+    # psycopg maps a uuid column to uuid.UUID, PostgREST returns a string. The
+    # raw value went straight into .replace() from v0.15.0, so OKF export
+    # crashed on the first memory on every Postgres install while working fine
+    # on Supabase. Every fixture in the suite used a string id, so nothing
+    # caught it until an export was run against a real database.
+    memory_id = str(memory["id"])
     uuid8 = memory_id.replace("-", "")[:8]
     return f"{slug}-{uuid8}.md"

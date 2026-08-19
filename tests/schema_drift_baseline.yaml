@@ -1,0 +1,226 @@
+# Schema drift baseline -- objects the migrations create or change that
+# sql/schema_postgres.sql deliberately does not.
+#
+# `ogham init` applies ONE schema file and no migrations, so anything here is a
+# feature a FRESH install does not get, or gets in a different form. This file
+# is a debt register that tests/test_schema_migration_drift.py measures against:
+# the test fails on NEW drift, not on what is listed here.
+#
+# Keys are pg_dump object headers -- "TYPE: name".
+#
+#   missing -- the migrations create it, the schema file does not
+#   changed -- both create it, with different definitions
+#
+# 2026-08-05 (TBU-228): the gate was rebuilt to compare pg_dump DEFINITIONS
+# instead of catalog NAMES, and the old name-based baseline was replaced
+# wholesale. Comparing names had reported a clean run while eight function
+# BODIES differed. Fixed in the same pass and no longer listed here: the eight
+# missing migration-037 REVOKEs, the four unpinned search_path trigger/RPC
+# functions, and the dropped in_result_contradictions comment.
+#
+# Measured against sql/schema_postgres.sql on pgvector/pgvector:pg17,
+# embedding_dim=512. The test creates anon/authenticated/service_role for the
+# duration of the run so the migrations' role-guarded blocks fire; without that
+# the measurement silently depends on what happens to exist in the cluster.
+
+issue: TBU-228
+
+known_drift:
+
+  # ── sql/schema_postgres.sql ──────────────────────────────────────────
+  # Vanilla Postgres. Everything below was measured against this file and
+  # only this file; the two Supabase variants have their own sections.
+  postgres:
+    # ── Migration 019: managed-gateway multi-tenancy ────────────────────────
+    # That gateway is not running. Adding tenant columns, a tenant function and
+    # an RLS policy to every self-hosted install is a product decision, not a
+    # schema-parity chore. Needs a ruling. `TABLE: memories` and
+    # `TABLE: memory_relationships` are listed under `changed` because 019 adds
+    # tenant_id to both -- and 016 adds memories.sparse_embedding, see below.
+    missing:
+      - "FUNCTION: current_tenant_id()"
+      - "INDEX: idx_memories_tenant_id"
+      - "INDEX: idx_memories_tenant_profile_created"
+      - "INDEX: idx_relationships_tenant_id"
+      - "POLICY: memories Tenant scoped access"
+      - "POLICY: memory_relationships Tenant scoped access"
+
+      # ── Migration 012 ───────────────────────────────────────────────────
+      # A one-off backfill helper, called by nothing in src/. Backfills belong
+      # in the migration that needs them, not in a fresh install where there is
+      # nothing to backfill.
+      - "FUNCTION: backfill_recurrence()"
+
+      # ── Migrations 013/021/023: a dead auto_link_memory overload ─────────
+      # Both backends call the signature the schema already defines -- postgres
+      # positionally as (uuid, vector, float, int, text), supabase by name with
+      # `max_links` -- so this variant has no caller. Backporting it would put
+      # two same-named functions in every fresh database for nobody.
+      - "FUNCTION: auto_link_memory(uuid, public.vector, text, double precision, integer)"
+
+      # ── RLS and Data API grants (migrations 032/036/038/041/043) ─────────
+      # These are Supabase-only by design: this file's own entity-edge section
+      # says "No RLS / grants here -- vanilla Postgres has no auth.uid() and no
+      # anon role", and the RLS lives in schema.sql and
+      # schema_selfhost_supabase.sql instead. They appear here only because the
+      # test creates the three Supabase roles to make its measurement
+      # deterministic, which makes the migrations' guarded blocks fire against
+      # the vanilla schema -- a combination no real install produces.
+      #
+      # Worth a ruling nonetheless: migrations 036/041 enable RLS on the entity
+      # tables with no accompanying policy for a non-Supabase role, so a vanilla
+      # install that DOES have these roles gets deny-all on those tables.
+      - "ACL: SEQUENCE entities_id_seq"
+      - "ACL: SEQUENCE entity_aliases_id_seq"
+      - "ACL: SEQUENCE entity_edges_id_seq"
+      - "ACL: SEQUENCE memory_relationships_id_seq"
+      - "ACL: TABLE audit_log"
+      - "ACL: TABLE entities"
+      - "ACL: TABLE entity_aliases"
+      - "ACL: TABLE entity_edge_predicates"
+      - "ACL: TABLE entity_edges"
+      - "ACL: TABLE memories"
+      - "ACL: TABLE memory_entities"
+      - "ACL: TABLE memory_lifecycle"
+      - "ACL: TABLE memory_relationships"
+      - "ACL: TABLE profile_settings"
+      - "ACL: TABLE topic_summaries"
+      - "ACL: TABLE topic_summary_sources"
+      - "POLICY: audit_log Deny anon access"
+      - "POLICY: entities Deny anon access"
+      - "POLICY: entity_aliases Deny anon access"
+      - "POLICY: entity_edge_predicates Deny anon access"
+      - "POLICY: entity_edges Deny anon access"
+      - "POLICY: memory_entities Deny anon access"
+      - "ROW SECURITY: audit_log"
+      - "ROW SECURITY: entities"
+      - "ROW SECURITY: entity_aliases"
+      - "ROW SECURITY: entity_edge_predicates"
+      - "ROW SECURITY: entity_edges"
+      - "ROW SECURITY: memory_entities"
+
+    changed:
+      # ── The schema is AHEAD here, not behind (TBU-229) ──────────────────
+      # Migration 023 removed the ::halfvec(N) casts and the halfvec-typed HNSW
+      # index in v0.5.1, for one stated reason: they "baked a specific
+      # EMBEDDING_DIM into the schema". TBU-149 later parameterised the dim
+      # across all three schema files, so the schema's `halfvec(:embedding_dim)`
+      # form no longer has the problem 023 was solving -- and 023's own header
+      # calls the halfvec index "2x faster and 2x smaller at scale".
+      #
+      # 023 also dropped `* m.importance` from the hybrid_search relevance
+      # product, which schema.sql and schema_postgres.sql still apply and
+      # schema_selfhost_supabase.sql never had (it uses a different, ACT-R
+      # formula). So the three shipping schemas and the migrated state express
+      # THREE different rankings.
+      #
+      # Not resolved here: closing it either way changes retrieval ranking on
+      # every existing install, and LongMemEval R@10 is a number this project
+      # holds itself to. Needs a decision plus a benchmark run, and then a
+      # migration -- not a schema edit. See TBU-229.
+      - "FUNCTION: batch_check_duplicates(public.vector[], double precision, text)"
+      - "FUNCTION: hybrid_search_memories(text, public.vector, integer, text, text[], text, double precision, double precision, integer, text[], text[], double precision)"
+      - "FUNCTION: match_memories(public.vector, double precision, integer, text[], text, text)"
+      - "INDEX: memories_embedding_idx"
+
+      # ── Columns added by migrations 016 and 019 ─────────────────────────
+      # memories.tenant_id and memory_relationships.tenant_id are migration 019,
+      # see the tenant note above. memories.sparse_embedding is migration 016,
+      # BGE-M3 neural sparse vectors: referenced nowhere in src/, it exists for
+      # benchmarking, and `sparsevec` requires pgvector >= 0.7 -- putting it in
+      # the install gate would break self-hosters on older pgvector to gain a
+      # column nothing reads. Add it the day something reads it.
+      - "TABLE: memories"
+      - "TABLE: memory_relationships"
+
+      # ── RLS enablement, see the note under `missing` ─────────────────────
+      # ENABLE ROW LEVEL SECURITY shows up inside the table's own DDL.
+      - "TABLE: entities"
+      - "TABLE: entity_aliases"
+      - "TABLE: entity_edge_predicates"
+      - "TABLE: entity_edges"
+      - "TABLE: memory_entities"
+
+  # ── sql/schema.sql (Supabase managed) ────────────────────────────────
+  supabase_cloud:
+    # Shared with the vanilla file, same reasons -- see the postgres section:
+    #   * tenant isolation (migration 019): current_tenant_id, the three tenant
+    #     indexes, the two "Tenant scoped access" policies, and the tenant_id
+    #     column that makes TABLE: memories / memory_relationships differ.
+    #   * backfill_recurrence (012): a one-off helper with no caller in src/.
+    #   * the dead auto_link_memory overload (013/021/023).
+    #   * the TBU-229 cluster: batch_check_duplicates, hybrid_search_memories,
+    #     match_memories and memories_embedding_idx all differ because migration
+    #     023 dropped the halfvec casts and `* m.importance` while the schema
+    #     files kept them. Ranking change, gated on a decision, not a backport.
+    #
+    # CLOSED 2026-08-19 (TBU-247), no longer listed below:
+    #   * ROW SECURITY / POLICY on audit_log. The migrations enabled RLS and
+    #     added a deny-anon policy; neither Supabase schema did, so a FRESH
+    #     install of the two variants -- the two targets where the anon role
+    #     actually exists -- left the who-did-what table readable while a
+    #     MIGRATED install did not. Same shape as the migration-037 REVOKE gap
+    #     (TBU-228): a hardening step that never reached the fresh-install path,
+    #     leaving the newest installs the least protected.
+    #   * ACL on topic_summaries / topic_summary_sources. The main GRANT block
+    #     sits above the statements that create those two tables, so it could
+    #     not have covered them; the wiki tables were the two of nine that
+    #     migration 038 granted and a fresh install did not.
+    # Removing these four entries is the acceptance test for TBU-247, so they
+    # must not come back without a ruling.
+    missing:
+      - "FUNCTION: auto_link_memory(uuid, extensions.vector, text, double precision, integer)"
+      - "FUNCTION: backfill_recurrence()"
+      - "INDEX: idx_memories_tenant_id"
+      - "INDEX: idx_memories_tenant_profile_created"
+      - "INDEX: idx_relationships_tenant_id"
+    changed:
+      - "FUNCTION: batch_check_duplicates(extensions.vector[], double precision, text)"
+      - "FUNCTION: hybrid_search_memories(text, extensions.vector, integer, text, text[], text, double precision, double precision, integer, text[], text[], double precision)"
+      - "FUNCTION: match_memories(extensions.vector, double precision, integer, text[], text, text)"
+      - "INDEX: memories_embedding_idx"
+      - "TABLE: memories"
+
+  # ── sql/schema_selfhost_supabase.sql (Supabase in Docker) ────────────
+  supabase_selfhost:
+    # Shared with the vanilla file, same reasons -- see the postgres section:
+    #   * tenant isolation (migration 019): current_tenant_id, the three tenant
+    #     indexes, the two "Tenant scoped access" policies, and the tenant_id
+    #     column that makes TABLE: memories / memory_relationships differ.
+    #   * backfill_recurrence (012): a one-off helper with no caller in src/.
+    #   * the dead auto_link_memory overload (013/021/023).
+    #   * the TBU-229 cluster: batch_check_duplicates, hybrid_search_memories,
+    #     match_memories and memories_embedding_idx all differ because migration
+    #     023 dropped the halfvec casts and `* m.importance` while the schema
+    #     files kept them. Ranking change, gated on a decision, not a backport.
+    #
+    # CLOSED 2026-08-19 (TBU-247), no longer listed below:
+    #   * ROW SECURITY / POLICY on audit_log. The migrations enabled RLS and
+    #     added a deny-anon policy; neither Supabase schema did, so a FRESH
+    #     install of the two variants -- the two targets where the anon role
+    #     actually exists -- left the who-did-what table readable while a
+    #     MIGRATED install did not. Same shape as the migration-037 REVOKE gap
+    #     (TBU-228): a hardening step that never reached the fresh-install path,
+    #     leaving the newest installs the least protected.
+    #   * ACL on topic_summaries / topic_summary_sources. The main GRANT block
+    #     sits above the statements that create those two tables, so it could
+    #     not have covered them; the wiki tables were the two of nine that
+    #     migration 038 granted and a fresh install did not.
+    # Removing these four entries is the acceptance test for TBU-247, so they
+    # must not come back without a ruling.
+    missing:
+      - "FUNCTION: auto_link_memory(uuid, extensions.vector, text, double precision, integer)"
+      - "FUNCTION: backfill_recurrence()"
+      - "FUNCTION: current_tenant_id()"
+      - "INDEX: idx_memories_tenant_id"
+      - "INDEX: idx_memories_tenant_profile_created"
+      - "INDEX: idx_relationships_tenant_id"
+      - "POLICY: memories Tenant scoped access"
+      - "POLICY: memory_relationships Tenant scoped access"
+    changed:
+      - "FUNCTION: batch_check_duplicates(extensions.vector[], double precision, text)"
+      - "FUNCTION: hybrid_search_memories(text, extensions.vector, integer, text, text[], text, double precision, double precision, integer, text[], text[], double precision)"
+      - "FUNCTION: match_memories(extensions.vector, double precision, integer, text[], text, text)"
+      - "INDEX: memories_embedding_idx"
+      - "TABLE: memories"
+      - "TABLE: memory_relationships"

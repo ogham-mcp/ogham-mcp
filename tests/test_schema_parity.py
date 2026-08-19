@@ -481,3 +481,44 @@ def test_derived_from_column_and_index_present():
         assert "derived_from jsonb" in sql, f"derived_from column missing from {name}"
         assert "entity_edges_derived_from_gin" in sql, f"GIN index missing from {name}"
         assert "USING gin (derived_from)" in sql, f"GIN index def missing from {name}"
+
+
+# Migrations whose functions must also exist in every fresh-install schema.
+# A fresh install applies a schema file and NOTHING else -- init_wizard.py has
+# no migration pass -- so a function that lives only in a migration is absent
+# forever on new installs.
+_BACKPORTED_FUNCTION_MIGRATIONS = ["036_entities_backfill.sql"]
+
+_CREATE_FUNCTION_RE = re.compile(
+    r"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?([a-z_][a-z0-9_]*)\s*\(",
+    re.IGNORECASE,
+)
+
+
+def test_migration_functions_are_backported_into_every_schema():
+    """Every function a backported migration defines must exist in all three
+    fresh-install schemas.
+
+    This caught a real, shipped gap. Migration 036 defines three functions;
+    `refresh_entity_temporal_span` and `spread_entity_activation_memories` were
+    copied into all three schema files, and `link_memory_entities` was not. On a
+    fresh install the entity TABLES existed but the function that populates them
+    did not, so `service.store_memory` raised UndefinedFunction on every write,
+    the exception was swallowed at debug level, `memory_entities` never
+    populated -- and the OKF export's MENTIONS bridge was silently always empty.
+
+    Found by building a scratch DB from schema_postgres.sql and running an
+    export, not by any test. Hence this one.
+    """
+    for migration_name in _BACKPORTED_FUNCTION_MIGRATIONS:
+        migration = REPO_ROOT / "sql" / "migrations" / migration_name
+        expected = set(_CREATE_FUNCTION_RE.findall(migration.read_text()))
+        assert expected, f"{migration_name}: no CREATE FUNCTION found -- regex drift?"
+
+        for schema in SCHEMA_FILES:
+            present = set(_CREATE_FUNCTION_RE.findall(schema.read_text()))
+            missing = expected - present
+            assert not missing, (
+                f"{schema.name} is missing {sorted(missing)} from {migration_name}. "
+                "A fresh install applies the schema file only, so these never arrive."
+            )

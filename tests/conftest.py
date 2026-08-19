@@ -397,9 +397,62 @@ def pg_fresh_db():
             "DROP FUNCTION IF EXISTS refresh_entity_temporal_span(bigint) CASCADE",
             fetch="none",
         )
+        # entity_edges/entity_aliases go too, and not merely for tidiness:
+        # DROP TABLE entities CASCADE drops the FK CONSTRAINT on entity_edges
+        # but leaves its ROWS, so re-applying 041 (CREATE TABLE IF NOT EXISTS)
+        # no-ops over a table full of orphans pointing at deleted entities.
+        # That state is unreachable in a healthy database -- ON DELETE CASCADE
+        # prevents it -- and it made list_edges return edges whose subject had
+        # no entity row.
+        backend._execute("DROP TABLE IF EXISTS entity_aliases CASCADE", fetch="none")
+        backend._execute("DROP TABLE IF EXISTS entity_edges CASCADE", fetch="none")
         backend._execute("DROP TABLE IF EXISTS memory_entities CASCADE", fetch="none")
         backend._execute("DROP TABLE IF EXISTS entities CASCADE", fetch="none")
+
+    def _restore():
+        """Put back everything _cleanup() removed (TBU-222).
+
+        _cleanup() runs on setup too -- the migration tests need these artifacts
+        ABSENT so they can watch a migration create them -- so restoration must
+        happen only on teardown.
+
+        Without this, the fixture left the shared scratch database permanently
+        stripped: `_ensure_standard_postgres_test_schema` is session-scoped and
+        cannot re-run mid-suite, and pytest collects alphabetically, so
+        test_migration_036.py ran before every entity-dependent test and left
+        19 of them failing with `relation "entities" does not exist`. The damage
+        also persisted across runs, so a test that passed in isolation failed on
+        the next invocation.
+
+        Applied in migration order; all are guarded (IF NOT EXISTS /
+        WHERE NOT EXISTS) so re-application is a no-op when nothing was dropped.
+
+        025/026 are deliberately NOT restored, even though _cleanup() removes
+        them. Every one of the 19 failures this fixture caused was
+        `relation "entities" does not exist` -- none were lifecycle -- so
+        restoring them buys nothing, and it costs something real: re-adding
+        `memories.stage` and `stage_entered_at` after each drop permanently
+        consumes two attnums, because dropped columns count against Postgres's
+        1600-column limit forever and VACUUM FULL does NOT reclaim them (only
+        recreating the table does). The scratch database used for this work hit
+        1580 dropped columns on `memories` and started failing with
+        TooManyColumns -- which then aborted this very restore loop before it
+        reached 036, silently bringing the original bug back. Restoring only the
+        entity layer halves that burn and still fixes what was broken.
+        """
+        repo_root = Path(__file__).parent.parent
+        for name in (
+            "036_entities_backfill",
+            "041_entity_edges",
+            "042_entity_edge_predicates",
+            "043_entity_aliases",
+            "045_predicate_uris",
+            "046_edge_provenance",
+        ):
+            path = repo_root / "sql" / "migrations" / f"{name}.sql"
+            backend._execute(path.read_text(), fetch="none")
 
     _cleanup()
     yield _Harness(backend)
     _cleanup()
+    _restore()

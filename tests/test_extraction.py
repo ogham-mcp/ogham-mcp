@@ -93,21 +93,6 @@ def test_temporal_intent_false():
     assert has_temporal_intent("Tell me about the project") is False
 
 
-def test_extract_person_name():
-    from ogham.extraction import extract_entities
-
-    entities = extract_entities("Caroline Smith went to the store")
-    assert "person:Caroline Smith" in entities
-
-
-def test_extract_person_not_stopwords():
-    from ogham.extraction import extract_entities
-
-    entities = extract_entities("The Quick brown fox")
-    person_tags = [e for e in entities if e.startswith("person:")]
-    assert len(person_tags) == 0
-
-
 def test_extract_camelcase():
     from ogham.extraction import extract_entities
 
@@ -408,3 +393,46 @@ def test_resolve_temporal_graceful_without_llm():
     result = resolve_temporal_query("the second Thursday of the quarter before last")
     # May return None (no LLM) or a result (if LLM is available) -- either is fine
     assert result is None or isinstance(result, tuple)
+
+
+def test_person_entities_are_not_extracted():
+    """Ogham does not extract person entities. Deleted 2026-08-18.
+
+    Every entity class Ogham keeps has an unambiguous syntactic marker --
+    CamelCase, a path separator, an Error suffix. ``person:`` had none: it
+    inferred personhood from capitalisation, which does not distinguish
+    "Kevin Burns" from "Durable Objects", and measured ~0% precision on
+    technical prose (2,086 distinct tags over this repo's own docs, none of
+    them people).
+
+    Three gates were tried and none closed it -- a shape rule, an all-caps
+    rejection, and a phrase denylist. The replacement that would have worked
+    cost 70-120x the latency and 1,090x the package size.
+
+    Independently: ogham-cli measured `person:` as the ONLY prefix on which
+    the two implementations disagreed. Dropping it took extraction parity
+    from 85.6% to 97/97.
+
+    If this test fails, the classifier is back. Read the above first.
+    """
+    from ogham.extraction import extract_entities
+
+    for content in (
+        "We met Kevin Burns at the conference",
+        "Reported by Jean McCarthy last week",
+        "Caroline Smith went to the store",
+        "Grant EXECUTE to SECURITY DEFINER functions",
+        "We store state in Durable Objects for the coordinator",
+        "Kevin Burns, Owen Fletcher and Luis Ramirez agreed.",
+    ):
+        assert not [e for e in extract_entities(content) if e.startswith("person:")], content
+
+
+def test_the_classes_with_syntactic_markers_still_work():
+    """The kept set, and why it is the kept set -- each has a real marker."""
+    from ogham.extraction import extract_entities
+
+    got = extract_entities("Edit src/ogham/config.py -- got a KeyError from PostgreSQL")
+    assert "file:src/ogham/config.py" in got
+    assert "error:KeyError" in got
+    assert "entity:PostgreSQL" in got

@@ -234,6 +234,12 @@ def store_memory_enriched(
 
     # Auto-extract entities as tags
     entity_tags = extract_entities(content)
+    # Graph writes get the person:-free list (TBU-242) so junk never reaches the
+    # entities table, where spread_entity_activation_memories would traverse it.
+    # `tags` deliberately keeps the full list: after the query side is filtered
+    # no person: tag can be matched against them, and display and the JSON-LD
+    # export still want them. Severing ranking is the goal, not deleting data.
+    linkable_entity_tags = entity_tags
     if entity_tags:
         if tags is None:
             tags = []
@@ -244,8 +250,14 @@ def store_memory_enriched(
     # Auto-extract recurrence (multilingual, 16 languages)
     recurrence_days = extract_recurrence(content)
 
-    # Compute importance score from content signals
-    importance = compute_importance(content, tags)
+    # Compute importance score from content signals.
+    #
+    # Scored on the person:-free tags (TBU-242). compute_importance adds +0.1
+    # once a memory carries 3 or more tags, and importance multiplies directly
+    # into relevance for EVERY future query -- so junk person: tags that merely
+    # push the count over the threshold write a permanent, query-independent
+    # ranking boost. Filtering the query side does nothing for that.
+    importance = compute_importance(content, tags or [])
     # Preserve original importance for Hebbian decay recovery
     if metadata is None:
         metadata = {}
@@ -332,20 +344,28 @@ def store_memory_enriched(
         surprise=surprise,
     )
 
-    # v0.14: Populate entities + memory_entities for the new row. Failure
-    # here is non-fatal -- the memory itself is already stored, and the
-    # backend gracefully degrades on deployments that haven't applied
-    # migration 036 yet (link_memory_entities returns 0 when entities
-    # tables are absent). This keeps spreading-activation, density, and
-    # suggest_connections fed without blocking ingest on graph plumbing.
-    if entity_tags:
+    # v0.14: Populate entities + memory_entities for the new row. Failure here
+    # is non-fatal -- the memory itself is already stored -- and keeps
+    # spreading-activation, density and suggest_connections fed without
+    # blocking ingest on graph plumbing.
+    #
+    # This comment used to claim the backend "gracefully degrades ...
+    # link_memory_entities returns 0 when entities tables are absent". It does
+    # not return 0; it raises UndefinedFunction, which is why the except exists.
+    # The distinction mattered: the function was missing from all three
+    # fresh-install schema files (TBU-221), so on every new install this raised
+    # on every write, was swallowed at debug level, and memory_entities stayed
+    # permanently empty -- taking the OKF export's MENTIONS bridge with it. The
+    # schemas are fixed and a parity test now holds them; the swallow stays,
+    # because a partially-migrated install is still a real state.
+    if linkable_entity_tags:
         try:
             from ogham.database import get_backend
 
             get_backend().link_memory_entities(
                 memory_id=str(result["id"]),
                 profile=profile,
-                entity_tags=entity_tags,
+                entity_tags=linkable_entity_tags,
             )
         except Exception as exc:
             logger.debug("link_memory_entities skipped: %s", exc)
@@ -897,6 +917,13 @@ def _search_memories_raw(
     # Entity overlap boost: extract entity tags from the query and pass to SQL.
     # Memories sharing entities with the query get up to 1.3x relevance boost.
     # See docs/plans/2026-04-06-entity-graph-spreading-activation.md Stage 1.
+    #
+    # person: tags are dropped here (TBU-242). This one filter closes BOTH
+    # query-conditioned ranking paths, because both are fed only from this
+    # variable: the entity-overlap term inside hybrid_search_memories, and the
+    # seeding of spread_entity_activation_memories via _merge_activation_results
+    # -- the latter is not merely a write-path artefact, it is queried live on
+    # every ordering / cross-reference / broad-summary search.
     query_entities = extract_entities(query)
     query_entity_tags = query_entities if query_entities else None
 
@@ -1830,104 +1857,8 @@ def _strided_retrieval(results: list[dict], limit: int) -> list[dict]:
     return diversified[:limit]
 
 
-def _graph_rerank(
-    results: list[dict],
-    query_entity_tags: list[str] | None,
-    profile: str,
-    boost_weight: float = 0.3,
-) -> list[dict]:
-    """Re-rank results using structured entity graph connectivity.
-
-    Uses the memory_entities table to boost results that share entities
-    with the query and with each other. Unlike _entity_thread (which does
-    a second text search), this only re-ranks existing results -- no new
-    candidates, no dilution.
-
-    Boost = (query_overlap + cross_connectivity) * boost_weight
-    - query_overlap: fraction of query entities found in this result's entities
-    - cross_connectivity: fraction of result's entities shared by 2+ other results
-    """
-    if not results or len(results) <= 1:
-        return results
-
-    from ogham.backends.postgres import PostgresBackend
-    from ogham.database import get_backend
-
-    backend = get_backend()
-    if not isinstance(backend, PostgresBackend):
-        return results
-
-    # Batch lookup: get entity IDs for all result memory IDs
-    mem_ids = [r.get("id") for r in results if r.get("id")]
-    if not mem_ids:
-        return results
-
-    try:
-        pool = backend._get_pool()
-        with pool.connection() as conn:
-            with conn.cursor() as cur:
-                # Get entity sets for each memory in the result set
-                cur.execute(
-                    """
-                    SELECT me.memory_id, array_agg(e.canonical_name || ':' || e.entity_type)
-                    FROM memory_entities me
-                    JOIN entities e ON e.id = me.entity_id
-                    WHERE me.memory_id = ANY(%s) AND me.profile = %s
-                    GROUP BY me.memory_id
-                    """,
-                    (mem_ids, profile),
-                )
-                mem_entities: dict[str, set[str]] = {}
-                for mid, ents in cur.fetchall():
-                    mem_entities[str(mid)] = set(ents)
-    except Exception:
-        return results
-
-    if not mem_entities:
-        return results
-
-    # Build entity frequency map across all results (for connectivity scoring)
-    entity_freq: dict[str, int] = {}
-    for ents in mem_entities.values():
-        for e in ents:
-            entity_freq[e] = entity_freq.get(e, 0) + 1
-
-    # Normalise query entity tags for matching (e.g. "person:John" -> "John:person")
-    query_ent_set: set[str] = set()
-    if query_entity_tags:
-        for tag in query_entity_tags:
-            parts = tag.split(":", 1)
-            if len(parts) == 2:
-                query_ent_set.add(f"{parts[1]}:{parts[0]}")
-
-    # Score each result
-    for r in results:
-        rid = str(r.get("id", ""))
-        ents = mem_entities.get(rid, set())
-        if not ents:
-            continue
-
-        # 1. Query overlap: what fraction of query entities does this memory have?
-        query_overlap = 0.0
-        if query_ent_set:
-            overlap = len(ents & query_ent_set)
-            query_overlap = overlap / len(query_ent_set)
-
-        # 2. Cross-connectivity: what fraction of this memory's entities appear
-        #    in 2+ other results? (shared entities = topical cluster)
-        shared = sum(1 for e in ents if entity_freq.get(e, 0) >= 2)
-        connectivity = shared / len(ents) if ents else 0.0
-
-        # Combined boost (capped at 1.0 to prevent over-boosting)
-        boost = min(1.0, query_overlap + connectivity * 0.5) * boost_weight
-
-        if "relevance" in r and r["relevance"] is not None:
-            r["relevance"] = r["relevance"] * (1.0 + boost)
-
-    results.sort(key=lambda r: r.get("relevance", 0), reverse=True)
-    return results
-
-
+# Per-profile cache for the density measurement below; 5-minute TTL so a
+# hot profile does not re-query the entity graph on every search.
 _DENSITY_CACHE: dict[str, tuple[float, float]] = {}
 _DENSITY_TTL_SECONDS = 300.0
 

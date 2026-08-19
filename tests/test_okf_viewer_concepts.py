@@ -86,3 +86,47 @@ def test_parse_bundle_skips_reserved_and_extracts_links(tmp_path: Path) -> None:
     assert by_id["memories/beta-def45678"].title == "beta-def45678"
     # Verify ViewerConcept type
     assert isinstance(alpha, ViewerConcept)
+
+
+def test_entity_concepts_are_not_rendered_as_viewer_nodes(tmp_path):
+    """The viewer models edges as markdown links in the BODY (extract_links).
+
+    Entity concept bodies are empty by design -- their triples live in
+    frontmatter as wiki links -- so ingesting them would render one grey,
+    minimum-size, permanently disconnected node per entity and silently break
+    the "one node per memory" reading of the graph. Same rglob shape that
+    import_okf_bundle was patched for in daa1087; the viewer shares the pattern
+    and was not covered.
+
+    Skipping is the v0.18 answer because the graph is export-only. Teaching the
+    viewer the frontmatter wiki-link grammar is a feature, not a fix.
+    """
+    bundle = tmp_path / "bundle"
+    _write(
+        bundle / "memories" / "alpha-abc12345.md",
+        """---
+        type: Decision
+        MENTIONS:
+          - '[[entities/ogham-e42]]'
+        ---
+
+        Body.
+        """,
+    )
+    _write(
+        bundle / "entities" / "ogham-e42.md",
+        """---
+        type: Entity
+        entity_id: 42
+        canonical_name: Ogham
+        OWNS:
+          - '[[entities/graph-e88]]'
+        ---
+        """,
+    )
+    _write(bundle / "entities" / "nested" / "deep-e99.md", "---\ntype: Entity\n---\n")
+
+    concepts = parse_bundle(bundle)
+
+    assert {c.id for c in concepts} == {"memories/alpha-abc12345"}
+    assert not [c for c in concepts if c.type == "Entity"]

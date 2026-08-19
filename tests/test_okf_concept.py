@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from ogham.okf.concept import (
     derive_okf_type,
     frontmatter_to_memory,
@@ -228,3 +230,90 @@ def test_frontmatter_to_memory_preserves_spec_recommended_fields_in_metadata():
     assert fm_out["title"] == "Customer Orders"
     assert fm_out["description"] == "One row per completed order."
     assert fm_out["resource"] == "https://console.cloud.google.com/..."
+
+
+# ── D7: memory_entities -> MENTIONS ───────────────────────────────────────
+
+
+def test_memory_to_frontmatter_emits_mentions_for_linked_entities():
+    """memory_entities becomes MENTIONS -- one of the five verified Schema.org
+    alignments, so schema:mentions lands on the memory concepts themselves."""
+    memory = {
+        "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "content": "Ogham ships supersession ranking",
+        "tags": ["type:decision"],
+        "created_at": "2026-08-03T09:00:00+00:00",
+    }
+    fm = memory_to_frontmatter(
+        memory,
+        entity_paths=["entities/ogham-e42", "entities/supabase-e7"],
+    )
+    assert fm["MENTIONS"] == ["[[entities/ogham-e42]]", "[[entities/supabase-e7]]"]
+
+
+def test_memory_to_frontmatter_omits_mentions_when_there_are_no_entities():
+    memory = {"id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "content": "x", "tags": []}
+    assert "MENTIONS" not in memory_to_frontmatter(memory, entity_paths=[])
+    assert "MENTIONS" not in memory_to_frontmatter(memory)
+
+
+def test_metadata_cannot_overwrite_the_mentions_edges():
+    """Same guard the spec/extension fields already have: metadata is producer
+    data and must not clobber a triple."""
+    memory = {
+        "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "content": "x",
+        "tags": [],
+        "metadata": {"MENTIONS": "not-a-link"},
+    }
+    fm = memory_to_frontmatter(memory, entity_paths=["entities/ogham-e42"])
+    assert fm["MENTIONS"] == ["[[entities/ogham-e42]]"]
+
+
+def test_entity_paths_is_keyword_only():
+    """The default keeps every existing caller working; keyword-only keeps a
+    future positional argument from silently landing on it."""
+    memory = {"id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "content": "x", "tags": []}
+    with pytest.raises(TypeError):
+        memory_to_frontmatter(memory, ["entities/ogham-e42"])  # type: ignore[misc]
+
+
+def test_stale_mentions_in_metadata_never_reaches_the_bundle():
+    """MENTIONS is derived from memory_entities, never carried as producer data.
+
+    This is a real round-trip path, not a hypothetical. frontmatter_to_memory
+    files every unrecognised frontmatter key into metadata, so a memory imported
+    from a bundle that had MENTIONS carries it in metadata forever. On the next
+    export, if that memory has no entity links, the metadata flatten would emit
+    the OLD bundle's MENTIONS -- naming entity concepts the new bundle never
+    wrote. That is precisely the dangling link the format flags everywhere else.
+
+    The `k not in fm` guard cannot catch it: with no entities, MENTIONS is not
+    in fm at all, so metadata wins uncontested.
+    """
+    memory = {
+        "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "content": "x",
+        "tags": [],
+        "metadata": {"MENTIONS": "[[entities/ghost-e999]]"},
+    }
+    assert "MENTIONS" not in memory_to_frontmatter(memory, entity_paths=[])
+    assert "MENTIONS" not in memory_to_frontmatter(memory)
+    # And a real derivation still wins over the stale value.
+    fm = memory_to_frontmatter(memory, entity_paths=["entities/ogham-e42"])
+    assert fm["MENTIONS"] == ["[[entities/ogham-e42]]"]
+
+
+def test_frontmatter_id_is_serialisable_when_the_backend_returns_a_uuid():
+    """yaml.safe_dump raises RepresenterError on a uuid.UUID, so passing the
+    psycopg id straight through made write_concept explode. Sibling of the
+    make_filename fix -- same root cause, different consumer."""
+    import uuid
+
+    import yaml
+
+    memory_id = uuid.UUID("d2b3e6b9-1996-4e1d-97f9-53bb27a3ffe9")
+    fm = memory_to_frontmatter({"id": memory_id, "content": "x", "tags": []})
+
+    assert fm["id"] == str(memory_id)
+    yaml.safe_dump(fm)  # must not raise

@@ -20,6 +20,19 @@ class _FakeGraph:
     def find_citing_edges(self, *args, **kwargs):
         raise NotImplementedError
 
+    # Enumeration primitives (TBU-130). AliasResolver never calls these, but the
+    # EntityGraph Protocol is runtime_checkable and pyright checks structural
+    # conformance at the AliasResolver(...) call site -- so a fake that omits
+    # them stops type-checking even though every test still passes.
+    def list_entities(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def list_edges(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def list_aliases(self, *args, **kwargs):
+        raise NotImplementedError
+
     def add_alias(self, entity_id, alias, profile):
         self._aliases[(alias, profile)] = entity_id
 

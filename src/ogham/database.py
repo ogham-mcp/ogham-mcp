@@ -444,6 +444,24 @@ def spread_entity_activation(
     )
 
 
+def get_memory_entities(profile: str) -> dict[str, list[int]]:
+    """memory id -> the entity ids it links to in ``profile``.
+
+    Feeds the MENTIONS bridge on OKF export. Returns {} rather than raising
+    when the entities layer is unavailable -- a pre-036 install has no
+    ``memory_entities`` table, and the GatewayBackend has no endpoint for it.
+    MENTIONS is additive, so a bundle without it is still a valid bundle;
+    failing a whole export over a missing join table would be the wrong trade.
+    Same defensive shape as the ``link_memory_entities`` guard on the write
+    side (service.py).
+    """
+    try:
+        return get_backend().get_memory_entities(profile)
+    except Exception as exc:
+        logger.debug("get_memory_entities unavailable: %s", exc)
+        return {}
+
+
 def auto_link_memory(
     memory_id: str,
     embedding: list[float],
@@ -509,7 +527,7 @@ def in_result_contradictions(profile: str, memory_ids: list[str]) -> list[dict[s
     Returns [{"stale_id": .., "newer_id": .., "strength": ..}], oriented by
     created_at. Backends that cannot express the filter return [].
     """
-    return cast(Any, get_backend()).in_result_contradictions(profile, memory_ids)
+    return get_backend().in_result_contradictions(profile, memory_ids)
 
 
 def gap_out_of_result_contradictions(
@@ -520,7 +538,7 @@ def gap_out_of_result_contradictions(
     Returns {"count": int, "pairs": [{"in_result_id": .., "other_id": .., "strength": ..}]}.
     Dispatches to gap_contradictions_for_ids SQL function (migration 039).
     """
-    return cast(Any, get_backend()).gap_out_of_result_contradictions(
+    return get_backend().gap_out_of_result_contradictions(
         profile, memory_ids, sample_size=sample_size
     )
 

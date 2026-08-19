@@ -10,7 +10,6 @@ from datetime import datetime
 
 import parsedatetime
 from geotext import GeoText as _GeoText
-from stop_words import AVAILABLE_LANGUAGES, get_stop_words
 
 from ogham.data.loader import (
     get_all_activity_words,
@@ -36,12 +35,6 @@ logger = logging.getLogger(__name__)
 
 # parsedatetime calendar for relative date parsing (zero deps, English)
 _PDT_CAL = parsedatetime.Calendar()
-
-# --- Stopwords (34 languages, loaded once) ---
-
-_STOP_WORDS: set[str] = set()
-for _lang in AVAILABLE_LANGUAGES:
-    _STOP_WORDS.update(get_stop_words(_lang))
 
 # --- Date extraction ---
 
@@ -165,7 +158,7 @@ def has_temporal_intent(query: str) -> bool:
 # --- Query reformulation ---
 # Bridges the gap between how users phrase questions ("when did I first
 # mention X?") and how content is stored ("X is important because...").
-# Uses the multilingual stop_words package + YAML query_filler lists.
+# Uses the YAML query_filler lists.
 # Zero model dependency, zero latency.
 
 _QUERY_DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4})\b")
@@ -177,9 +170,11 @@ _query_stopwords_cache: dict[str, set[str]] = {}
 def _get_query_stopwords(lang: str = "en") -> set[str]:
     """Build stopword set for query reformulation from YAML query_filler only.
 
-    Does NOT use the stop_words package -- that's too aggressive for query
-    reformulation (kills content words like "first", "move"). The YAML
-    query_filler list is intentionally tight: only true function words
+    Deliberately narrow. A broad multilingual stopword union was tried and
+    removed with the person classifier (2026-08-18): it is too aggressive for
+    query reformulation, killing content words like "first" and "move", and
+    it silently swallowed real given names. The YAML query_filler list is
+    intentionally tight: only true function words
     (pronouns, articles, prepositions, auxiliaries) and query-specific filler.
     """
     if lang not in _query_stopwords_cache:
@@ -675,7 +670,6 @@ def extract_entities(content: str) -> list[str]:
     """Extract named entities from content for tagging.
 
     Returns sorted list of prefixed tags, capped at 20:
-      person:FirstName LastName
       entity:CamelCaseName
       file:path/to/file.ext
       error:SomeError
@@ -699,25 +693,6 @@ def extract_entities(content: str) -> list[str]:
 
     for m in _ERROR_TYPE.finditer(content):
         entities.add(f"error:{m.group(0)}")
-
-    # --- Person names (existing): two consecutive capitalised words ---
-    words = content.split()
-    for i in range(len(words) - 1):
-        w1 = words[i].translate(_PUNCT)
-        w2 = words[i + 1].translate(_PUNCT)
-        if (
-            w1
-            and w2
-            and w1[0].isupper()
-            and w2[0].isupper()
-            and w1.isalpha()
-            and w2.isalpha()
-            and w1.lower() not in _STOP_WORDS
-            and w2.lower() not in _STOP_WORDS
-            and len(w1) > 1
-            and len(w2) > 1
-        ):
-            entities.add(f"person:{w1} {w2}")
 
     # --- Enrichment entities (v1, multilingual) ---
     content_lower = content.lower()
@@ -762,6 +737,9 @@ def extract_entities(content: str) -> list[str]:
         if _match(word):
             entities.add(f"emotion:{word}")
             emotion_count += 1
+
+    # Whitespace tokens, used by the relationship and quantity passes below.
+    words = content.split()
 
     # Relationships: require social context (preposition or event/activity nearby)
     _SOCIAL_PREPS = {"with", "mit", "avec", "con", "com", "for", "für", "pour", "para"}

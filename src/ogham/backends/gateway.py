@@ -442,3 +442,11 @@ class GatewayBackend:
     def link_memory_entities(self, *args: Any, **kwargs: Any) -> int:
         self._lifecycle_unsupported("link_memory_entities")
         return 0
+
+    def get_memory_entities(self, *args: Any, **kwargs: Any) -> dict[str, list[int]]:
+        # Refuse rather than return {}: an empty dict is indistinguishable from
+        # a profile that genuinely has no entity links, and the gateway has no
+        # endpoint for this. `database.get_memory_entities` is what downgrades
+        # the refusal to a bundle without MENTIONS.
+        self._lifecycle_unsupported("get_memory_entities")
+        return {}

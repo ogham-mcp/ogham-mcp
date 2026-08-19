@@ -954,3 +954,25 @@ class SupabaseBackend:
         }
         result = self._get_client().rpc("link_memory_entities", params).execute()
         return int(result.data) if isinstance(result.data, int | float | str) else 0
+
+    def get_memory_entities(self, profile: str) -> dict[str, list[int]]:
+        """memory id -> linked entity ids, for OKF export's MENTIONS bridge.
+
+        A plain table read rather than an RPC: no SQL function exists for it,
+        and PostgREST can express the filter and both sort keys directly. The
+        sort is load-bearing -- an unchanged profile must export byte-identical
+        MENTIONS lists twice running.
+        """
+        result = (
+            self._get_client()
+            .table("memory_entities")
+            .select("memory_id,entity_id")
+            .eq("profile", profile)
+            .order("memory_id")
+            .order("entity_id")
+            .execute()
+        )
+        out: dict[str, list[int]] = {}
+        for row in _rows(result.data):
+            out.setdefault(str(row["memory_id"]), []).append(int(row["entity_id"]))
+        return out

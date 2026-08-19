@@ -42,8 +42,13 @@ def _install_claude_code():
             "matcher": "",
             "hooks": [{"type": "command", "command": "ogham hooks recall"}],
         },
+        # Scoped to the two tools whose captures are worth keeping (TBU-231).
+        # A matcher of "" means match-all, which fired on every Bash call and
+        # made 65% of the store command noise that was never once recalled.
+        # Claude Code evaluates a matcher of only letters/digits/_/-/space/,/|
+        # as an exact string or |-separated list of exact tool names.
         "PostToolUse": {
-            "matcher": "",
+            "matcher": "Edit|Write",
             "hooks": [{"type": "command", "command": "ogham hooks inscribe"}],
         },
         "PreCompact": {

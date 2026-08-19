@@ -77,38 +77,82 @@ def test_session_start_disabled_skips_recall_side_effects():
     lifecycle.assert_not_called()
 
 
-def test_post_tool_stores_action():
+def _edit_event(**overrides):
+    """A minimal Edit event that produces exactly one memory.
+
+    Edit is the vehicle for the cross-cutting assertions below -- tagging,
+    dedup, formatting, secret masking. Those used to ride on Bash, which is no
+    longer captured at all (TBU-231), so a Bash-based version of any of them
+    would pass by storing nothing and prove nothing.
+    """
+    event = {
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": "/src/ogham/config.py",
+            "old_string": "TIMEOUT = 30",
+            "new_string": "TIMEOUT = 60",
+        },
+        "cwd": "/Users/dev/myproject",
+        "session_id": "s1",
+    }
+    event.update(overrides)
+    return event
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git commit -m 'fix: update config'",
+        "git push origin main",
+        "uv run pytest -q",
+        "gh pr merge 12",
+        "make publish",
+    ],
+)
+def test_post_tool_never_captures_bash(command):
+    """TBU-231. Bash is not captured, whatever the command.
+
+    It was 65% of the store and every sampled row had access_count 0. The
+    matcher written by `ogham hooks install` is scoped to Edit|Write so these
+    events should not arrive; this asserts the backstop for installs still
+    carrying the old match-all matcher.
+    """
     from ogham.hooks import post_tool
 
-    hook_input = {
-        "tool_name": "Bash",
-        "tool_input": {"command": "git commit -m 'fix: update config'"},
-        "session_id": "abc123",
-        "cwd": "/Users/dev/myproject",
-    }
     with patch("ogham.service.store_memory_enriched") as mock_store:
-        post_tool(hook_input, profile="work")
+        post_tool(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+                "session_id": "abc123",
+                "cwd": "/Users/dev/myproject",
+            },
+            profile="work",
+        )
 
-    mock_store.assert_called_once()
-    content = mock_store.call_args.kwargs["content"]
-    assert "git commit: fix: update config" in content
+    mock_store.assert_not_called()
 
 
 def test_post_tool_disabled_skips_store():
     from ogham.flow_control import temporary_flow_overrides
     from ogham.hooks import post_tool
 
-    hook_input = {
-        "tool_name": "Bash",
-        "tool_input": {"command": "git commit -m 'fix: update config'"},
-        "session_id": "abc123",
-        "cwd": "/Users/dev/myproject",
-    }
     with temporary_flow_overrides(inscribe=False):
         with patch("ogham.service.store_memory_enriched") as mock_store:
-            post_tool(hook_input, profile="work")
+            post_tool(_edit_event(), profile="work")
 
     mock_store.assert_not_called()
+
+
+def test_post_tool_enabled_stores_the_edit():
+    """Negative control for the test above: without the override, the same event
+    DOES store. Otherwise 'disabled skips store' would pass on a broken path."""
+    from ogham.hooks import post_tool
+
+    with patch("ogham.service.store_memory_enriched") as mock_store:
+        post_tool(_edit_event(), profile="work")
+
+    mock_store.assert_called_once()
 
 
 def test_post_tool_skips_ogham_tools():
@@ -334,167 +378,6 @@ def test_post_tool_skips_noise_bash():
         assert mock_store.call_count == 0, f"'{cmd}' should be skipped as noise"
 
 
-def test_post_tool_captures_signal_bash():
-    """Bash commands matching the verb-based YAML signal lists should be captured.
-
-    The YAML config was tightened on 2026-04-22 to drop noun-heavy
-    categories (docker/pytest/railway/etc.) because they fired on every
-    daily infra command. Signal capture is now verbs-only: errors,
-    decisions (past-tense), architecture verbs, git_signal subcommands,
-    and explicit annotations. Test commands updated to match.
-    """
-    from ogham.hooks import post_tool
-
-    for cmd in [
-        "git commit -m 'fix bug'",  # git_signal=commit
-        "git push origin main",  # git_signal=push
-        "git merge --no-ff feature/wiki",  # git_signal=merge
-        "git revert HEAD",  # git_signal=revert
-    ]:
-        with patch("ogham.service.store_memory_enriched") as mock_store:
-            post_tool(
-                {
-                    "tool_name": "Bash",
-                    "tool_input": {"command": cmd},
-                    "cwd": "/tmp",
-                    "session_id": "s1",
-                },
-                profile="work",
-            )
-        assert mock_store.call_count == 1, f"{cmd!r} should be captured as signal"
-
-
-def test_post_tool_captures_bash_error_from_response():
-    from ogham.hooks import post_tool
-
-    with patch("ogham.service.store_memory_enriched") as mock_store:
-        post_tool(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": "uv run pytest", "exit_code": 1},
-                "tool_response": (
-                    "ImportError: cannot import name 'task_redis_prefix' "
-                    "from 'fastmcp.server.tasks.keys'"
-                ),
-                "cwd": "/Users/dev/ogham-mcp",
-                "session_id": "s1",
-            },
-            profile="work",
-        )
-
-    mock_store.assert_called_once()
-    content = mock_store.call_args.kwargs["content"]
-    assert content.startswith("error: ImportError cannot import name")
-    tags = mock_store.call_args.kwargs["tags"]
-    assert "type:error" in tags
-
-
-def test_post_tool_captures_bash_deploy_outcome():
-    from ogham.hooks import post_tool
-
-    with patch("ogham.service.store_memory_enriched") as mock_store:
-        post_tool(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": "uv publish --token pypi-FAKEFAKEFAKEFAKEFAKEFAKE"},
-                "tool_response": "Published 0.10.2",
-                "cwd": "/Users/dev/ogham-mcp",
-                "session_id": "s1",
-            },
-            profile="work",
-        )
-
-    mock_store.assert_called_once()
-    content = mock_store.call_args.kwargs["content"]
-    assert content == "published 0.10.2 [ogham-mcp]"
-    tags = mock_store.call_args.kwargs["tags"]
-    assert "type:deploy" in tags
-
-
-def test_post_tool_captures_gh_pr_merge():
-    from ogham.hooks import post_tool
-
-    with patch("ogham.service.store_memory_enriched") as mock_store:
-        post_tool(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": "gh pr merge 37 --squash"},
-                "tool_response": "Merged pull request #37",
-                "cwd": "/Users/dev/ogham-mcp",
-                "session_id": "s1",
-            },
-            profile="work",
-        )
-
-    mock_store.assert_called_once()
-    content = mock_store.call_args.kwargs["content"]
-    assert content == "merged PR #37 (squash) [ogham-mcp]"
-
-
-@pytest.mark.parametrize(
-    ("command", "response", "expected"),
-    [
-        (
-            "gh pr create --title 'Add dashboard hooks'",
-            "title: Add dashboard hooks\nurl: https://github.com/x/y/pull/12",
-            "created PR: Add dashboard hooks [ogham-mcp]",
-        ),
-        (
-            "gh pr close 12",
-            "title: Close stale dashboard hooks PR",
-            "closed PR: Close stale dashboard hooks PR [ogham-mcp]",
-        ),
-        (
-            "gh issue close 44",
-            "Closed issue #44",
-            "closed issue #44 [ogham-mcp]",
-        ),
-    ],
-)
-def test_post_tool_captures_other_gh_actions(command, response, expected):
-    from ogham.hooks import post_tool
-
-    with patch("ogham.service.store_memory_enriched") as mock_store:
-        post_tool(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": command},
-                "tool_response": response,
-                "cwd": "/Users/dev/ogham-mcp",
-                "session_id": "s1",
-            },
-            profile="work",
-        )
-
-    mock_store.assert_called_once()
-    content = mock_store.call_args.kwargs["content"]
-    assert content == expected
-    tags = mock_store.call_args.kwargs["tags"]
-    assert "type:decision" in tags
-
-
-def test_post_tool_captures_gh_release_create():
-    from ogham.hooks import post_tool
-
-    with patch("ogham.service.store_memory_enriched") as mock_store:
-        post_tool(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": "gh release create v0.10.3"},
-                "tool_response": "Created release v0.10.3",
-                "cwd": "/Users/dev/ogham-mcp",
-                "session_id": "s1",
-            },
-            profile="work",
-        )
-
-    mock_store.assert_called_once()
-    content = mock_store.call_args.kwargs["content"]
-    assert content == "created GitHub release v0.10.3 [ogham-mcp]"
-    tags = mock_store.call_args.kwargs["tags"]
-    assert "type:deploy" in tags
-
-
 def test_post_tool_dry_run_does_not_store_or_dedup():
     from ogham.hooks import post_tool
 
@@ -590,56 +473,38 @@ def test_post_tool_tags_include_tool_name():
 
     with patch("ogham.service.store_memory_enriched") as mock_store:
         post_tool(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": "git commit -m 'deploy fix'"},
-                "cwd": "/tmp",
-                "session_id": "s1",
-            },
+            _edit_event(cwd="/tmp"),
             profile="work",
         )
 
     tags = mock_store.call_args.kwargs["tags"]
-    assert "tool:Bash" in tags
-    assert "type:action" in tags
-    assert "type:decision" in tags
+    assert "tool:Edit" in tags
     assert "session:s1" in tags
 
 
+def _edit_of(file_path: str, new_string: str, session_id: str = "s1"):
+    return {
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": file_path,
+            "old_string": "TIMEOUT = 30",
+            "new_string": new_string,
+        },
+        "cwd": "/tmp",
+        "session_id": session_id,
+    }
+
+
 def test_post_tool_dedup_same_file():
-    """Repeated Bash commits on the same file within 5 min should be collapsed."""
+    """Repeated edits to the same file within the window should be collapsed."""
     from ogham.hooks import post_tool
 
     with patch("ogham.service.store_memory_enriched") as mock_store:
-        post_tool(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": "git commit -m 'fix deploy'", "file_path": "/tmp/foo.py"},
-                "cwd": "/tmp",
-                "session_id": "s1",
-            },
-            profile="work",
-        )
-        post_tool(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": "git commit -m 'fix again'", "file_path": "/tmp/foo.py"},
-                "cwd": "/tmp",
-                "session_id": "s1",
-            },
-            profile="work",
-        )
-        post_tool(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": "git commit -m 'fix bar'", "file_path": "/tmp/bar.py"},
-                "cwd": "/tmp",
-                "session_id": "s1",
-            },
-            profile="work",
-        )
+        post_tool(_edit_of("/tmp/foo.py", "TIMEOUT = 60"), profile="work")
+        post_tool(_edit_of("/tmp/foo.py", "TIMEOUT = 90"), profile="work")
+        post_tool(_edit_of("/tmp/bar.py", "TIMEOUT = 90"), profile="work")
 
-    assert mock_store.call_count == 2, "Second commit on foo.py should be deduped"
+    assert mock_store.call_count == 2, "Second edit to foo.py should be deduped"
 
 
 def test_post_tool_dedup_different_sessions():
@@ -647,24 +512,8 @@ def test_post_tool_dedup_different_sessions():
     from ogham.hooks import post_tool
 
     with patch("ogham.service.store_memory_enriched") as mock_store:
-        post_tool(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": "git commit -m 'fix'", "file_path": "/tmp/foo.py"},
-                "cwd": "/tmp",
-                "session_id": "s1",
-            },
-            profile="work",
-        )
-        post_tool(
-            {
-                "tool_name": "Bash",
-                "tool_input": {"command": "git commit -m 'fix'", "file_path": "/tmp/foo.py"},
-                "cwd": "/tmp",
-                "session_id": "s2",
-            },
-            profile="work",
-        )
+        post_tool(_edit_of("/tmp/foo.py", "TIMEOUT = 60", session_id="s1"), profile="work")
+        post_tool(_edit_of("/tmp/foo.py", "TIMEOUT = 60", session_id="s2"), profile="work")
 
     assert mock_store.call_count == 2, "Different sessions should not dedup"
 
@@ -675,21 +524,15 @@ def test_post_tool_content_format():
 
     with patch("ogham.service.store_memory_enriched") as mock_store:
         post_tool(
-            {
-                "tool_name": "Bash",
-                "tool_input": {
-                    "command": "git push origin main",
-                },
-                "cwd": "/Users/dev/myproject",
-                "session_id": "s1",
-            },
+            _edit_event(),
             profile="work",
         )
 
     content = mock_store.call_args.kwargs["content"]
-    assert "git push" in content
-    assert "myproject" in content
-    assert "Directory:" not in content
+    assert "config.py" in content, "the file being edited should be named"
+    assert "myproject" in content, "the project should be named, from cwd"
+    assert "Directory:" not in content, "no verbose Tool:/Input:/Directory: scaffolding"
+    assert "Tool:" not in content
 
 
 def test_pre_compact_stores_summary():
@@ -836,11 +679,28 @@ def test_mask_secrets_safe_content():
 def test_post_tool_masks_secrets_before_storing():
     from ogham.hooks import post_tool
 
+    # Assembled at runtime, and deliberately low-entropy, so the file contains no
+    # literal that reads as a credential -- gitleaks runs on this repo and a
+    # realistic-looking constant here fails the commit.
+    #
+    # Length matters, though: the bare-token pattern is
+    # `sk-proj-[A-Za-z0-9-]{20,}`, so a SHORT synthetic token slips past the bare
+    # path and the test then only proves the keyword-anchored path
+    # (`api_key=...`) works. That distinction is the whole point now -- the Edit
+    # extractor rewrites content into prose ("added X to Y"), which breaks the
+    # keyword adjacency, so bare detection is what actually protects the primary
+    # capture path.
+    fake_secret = "sk-proj-" + "A" * 28
+
     with patch("ogham.service.store_memory_enriched") as mock_store:
         post_tool(
             {
-                "tool_name": "Bash",
-                "tool_input": {"command": "git commit -m 'config api_key=sk-proj-abc123def456ghi'"},
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": "/tmp/config.py",
+                    "old_string": "API_KEY = ''",
+                    "new_string": f"API_KEY = '{fake_secret}'",
+                },
                 "cwd": "/tmp",
                 "session_id": "s1",
             },
@@ -848,7 +708,7 @@ def test_post_tool_masks_secrets_before_storing():
         )
 
     content = mock_store.call_args.kwargs["content"]
-    assert "sk-proj-abc123def456ghi" not in content
+    assert fake_secret not in content
     assert "***MASKED***" in content
 
 

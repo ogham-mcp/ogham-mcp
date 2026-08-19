@@ -294,6 +294,85 @@ class SupabaseEntityGraph:
         )
         return [self._row_to_edge(row) for row in _rows(result.data)]
 
+    # -- enumeration (TBU-130) ---------------------------------------
+
+    def list_entities(self, profile: str) -> list[Entity]:
+        """Every entity reachable in ``profile``, ordered by id.
+
+        PostgREST has no IN-subquery, so the three-way union the Postgres
+        backend does in SQL happens here in Python instead: memory links plus
+        both endpoints of every edge. Including both endpoints is what
+        guarantees an OKF export never writes an edge whose object is missing.
+        """
+        ids: set[int] = set()
+
+        linked = (
+            self._client.table("memory_entities")
+            .select("entity_id")
+            .eq("profile", profile)
+            .execute()
+        )
+        for row in _rows(linked.data):
+            ids.add(int(row["entity_id"]))
+
+        edge_rows = (
+            self._client.table("entity_edges")
+            .select("subject_id,object_id")
+            .eq("profile", profile)
+            .execute()
+        )
+        for row in _rows(edge_rows.data):
+            ids.add(int(row["subject_id"]))
+            ids.add(int(row["object_id"]))
+
+        # `.in_("id", [])` is a PostgREST error, not an empty result -- so a
+        # profile with no entities has to short-circuit before the query is
+        # built rather than relying on the filter to return nothing.
+        if not ids:
+            return []
+
+        result = (
+            self._client.table("entities")
+            .select("id,canonical_name,entity_type")
+            .in_("id", sorted(ids))
+            .order("id")
+            .execute()
+        )
+        return [
+            Entity(
+                id=int(row["id"]),
+                canonical_name=row["canonical_name"],
+                entity_type=row["entity_type"],
+            )
+            for row in _rows(result.data)
+        ]
+
+    def list_edges(self, profile: str, *, current_only: bool = True) -> list[EntityEdge]:
+        query = (
+            self._client.table("entity_edges")
+            .select(
+                "id,subject_id,predicate,object_id,profile,fact_id,strength,metadata,"
+                "derived_from,valid_from,valid_to"
+            )
+            .eq("profile", profile)
+        )
+        if current_only:
+            query = query.is_("valid_to", "null")
+        return [self._row_to_edge(row) for row in _rows(query.order("id").execute().data)]
+
+    def list_aliases(self, profile: str) -> dict[int, list[str]]:
+        result = (
+            self._client.table("entity_aliases")
+            .select("entity_id,alias")
+            .eq("profile", profile)
+            .order("entity_id")
+            .execute()
+        )
+        out: dict[int, list[str]] = {}
+        for row in _rows(result.data):
+            out.setdefault(int(row["entity_id"]), []).append(row["alias"])
+        return out
+
     # -- helpers -----------------------------------------------------
 
     def _resolve_to_id(self, name_or_id: str | int, profile: str) -> int | None:

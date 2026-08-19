@@ -21,8 +21,12 @@ def test_hooks_inscribe_dry_run_previews_tool_memory():
     from ogham.hooks_cli import hooks_app
 
     data = {
-        "tool_name": "Bash",
-        "tool_input": {"command": "git commit -m 'feat: add dashboard'"},
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": "/src/ogham/dashboard.py",
+            "old_string": "PANELS = []",
+            "new_string": "PANELS = ['overview']",
+        },
         "cwd": "/Users/dev/ogham-mcp",
         "session_id": "s1",
     }
@@ -31,7 +35,8 @@ def test_hooks_inscribe_dry_run_previews_tool_memory():
         result = runner.invoke(hooks_app, ["inscribe", "--dry-run"])
 
     assert result.exit_code == 0
-    assert "git commit: feat: add dashboard [ogham-mcp]" in result.output
+    assert "dashboard.py" in result.output
+    assert "[ogham-mcp]" in result.output
 
 
 def test_hooks_inscribe_dry_run_routes_user_prompt_submit():
@@ -95,3 +100,31 @@ def test_hooks_inscribe_no_inscribe_skips_hooks():
     assert result.exit_code == 0
     post_tool.assert_not_called()
     pre_compact.assert_not_called()
+
+
+def test_install_scopes_post_tool_use_to_edit_and_write(tmp_path, monkeypatch):
+    """TBU-231. A match-all PostToolUse matcher fired on every Bash call and made
+    65% of the store command noise. The installer must write an explicit tool
+    list, not "".
+
+    Claude Code evaluates a matcher containing only letters, digits, `_`, `-`,
+    spaces, `,` and `|` as an exact string or |-separated list of exact tool
+    names, so "Edit|Write" matches those two tools and nothing else.
+    """
+    import json
+
+    from ogham import hooks_install
+
+    monkeypatch.setattr(hooks_install.Path, "home", staticmethod(lambda: tmp_path))
+    hooks_install._install_claude_code()
+
+    settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+    post_tool_use = settings["hooks"]["PostToolUse"]
+    matchers = [entry["matcher"] for entry in post_tool_use]
+    assert matchers == ["Edit|Write"], f"expected a scoped matcher, got {matchers!r}"
+
+    # The recall-side events are not tool-scoped and must stay match-all.
+    for event in ("SessionStart", "PreCompact", "PostCompact"):
+        assert [e["matcher"] for e in settings["hooks"][event]] == [""], (
+            f"{event} is not a tool event -- it should stay match-all"
+        )

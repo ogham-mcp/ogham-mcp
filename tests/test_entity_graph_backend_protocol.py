@@ -42,3 +42,34 @@ def test_supabase_backend_accepts_expected_ctor():
     params = list(sig.parameters.keys())
     assert "client" in params
     assert "allowed_predicates" in params
+
+
+# --- DatabaseBackend contradiction lookups (TBU-217) ---
+# Both reach the backend via cast(Any, get_backend()) in database.py, so
+# nothing breaks today -- but a new backend can satisfy the Protocol while
+# missing methods the retrieval path calls at runtime.
+
+_CONTRADICTION_LOOKUPS = ("in_result_contradictions", "gap_out_of_result_contradictions")
+
+
+def test_protocol_declares_the_contradiction_lookups():
+    """The Protocol must describe the whole backend surface, not part of it."""
+    from ogham.backends.protocol import DatabaseBackend
+
+    for method in _CONTRADICTION_LOOKUPS:
+        assert callable(getattr(DatabaseBackend, method, None)), (
+            f"DatabaseBackend Protocol does not declare {method}"
+        )
+
+
+def test_every_backend_implements_the_contradiction_lookups():
+    """Postgres implements both; Supabase and Gateway degrade deliberately."""
+    from ogham.backends.gateway import GatewayBackend
+    from ogham.backends.postgres import PostgresBackend
+    from ogham.backends.supabase import SupabaseBackend
+
+    for backend in (PostgresBackend, SupabaseBackend, GatewayBackend):
+        for method in _CONTRADICTION_LOOKUPS:
+            assert callable(getattr(backend, method, None)), (
+                f"{backend.__name__} missing method {method}"
+            )

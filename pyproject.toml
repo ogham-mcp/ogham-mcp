@@ -1,6 +1,6 @@
 [project]
 name = "ogham-mcp"
-version = "0.17.2"
+version = "0.18.0"
 description = "Shared memory MCP server — persistent, searchable, cross-client"
 # Without `readme` the published METADATA carries a zero-byte description, so
 # the PyPI page shows the one-line summary and no route to the repo or docs.
@@ -41,7 +41,6 @@ dependencies = [
     "ollama>=0.4",
     "openai>=1.0",
     "typer>=0.24",
-    "stop-words>=2024.2.1",
     "parsedatetime>=2.6",
     "pyyaml>=6.0",
     "geotext>=0.4",

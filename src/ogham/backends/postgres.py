@@ -78,6 +78,7 @@ _ALLOWED_MEMORY_COLUMNS = frozenset(
         "access_count",
         "last_accessed_at",
         "confidence",
+        "importance",
     }
 )
 
@@ -716,6 +717,27 @@ class PostgresBackend:
             fetch="scalar",
         )
         return int(result or 0)
+
+    def get_memory_entities(self, profile: str) -> dict[str, list[int]]:
+        """memory id -> linked entity ids, for OKF export's MENTIONS bridge.
+
+        ORDER BY is not cosmetic: two exports of an unchanged profile must
+        produce identical MENTIONS lists, or every re-export shows a diff.
+
+        Keys are stringified because psycopg returns ``uuid.UUID`` for the
+        column while PostgREST returns a string; callers key on
+        ``memory["id"]`` and must not have to care which backend they are on.
+        """
+        rows = self._execute(
+            "SELECT memory_id, entity_id FROM memory_entities"
+            " WHERE profile = %(p)s ORDER BY memory_id, entity_id",
+            {"p": profile},
+            fetch="all",
+        )
+        out: dict[str, list[int]] = {}
+        for row in rows or []:
+            out.setdefault(str(row["memory_id"]), []).append(int(row["entity_id"]))
+        return out
 
     # ── Audit ─────────────────────────────────────────────────────────
 

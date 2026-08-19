@@ -186,7 +186,7 @@ begin
     on conflict (memory_id) do nothing;
     return new;
 end;
-$$ language plpgsql;
+$$ language plpgsql set search_path to 'public', 'pg_catalog';
 
 drop trigger if exists memories_init_lifecycle on memories;
 create trigger memories_init_lifecycle
@@ -205,7 +205,7 @@ begin
     end if;
     return new;
 end;
-$$ language plpgsql;
+$$ language plpgsql set search_path to 'public', 'pg_catalog';
 
 drop trigger if exists memories_sync_lifecycle_profile on memories;
 create trigger memories_sync_lifecycle_profile
@@ -961,6 +961,14 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_profile_time
 CREATE INDEX IF NOT EXISTS idx_audit_log_resource
     ON audit_log (resource_id) WHERE resource_id IS NOT NULL;
 
+-- RLS for audit_log: mirror the "Deny anon access" pattern (migration 027).
+-- audit_log is the table recording who did what, so a fresh install must not
+-- be the one place anon can read. The Python server writes via service_role,
+-- which bypasses RLS, so functional behaviour is unchanged. TBU-247.
+ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Deny anon access" ON audit_log
+    FOR ALL TO anon USING (false) WITH CHECK (false);
+
 -- ── Entity graph (spreading activation substrate) ─────────────────────
 
 CREATE TABLE IF NOT EXISTS entities (
@@ -1002,6 +1010,64 @@ CREATE INDEX IF NOT EXISTS idx_memory_entities_memory
     ON memory_entities (memory_id);
 CREATE INDEX IF NOT EXISTS idx_memory_entities_entity_profile
     ON memory_entities (entity_id, profile);
+
+-- link_memory_entities: upsert entities + link in memory_entities for one
+-- memory. Both live writes (service.store_memory) and the backfill loop call
+-- this, so the two paths produce identical state. Idempotent on
+-- memory_entities via ON CONFLICT DO NOTHING. Mention counts accumulate on
+-- entities so the temporal-span refresher has data to work with.
+-- Returns the number of (memory, entity) edges newly inserted.
+--
+-- Backported from migration 036 (TBU-221). Its two sibling functions were
+-- copied into the schema files when 036 landed and this one was missed, so a
+-- FRESH install had the entity tables but no way to populate them: every
+-- store_memory raised UndefinedFunction, service.py swallowed it at debug
+-- level, memory_entities stayed empty, and the OKF export's MENTIONS bridge
+-- was silently always empty. A fresh install applies a schema file and nothing
+-- else -- there is no migration pass -- so a function that lives only in a
+-- migration never arrives. Held by
+-- tests/test_schema_parity.py::test_migration_functions_are_backported_into_every_schema
+CREATE OR REPLACE FUNCTION link_memory_entities(
+    p_memory_id uuid,
+    p_profile text,
+    p_entity_tags text[]
+) RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+    inserted_count integer := 0;
+BEGIN
+    IF p_entity_tags IS NULL OR array_length(p_entity_tags, 1) IS NULL THEN
+        RETURN 0;
+    END IF;
+
+    WITH parsed AS (
+        SELECT split_part(t, ':', 1) AS et,
+               split_part(t, ':', 2) AS cn
+        FROM unnest(p_entity_tags) AS t
+        WHERE t LIKE '%:%' AND length(split_part(t, ':', 2)) > 0
+    ),
+    entity_upsert AS (
+        INSERT INTO entities (canonical_name, entity_type, mention_count)
+        SELECT cn, et, 1 FROM parsed
+        ON CONFLICT (canonical_name, entity_type) DO UPDATE
+            SET mention_count = entities.mention_count + 1
+        RETURNING id
+    ),
+    edge_insert AS (
+        INSERT INTO memory_entities (memory_id, entity_id, profile)
+        SELECT p_memory_id, eu.id, p_profile
+        FROM entity_upsert eu
+        ON CONFLICT (memory_id, entity_id) DO NOTHING
+        RETURNING memory_id
+    )
+    SELECT count(*) INTO inserted_count FROM edge_insert;
+
+    RETURN inserted_count;
+END;
+$$;
 
 -- Refresh temporal span for a single entity
 CREATE OR REPLACE FUNCTION refresh_entity_temporal_span(target_entity_id bigint)
@@ -1064,6 +1130,7 @@ BEGIN
                                 AND me2.entity_id != w.entity_id
                                 AND me2.profile = filter_profile
         JOIN entities e2 ON e2.id = me2.entity_id
+                          AND e2.entity_type <> 'person'
         WHERE w.depth < max_depth
           AND w.activation * decay
               * LEAST(e2.temporal_span, 3.0)
@@ -1094,6 +1161,7 @@ $$;
 -- the public REST surface. Migration 037 keeps existing deployments in
 -- sync with this schema-time grant. See migration 037 header for the
 -- full rationale.
+REVOKE EXECUTE ON FUNCTION link_memory_entities(uuid, text, text[]) FROM anon, authenticated, PUBLIC;
 REVOKE EXECUTE ON FUNCTION refresh_entity_temporal_span(bigint) FROM anon, authenticated, PUBLIC;
 REVOKE EXECUTE ON FUNCTION spread_entity_activation_memories(text[], text, integer, double precision, double precision, integer) FROM anon, authenticated, PUBLIC;
 
@@ -1212,8 +1280,8 @@ CREATE POLICY "Deny anon access" ON entity_aliases
 -- EXECUTE in migration 037. authenticated is unused by Ogham.
 --
 -- Migration 038_data_api_grants.sql provides the upgrade path for
--- existing self-hosted installs and also covers topic_summaries +
--- topic_summary_sources (created by migration 028).
+-- existing self-hosted installs. topic_summaries + topic_summary_sources
+-- are granted further down, after the statements that create them.
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.memories             TO service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.profile_settings     TO service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.memory_lifecycle     TO service_role;
@@ -1226,3 +1294,792 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.entity_edge_predicates TO service
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.entity_aliases       TO service_role;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO service_role;
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- Backported from migrations (TBU-223)
+--
+-- `ogham init` applies ONE schema file and no migrations, so anything a
+-- migration added that was never copied here is absent forever on new
+-- installs while working fine on databases that grew through the migration
+-- history. 71 objects had drifted this way -- the whole wiki feature, the
+-- lifecycle and graph RPCs, in_result_contradictions (047, the supersession
+-- ranking shipped in v0.17.2) and two triggers.
+--
+-- Definitions below are the FINAL form, read from a database with the full
+-- migration history applied (pg_get_functiondef / pg_get_triggerdef), not
+-- copied from the migration that first created them: wiki_topic_upsert is
+-- replaced by 033 and wiki_topic_search by 034, so copying from 031 would
+-- have backported a stale version.
+--
+-- Vector dims are re-parameterised to :embedding_dim per TBU-159.
+-- Held by tests/test_schema_migration_drift.py.
+--
+-- DELIBERATELY NOT BACKPORTED (still in tests/schema_drift_baseline.yaml):
+--   * tenant isolation (019) -- tenant_id columns, current_tenant_id(),
+--     idx_*_tenant_* : a managed-gateway feature, and that gateway is not
+--     running. Needs a product ruling, not a silent schema change.
+--   * memories.sparse_embedding (016) -- referenced nowhere in src/, and
+--     `sparsevec` needs pgvector >= 0.7, so adding it to the INSTALL gate
+--     would break self-hosters on older pgvector to gain a column that
+--     nothing reads.
+--   * backfill_recurrence() (012) -- a one-off backfill helper, called by
+--     nothing in src/.
+--   * the auto_link_memory(uuid, vector, text, float, int) overload -- both
+--     backends call the signature already defined above (postgres
+--     positionally, supabase by name with max_links); the migration's top_n
+--     variant is dead.
+-- ══════════════════════════════════════════════════════════════════════════
+
+-- ── Temporal auto-extraction (migration 015) ──────────────────────────
+
+CREATE OR REPLACE FUNCTION public.extract_occurrence_from_content()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+    date_str text;
+    parsed date;
+BEGIN
+    -- Only fire if occurrence_period is not already set
+    IF NEW.occurrence_period IS NOT NULL THEN
+        RETURN NEW;
+    END IF;
+
+    -- Extract [Date: YYYY-MM-DD] prefix
+    date_str := substring(NEW.content FROM '\[Date:\s*(\d{4}-\d{2}-\d{2})\]');
+    IF date_str IS NOT NULL THEN
+        BEGIN
+            parsed := date_str::date;
+            NEW.occurrence_period := tstzrange(
+                parsed::timestamptz,
+                (parsed + interval '1 day')::timestamptz
+            );
+        EXCEPTION WHEN OTHERS THEN
+            -- Invalid date string, skip
+            NULL;
+        END;
+    END IF;
+
+    RETURN NEW;
+END;
+$function$;
+
+
+-- ── Topic summaries / wiki (migrations 028-034, 040) ──────────────────
+
+CREATE TABLE IF NOT EXISTS topic_summaries (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  topic_key text NOT NULL,
+  profile_id text NOT NULL,
+  content text NOT NULL,
+  embedding vector(:embedding_dim),
+  source_count integer NOT NULL,
+  source_cursor uuid,
+  source_hash bytea NOT NULL,
+  token_count integer,
+  importance double precision NOT NULL DEFAULT 0.5,
+  model_used text NOT NULL,
+  version integer NOT NULL DEFAULT 1,
+  status text NOT NULL DEFAULT 'fresh'::text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  stale_reason text,
+  tldr_one_line text,
+  tldr_short text
+);
+
+ALTER TABLE topic_summaries ADD CONSTRAINT topic_summaries_profile_topic_unique UNIQUE (profile_id, topic_key);
+ALTER TABLE topic_summaries ADD CONSTRAINT topic_summaries_pkey PRIMARY KEY (id);
+ALTER TABLE topic_summaries ADD CONSTRAINT topic_summaries_status_valid CHECK ((status = ANY (ARRAY['fresh'::text, 'stale'::text, 'regenerating'::text])));
+
+CREATE INDEX IF NOT EXISTS topic_summaries_embedding_hnsw_idx ON public.topic_summaries USING hnsw (embedding vector_cosine_ops) WITH (m='16', ef_construction='64') WHERE (status = 'fresh'::text);
+CREATE INDEX IF NOT EXISTS topic_summaries_profile_fresh_idx ON public.topic_summaries USING btree (profile_id, updated_at DESC) WHERE (status = 'fresh'::text);
+CREATE INDEX IF NOT EXISTS topic_summaries_stale_sweep_idx ON public.topic_summaries USING btree (updated_at) WHERE (status = 'fresh'::text);
+
+CREATE TABLE IF NOT EXISTS topic_summary_sources (
+  summary_id uuid NOT NULL,
+  memory_id uuid NOT NULL
+);
+
+ALTER TABLE topic_summary_sources ADD CONSTRAINT topic_summary_sources_pkey PRIMARY KEY (summary_id, memory_id);
+ALTER TABLE topic_summary_sources ADD CONSTRAINT topic_summary_sources_memory_id_fkey FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE;
+ALTER TABLE topic_summary_sources ADD CONSTRAINT topic_summary_sources_summary_id_fkey FOREIGN KEY (summary_id) REFERENCES topic_summaries(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS topic_summary_sources_memory_id_idx ON public.topic_summary_sources USING btree (memory_id);
+
+-- Data API grants for the wiki tables. The main GRANT block above runs before
+-- these two tables exist, which is why they are granted here and not there.
+-- Migration 038 covers all nine tables; a fresh install was getting seven.
+-- TBU-247.
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.topic_summaries       TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.topic_summary_sources TO service_role;
+
+CREATE OR REPLACE FUNCTION public.topic_summaries_set_updated_at()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_catalog'
+AS $function$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_topic_upsert(p_profile text, p_topic_key text, p_content text, p_embedding vector, p_source_memory_ids uuid[], p_model_used text, p_source_cursor uuid, p_source_hash bytea, p_token_count integer DEFAULT NULL::integer, p_importance double precision DEFAULT 0.5, p_tldr_one_line text DEFAULT NULL::text, p_tldr_short text DEFAULT NULL::text)
+ RETURNS topic_summaries
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+DECLARE
+    upserted topic_summaries;
+BEGIN
+    INSERT INTO topic_summaries (
+        topic_key, profile_id, content, embedding,
+        source_count, source_cursor, source_hash,
+        token_count, importance, model_used,
+        tldr_one_line, tldr_short
+    )
+    VALUES (
+        p_topic_key, p_profile, p_content, p_embedding,
+        cardinality(p_source_memory_ids), p_source_cursor, p_source_hash,
+        p_token_count, p_importance, p_model_used,
+        p_tldr_one_line, p_tldr_short
+    )
+    ON CONFLICT (profile_id, topic_key) DO UPDATE SET
+        content = EXCLUDED.content,
+        embedding = EXCLUDED.embedding,
+        source_count = EXCLUDED.source_count,
+        source_cursor = EXCLUDED.source_cursor,
+        source_hash = EXCLUDED.source_hash,
+        token_count = EXCLUDED.token_count,
+        importance = EXCLUDED.importance,
+        model_used = EXCLUDED.model_used,
+        tldr_one_line = EXCLUDED.tldr_one_line,
+        tldr_short = EXCLUDED.tldr_short,
+        version = topic_summaries.version + 1,
+        status = 'fresh',
+        stale_reason = NULL
+    RETURNING * INTO upserted;
+
+    -- Concurrent-delete safety: if another transaction deleted the topic
+    -- between our row-lock release and the RETURNING, INSERT...DO UPDATE
+    -- can yield zero rows. Bail rather than crash on the FK insert.
+    IF upserted.id IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    DELETE FROM topic_summary_sources WHERE summary_id = upserted.id;
+
+    -- JOIN against memories so concurrently-deleted memory ids drop
+    -- silently instead of throwing a FK violation. Wiki content is a
+    -- best-effort snapshot; missing one source is preferable to
+    -- failing the whole upsert.
+    INSERT INTO topic_summary_sources (summary_id, memory_id)
+    SELECT upserted.id, m.id
+      FROM unnest(p_source_memory_ids) AS t(id)
+      JOIN memories m ON m.id = t.id
+    ON CONFLICT DO NOTHING;
+
+    RETURN upserted;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_topic_search(p_profile text, p_query_embedding vector, p_top_k integer DEFAULT 3, p_min_similarity double precision DEFAULT 0.0)
+ RETURNS TABLE(id uuid, topic_key text, profile_id text, content text, tldr_one_line text, tldr_short text, source_count integer, source_cursor uuid, source_hash bytea, model_used text, version integer, status text, updated_at timestamp with time zone, similarity double precision)
+ LANGUAGE sql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+    -- HNSW + threshold trap: combining `WHERE similarity >= threshold`
+    -- with `ORDER BY <=> ... LIMIT k` defeats the index when the
+    -- threshold filters out top-k. Postgres falls back to scanning the
+    -- HNSW tail row-by-row. Wrap the index-driven top-k in a CTE,
+    -- apply the threshold AFTER. The index path then runs unfiltered
+    -- and the threshold trims the (already small) output.
+    WITH top_k AS (
+        SELECT id, topic_key, profile_id, content,
+               tldr_one_line, tldr_short,
+               source_count, source_cursor, source_hash,
+               model_used, version, status, updated_at,
+               1 - (embedding <=> p_query_embedding) AS similarity
+          FROM topic_summaries
+         WHERE profile_id = p_profile
+           AND status = 'fresh'
+           AND embedding IS NOT NULL
+         ORDER BY embedding <=> p_query_embedding
+         LIMIT p_top_k
+    )
+    SELECT * FROM top_k WHERE similarity >= p_min_similarity;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_topic_get_by_key(p_profile text, p_topic_key text)
+ RETURNS SETOF topic_summaries
+ LANGUAGE sql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+    SELECT * FROM topic_summaries
+     WHERE profile_id = p_profile AND topic_key = p_topic_key
+     LIMIT 1;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_topic_get_affected(p_memory_id uuid)
+ RETURNS TABLE(id uuid, profile_id text, topic_key text, status text, version integer)
+ LANGUAGE sql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+    SELECT ts.id, ts.profile_id, ts.topic_key, ts.status, ts.version
+      FROM topic_summary_sources tss
+      JOIN topic_summaries ts ON ts.id = tss.summary_id
+     WHERE tss.memory_id = p_memory_id;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_topic_list_stale(p_profile text DEFAULT NULL::text, p_older_than_days integer DEFAULT NULL::integer)
+ RETURNS SETOF topic_summaries
+ LANGUAGE sql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+    SELECT * FROM topic_summaries
+     WHERE status = 'stale'
+       AND (p_profile IS NULL OR profile_id = p_profile)
+       AND (p_older_than_days IS NULL
+            OR updated_at < now() - make_interval(days => p_older_than_days));
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_topic_list_fresh_for_drift(p_profile text)
+ RETURNS TABLE(id uuid, topic_key text, source_hash bytea)
+ LANGUAGE sql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+    SELECT id, topic_key, source_hash
+      FROM topic_summaries
+     WHERE profile_id = p_profile
+       AND status = 'fresh';
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_topic_mark_stale(p_summary_id uuid, p_reason text DEFAULT NULL::text)
+ RETURNS void
+ LANGUAGE sql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+    UPDATE topic_summaries
+       SET status = 'stale', stale_reason = p_reason
+     WHERE id = p_summary_id;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_topic_sweep_stale(p_profile text, p_older_than_days integer DEFAULT 30)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+DECLARE
+    n integer;
+BEGIN
+    WITH updated AS (
+        UPDATE topic_summaries
+           SET status = 'stale',
+               stale_reason = 'nightly sweep: idle past threshold'
+         WHERE profile_id = p_profile
+           AND status = 'fresh'
+           AND updated_at < now() - make_interval(days => p_older_than_days)
+         RETURNING id
+    )
+    SELECT count(*) INTO n FROM updated;
+    RETURN n;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_lint_orphans(p_profile text, p_sample_size integer DEFAULT 10, p_grace_minutes integer DEFAULT 5)
+ RETURNS TABLE(id text, content text, tags text[], created_at timestamp with time zone, total_count bigint)
+ LANGUAGE sql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+    -- LEFT JOIN ... ON (source_id = m.id OR target_id = m.id) defeats the
+    -- per-column indexes on memory_relationships and forces a sequential
+    -- scan of the edge table. Two NOT EXISTS subqueries each use an index
+    -- cleanly. Critical for profiles with thousands of memories.
+    WITH orphans AS (
+        SELECT m.id, m.content, m.tags, m.created_at
+          FROM memories m
+         WHERE m.profile = p_profile
+           AND m.created_at < now() - make_interval(mins => p_grace_minutes)
+           AND (m.expires_at IS NULL OR m.expires_at > now())
+           AND NOT EXISTS (
+               SELECT 1 FROM memory_relationships mr
+                WHERE mr.source_id = m.id
+           )
+           AND NOT EXISTS (
+               SELECT 1 FROM memory_relationships mr
+                WHERE mr.target_id = m.id
+           )
+    )
+    SELECT id::text, content, tags, created_at,
+           (SELECT count(*) FROM orphans)
+      FROM orphans
+     ORDER BY created_at DESC
+     LIMIT p_sample_size;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_lint_contradictions(p_profile text, p_sample_size integer DEFAULT 10)
+ RETURNS TABLE(source_id text, target_id text, strength double precision, created_at timestamp with time zone, total_count bigint)
+ LANGUAGE sql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+    WITH all_pairs AS (
+        SELECT mr.source_id, mr.target_id, mr.strength, mr.created_at
+          FROM memory_relationships mr
+          JOIN memories ms ON ms.id = mr.source_id AND ms.profile = p_profile
+          JOIN memories mt ON mt.id = mr.target_id AND mt.profile = p_profile
+         WHERE mr.relationship = 'contradicts'
+    )
+    SELECT mr.source_id::text, mr.target_id::text, mr.strength, mr.created_at,
+           (SELECT count(*) FROM all_pairs)
+      FROM all_pairs mr
+     ORDER BY mr.created_at DESC
+     LIMIT p_sample_size;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_lint_stale_lifecycle(p_profile text, p_older_than_days integer DEFAULT 90, p_sample_size integer DEFAULT 10)
+ RETURNS TABLE(id text, stage text, stage_entered_at timestamp with time zone, content text, total_count bigint)
+ LANGUAGE sql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+    WITH stale AS (
+        SELECT ml.memory_id, ml.stage, ml.stage_entered_at, m.content
+          FROM memory_lifecycle ml
+          JOIN memories m ON m.id = ml.memory_id
+         WHERE ml.profile = p_profile
+           AND ml.stage = 'stable'
+           AND ml.stage_entered_at < now() - make_interval(days => p_older_than_days)
+    )
+    SELECT memory_id::text, stage, stage_entered_at, content,
+           (SELECT count(*) FROM stale)
+      FROM stale
+     ORDER BY stage_entered_at ASC
+     LIMIT p_sample_size;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_recompute_get_source_ids(p_profile text, p_tag text)
+ RETURNS TABLE(id text)
+ LANGUAGE sql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+    SELECT id::text
+      FROM memories
+     WHERE profile = p_profile
+       AND p_tag = ANY(tags)
+       AND (expires_at IS NULL OR expires_at > now())
+     ORDER BY id;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_recompute_get_source_content(p_memory_ids uuid[])
+ RETURNS TABLE(id text, content text)
+ LANGUAGE sql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+    SELECT id::text, content
+      FROM memories
+     WHERE id = ANY(p_memory_ids)
+     ORDER BY id;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.wiki_walk_graph(p_start_id uuid, p_max_depth integer DEFAULT 1, p_direction text DEFAULT 'both'::text, p_min_strength double precision DEFAULT 0.0, p_relationship_types text[] DEFAULT NULL::text[], p_result_limit integer DEFAULT 50)
+ RETURNS TABLE(id uuid, content text, metadata jsonb, source text, tags text[], confidence double precision, depth integer, relationship text, edge_strength double precision, connected_from uuid, direction_used text)
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+BEGIN
+    IF p_direction NOT IN ('outgoing', 'incoming', 'both') THEN
+        RAISE EXCEPTION 'direction must be outgoing/incoming/both, got %', p_direction;
+    END IF;
+    IF p_max_depth < 0 OR p_max_depth > 5 THEN
+        RAISE EXCEPTION 'depth must be 0..5, got %', p_max_depth;
+    END IF;
+
+    RETURN QUERY
+    -- Track the path so cycles (A->B->A) and diamond patterns
+    -- (A->B->C, A->D->C) don't blow the recursion size. Without
+    -- this, dense graphs at depth=5 generate orders of magnitude
+    -- more rows than DISTINCT ON ultimately keeps.
+    WITH RECURSIVE graph AS (
+        SELECT p_start_id AS id, 0 AS depth,
+               NULL::relationship_type AS rel,
+               NULL::float AS edge_strength,
+               NULL::uuid AS connected_from,
+               NULL::text AS direction_used,
+               ARRAY[p_start_id] AS visited
+        UNION ALL
+        SELECT
+            next_id.v,
+            g.depth + 1,
+            mr.relationship,
+            mr.strength,
+            g.id,
+            CASE
+                WHEN mr.source_id = g.id THEN 'outgoing'
+                ELSE 'incoming'
+            END,
+            g.visited || next_id.v
+        FROM graph g
+        JOIN memory_relationships mr
+          ON CASE
+                WHEN p_direction = 'outgoing' THEN mr.source_id = g.id
+                WHEN p_direction = 'incoming' THEN mr.target_id = g.id
+                ELSE (mr.source_id = g.id OR mr.target_id = g.id)
+             END
+        CROSS JOIN LATERAL (
+            -- Materialise the next id once so the cycle filter and the
+            -- SELECT projection see the same value without restating the
+            -- direction CASE three times.
+            SELECT CASE
+                WHEN p_direction = 'outgoing' THEN mr.target_id
+                WHEN p_direction = 'incoming' THEN mr.source_id
+                WHEN mr.source_id = g.id THEN mr.target_id
+                ELSE mr.source_id
+            END AS v
+        ) next_id
+        WHERE g.depth < p_max_depth
+          AND mr.strength >= p_min_strength
+          AND (p_relationship_types IS NULL
+               OR mr.relationship::text = ANY(p_relationship_types))
+          AND NOT (next_id.v = ANY(g.visited))
+    )
+    SELECT
+        m.id, m.content, m.metadata, m.source, m.tags, m.confidence,
+        deduped.depth, deduped.rel::text, deduped.edge_strength,
+        deduped.connected_from, deduped.direction_used
+    FROM (
+        -- Alias the CTE to `g` and qualify every column with the alias.
+        -- Two reasons: (1) the function's RETURNS TABLE(id, depth, ...)
+        -- declares OUT parameters with the same names, and PG17 raises
+        -- AmbiguousColumn when bare `id` is used inside the body;
+        -- (2) qualified `graph.id` references work in scratch PG17 but
+        -- the Supabase PG build rejects "relation graph does not exist"
+        -- on parse, so use an alias instead of the CTE name directly.
+        SELECT DISTINCT ON (g.id)
+               g.id, g.depth, g.rel,
+               g.edge_strength, g.connected_from, g.direction_used
+          FROM graph g
+         WHERE g.depth > 0
+         ORDER BY g.id, g.depth ASC
+    ) deduped
+    JOIN memories m ON m.id = deduped.id
+    ORDER BY deduped.depth ASC, deduped.edge_strength DESC NULLS LAST
+    LIMIT p_result_limit;
+END;
+$function$;
+
+
+-- ── Lifecycle + graph RPCs (migration 035) ────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.lifecycle_advance_fresh_to_stable(p_profile text, p_cutoff timestamp with time zone, p_s_gate double precision, p_i_gate double precision)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+DECLARE
+    v_count integer;
+BEGIN
+    WITH advanced AS (
+        UPDATE memory_lifecycle AS ml
+           SET stage            = 'stable',
+               stage_entered_at = now(),
+               updated_at       = now()
+          FROM memories AS m
+         WHERE ml.memory_id        = m.id
+           AND ml.profile          = p_profile
+           AND ml.stage            = 'fresh'
+           AND ml.stage_entered_at <= p_cutoff
+           AND (m.surprise >= p_s_gate OR m.importance >= p_i_gate)
+        RETURNING ml.memory_id
+    )
+    SELECT count(*)::integer INTO v_count FROM advanced;
+    RETURN v_count;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.lifecycle_close_editing_windows(p_profile text, p_cutoff timestamp with time zone)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+DECLARE
+    v_count integer;
+BEGIN
+    WITH closed AS (
+        UPDATE memory_lifecycle
+           SET stage            = 'stable',
+               stage_entered_at = now(),
+               updated_at       = now()
+         WHERE profile           = p_profile
+           AND stage             = 'editing'
+           AND stage_entered_at <= p_cutoff
+        RETURNING memory_id
+    )
+    SELECT count(*)::integer INTO v_count FROM closed;
+    RETURN v_count;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.lifecycle_open_editing_window(p_ids uuid[])
+ RETURNS void
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+    UPDATE memory_lifecycle
+       SET stage            = 'editing',
+           stage_entered_at = now(),
+           updated_at       = now()
+     WHERE memory_id = ANY(p_ids)
+       AND stage = 'stable';
+$function$;
+
+CREATE OR REPLACE FUNCTION public.lifecycle_pipeline_counts(p_profile text)
+ RETURNS TABLE(stage text, n bigint)
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+    SELECT stage, count(*)::bigint AS n
+      FROM memory_lifecycle
+     WHERE profile = p_profile
+     GROUP BY stage;
+$function$;
+
+
+-- ── Retrieval (migrations 035, 039, 047) ──────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.in_result_contradictions(p_profile text, p_memory_ids uuid[])
+ RETURNS TABLE(stale_id text, newer_id text, strength double precision)
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT
+        CASE WHEN a.created_at >= b.created_at THEN b.id ELSE a.id END::text AS stale_id,
+        CASE WHEN a.created_at >= b.created_at THEN a.id ELSE b.id END::text AS newer_id,
+        mr.strength
+    FROM memory_relationships mr
+    JOIN memories a ON a.id = mr.source_id AND a.profile = p_profile
+    JOIN memories b ON b.id = mr.target_id AND b.profile = p_profile
+    WHERE mr.relationship = 'contradicts'
+      AND mr.source_id = ANY(p_memory_ids)
+      AND mr.target_id = ANY(p_memory_ids)
+      -- Equal timestamps mean two peers written together, not a correction.
+      -- Ranking one above the other would be a guess, so emit nothing.
+      AND a.created_at <> b.created_at;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.gap_contradictions_for_ids(p_profile text, p_memory_ids uuid[], p_sample_size integer DEFAULT 10)
+ RETURNS TABLE(in_result_id text, other_id text, strength double precision, total_count bigint)
+ LANGUAGE sql
+ STABLE
+AS $function$
+    WITH edges AS (
+        SELECT
+            CASE WHEN mr.source_id = ANY(p_memory_ids) THEN mr.source_id ELSE mr.target_id END AS in_id,
+            CASE WHEN mr.source_id = ANY(p_memory_ids) THEN mr.target_id ELSE mr.source_id END AS other_id,
+            mr.strength
+        FROM memory_relationships mr
+        JOIN memories ms ON ms.id = mr.source_id AND ms.profile = p_profile
+        JOIN memories mt ON mt.id = mr.target_id AND mt.profile = p_profile
+        WHERE mr.relationship = 'contradicts'
+          AND (mr.source_id = ANY(p_memory_ids) OR mr.target_id = ANY(p_memory_ids))
+          AND NOT (mr.source_id = ANY(p_memory_ids) AND mr.target_id = ANY(p_memory_ids))
+    )
+    SELECT in_id::text, other_id::text, strength, count(*) OVER () AS total_count
+    FROM edges
+    LIMIT p_sample_size;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.hebbian_strengthen_edges(p_sources text[], p_targets text[], p_bootstrap real, p_rate real)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+DECLARE
+    v_count integer;
+BEGIN
+    -- Caller is responsible for canonicalising pairs (sorted) -- see
+    -- src/ogham/graph.py docstring for deadlock + idempotency rationale.
+    WITH touched AS (
+        INSERT INTO memory_relationships
+            (source_id, target_id, relationship, strength, created_by)
+        SELECT s::uuid, t::uuid, 'related', p_bootstrap, 'hebbian'
+          FROM unnest(p_sources, p_targets) AS p(s, t)
+        ON CONFLICT (source_id, target_id, relationship) DO UPDATE
+            SET strength = LEAST(1.0,
+                                 memory_relationships.strength * (1 + p_rate))
+        RETURNING source_id
+    )
+    SELECT count(*)::integer INTO v_count FROM touched;
+    RETURN v_count;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.entity_graph_density(p_profile text)
+ RETURNS TABLE(entities double precision, edges double precision)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+BEGIN
+    IF to_regclass('public.memory_entities') IS NULL THEN
+        RETURN QUERY SELECT 0.0::double precision, 0.0::double precision;
+        RETURN;
+    END IF;
+    RETURN QUERY EXECUTE
+        'SELECT
+            count(DISTINCT entity_id)::double precision AS entities,
+            count(*)::double precision                  AS edges
+           FROM memory_entities
+          WHERE profile = $1'
+        USING p_profile;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.suggest_unlinked_by_shared_entities(p_memory_id uuid, p_profile text, p_min_shared integer, p_limit integer)
+ RETURNS TABLE(id text, shared_count bigint, shared_entities text[], content text, created_at timestamp with time zone, tags text[])
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions', 'pg_catalog'
+AS $function$
+BEGIN
+    -- Same to_regclass guard as entity_graph_density. Both `entities`
+    -- and `memory_entities` are needed; check the more-derived one.
+    IF to_regclass('public.memory_entities') IS NULL
+       OR to_regclass('public.entities') IS NULL THEN
+        RETURN;
+    END IF;
+    RETURN QUERY EXECUTE
+        'WITH target_entities AS (
+            SELECT entity_id FROM memory_entities
+             WHERE memory_id = $1
+        ),
+        shared AS (
+            SELECT
+                me.memory_id,
+                count(*)::bigint AS shared_count,
+                array_agg(e.entity_type || '':'' || e.canonical_name) AS shared_entities
+              FROM memory_entities me
+              JOIN target_entities te ON te.entity_id = me.entity_id
+              JOIN entities e         ON e.id        = me.entity_id
+             WHERE me.memory_id != $1
+               AND me.profile    = $2
+             GROUP BY me.memory_id
+            HAVING count(*) >= $3
+        ),
+        unlinked AS (
+            SELECT s.* FROM shared s
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM memory_relationships mr
+                  WHERE (mr.source_id = $1 AND mr.target_id = s.memory_id)
+                     OR (mr.target_id = $1 AND mr.source_id = s.memory_id)
+             )
+        )
+        SELECT
+            u.memory_id::text AS id,
+            u.shared_count,
+            u.shared_entities,
+            m.content,
+            m.created_at,
+            m.tags
+          FROM unlinked u
+          JOIN memories m ON m.id = u.memory_id
+         WHERE m.expires_at IS NULL OR m.expires_at > now()
+         ORDER BY u.shared_count DESC, m.created_at DESC
+         LIMIT $4'
+        USING p_memory_id, p_profile, p_min_shared, p_limit;
+END;
+$function$;
+
+
+-- ── Triggers ─────────────────────────────────────────────────────────
+
+DROP TRIGGER IF EXISTS memories_extract_occurrence ON memories;
+CREATE TRIGGER memories_extract_occurrence BEFORE INSERT OR UPDATE ON public.memories FOR EACH ROW EXECUTE FUNCTION extract_occurrence_from_content();
+
+DROP TRIGGER IF EXISTS topic_summaries_bump_updated_at ON topic_summaries;
+CREATE TRIGGER topic_summaries_bump_updated_at BEFORE UPDATE ON public.topic_summaries FOR EACH ROW EXECUTE FUNCTION topic_summaries_set_updated_at();
+
+-- ── RLS for topic summaries (migration 032, self-guarding on the anon role) ──
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        RAISE NOTICE
+            'anon role not found -- skipping RLS setup for topic_summaries '
+            '+ topic_summary_sources (non-Supabase install)';
+        RETURN;
+    END IF;
+
+    -- topic_summaries
+    IF NOT (SELECT rowsecurity FROM pg_tables
+              WHERE tablename = 'topic_summaries' AND schemaname = 'public') THEN
+        EXECUTE 'ALTER TABLE topic_summaries ENABLE ROW LEVEL SECURITY';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policy p
+          JOIN pg_class c ON c.oid = p.polrelid
+         WHERE c.relname = 'topic_summaries' AND p.polname = 'Deny anon access'
+    ) THEN
+        EXECUTE $policy$
+            CREATE POLICY "Deny anon access" ON topic_summaries
+                FOR ALL TO anon
+                USING (false) WITH CHECK (false)
+        $policy$;
+    END IF;
+
+    -- topic_summary_sources (FK junction table)
+    IF NOT (SELECT rowsecurity FROM pg_tables
+              WHERE tablename = 'topic_summary_sources' AND schemaname = 'public') THEN
+        EXECUTE 'ALTER TABLE topic_summary_sources ENABLE ROW LEVEL SECURITY';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policy p
+          JOIN pg_class c ON c.oid = p.polrelid
+         WHERE c.relname = 'topic_summary_sources' AND p.polname = 'Deny anon access'
+    ) THEN
+        EXECUTE $policy$
+            CREATE POLICY "Deny anon access" ON topic_summary_sources
+                FOR ALL TO anon
+                USING (false) WITH CHECK (false)
+        $policy$;
+    END IF;
+END$$;
+
+COMMIT;
+
+-- ── Grants for the lifecycle/graph RPCs (migration 035, self-guarding) ──
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.lifecycle_advance_fresh_to_stable(text, timestamptz, float, float) TO authenticated, service_role';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.lifecycle_close_editing_windows(text, timestamptz) TO authenticated, service_role';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.lifecycle_open_editing_window(uuid[]) TO authenticated, service_role';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.lifecycle_pipeline_counts(text) TO authenticated, service_role';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.hebbian_strengthen_edges(text[], text[], real, real) TO authenticated, service_role';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.entity_graph_density(text) TO authenticated, service_role';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.suggest_unlinked_by_shared_entities(uuid, text, integer, integer) TO authenticated, service_role';
+    END IF;
+END
+$$;
+
+-- ── Revoke the REST surface on the SECURITY DEFINER RPCs (migration 037) ──
+-- Migration 037 revokes ELEVEN functions; only the three above the entity-edge
+-- section were ever backported, so a fresh install exposed the lifecycle and
+-- graph RPCs where an upgraded install did not. Runs after the 035 grants for
+-- the same reason 037 is numbered after 035: the grant comes first, then the
+-- narrowing. Keep this list in step with migration 037.
+REVOKE EXECUTE ON FUNCTION lifecycle_advance_fresh_to_stable(text, timestamptz, double precision, double precision) FROM anon, authenticated, PUBLIC;
+REVOKE EXECUTE ON FUNCTION lifecycle_close_editing_windows(text, timestamptz) FROM anon, authenticated, PUBLIC;
+REVOKE EXECUTE ON FUNCTION lifecycle_open_editing_window(uuid[]) FROM anon, authenticated, PUBLIC;
+REVOKE EXECUTE ON FUNCTION lifecycle_pipeline_counts(text) FROM anon, authenticated, PUBLIC;
+REVOKE EXECUTE ON FUNCTION hebbian_strengthen_edges(text[], text[], real, real) FROM anon, authenticated, PUBLIC;
+REVOKE EXECUTE ON FUNCTION entity_graph_density(text) FROM anon, authenticated, PUBLIC;
+REVOKE EXECUTE ON FUNCTION suggest_unlinked_by_shared_entities(uuid, text, integer, integer) FROM anon, authenticated, PUBLIC;
+
+-- ── Comment restored with the 047 backport ──────────────────────────────
+COMMENT ON FUNCTION in_result_contradictions(p_profile text, p_memory_ids uuid[]) IS
+    'Contradiction pairs with both endpoints inside a result set, oriented stale -> newer by created_at. Complements gap_contradictions_for_ids, which covers only pairs reaching outside the set. See TBU-207.';

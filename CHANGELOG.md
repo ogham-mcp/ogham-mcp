@@ -4,6 +4,118 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.18.0] - 2026-08-19 -- Graph in the bundle, person entities out, RLS on the audit log
+
+### Added
+
+- **`ogham export --format okf` now carries the typed-entity graph.** Alongside
+  your memories the bundle gains an `entities/` directory -- one concept per
+  entity, each edge written as a frontmatter triple on its subject -- plus a
+  root `context.jsonld`. Together these make the bundle conforming Vault-LD via
+  the lift in Appendix B of that spec.
+
+  **Export only in this release.** Memories round-trip exactly as before, but
+  nothing reads the graph back in: `ogham import` skips `entities/` rather than
+  turning entity concepts into memories.
+- Memory concepts gain a `MENTIONS` property linking to the entities extracted
+  from them, so `schema:mentions` lands on the concepts themselves and not only
+  in the vocabulary.
+- The bundle index declares `ogham_graph_version: 1` next to `okf_version`.
+  `okf_version` covers the OKF container; the graph layer is Ogham's own and
+  needed a number of its own.
+- `EntityGraph` gains `list_entities`, `list_edges` and `list_aliases` on both
+  the Postgres and Supabase backends. It could already walk the graph and fetch
+  a single edge, but never enumerate a profile.
+
+### Removed
+
+- **Ogham no longer extracts `person:` entities.** Every other entity class has
+  an unambiguous syntactic marker -- CamelCase for `entity:`, a path separator
+  for `file:`, an `Error` suffix for `error:`. `person:` had none. It inferred
+  personhood from capitalisation, which cannot tell `Kevin Burns` from
+  `Durable Objects` because to a shape rule the two are identical. It also
+  missed real given names whose spelling collides with a common word in one of
+  the 33 languages its filter covered -- so the misses were not evenly spread,
+  they fell along naming tradition.
+
+  Three successive gates were tried. Each removed one family of false positives
+  and revealed the next. The class is gone rather than narrowed.
+
+  **What this means for you:** existing `person:` tags stay in your database and
+  remain searchable, and no new ones are written. If you filter searches on a
+  `person:` tag, that filter will stop matching newly-stored memories.
+  `entity:`, `file:` and `error:` are unaffected.
+- `extract_entities()` no longer takes a `lang` argument. It selected a
+  per-language person-name gate and had no other effect.
+- `stop-words` is no longer a dependency. It backed only the person classifier.
+- **Hooks no longer capture Bash output.** `PostToolUse` is scoped to
+  `Edit|Write`. Command stdout was being stored as memories, which buried real
+  content under transcript noise.
+
+### Fixed
+
+- **`audit_log` had no row-level security on a fresh Supabase install.** The
+  migrations enable RLS on it and attach a deny-anon policy; neither
+  `sql/schema.sql` nor `sql/schema_selfhost_supabase.sql` did. On the two
+  install targets where the `anon` role actually exists, a database created
+  from the schema file left the table recording who did what readable, while a
+  database grown through the migrations did not. Both schemas now match their
+  migrations.
+- The wiki tables `topic_summaries` and `topic_summary_sources` were missing
+  their Data API grants in both Supabase schemas. The `GRANT` block sits above
+  the statements that create those two tables, so it could never have covered
+  them.
+- **A fresh install was missing 8 of migration 037's 11 `REVOKE`s**, leaving
+  `PUBLIC` able to execute 7 of 10 `SECURITY DEFINER` functions on a
+  newly-created database. Migrated installs were unaffected. All three shipping
+  schema files now match their migrations; 62 drifted objects were backported.
+- The schema drift gate compared object *names* and reported a clean run while
+  eight function *bodies* differed. It now compares `pg_dump` definitions and
+  runs against all three schema variants in CI, along with the full Postgres
+  integration suite -- previously the SQL layer was verified to install but
+  never to behave.
+- **Spreading activation no longer walks through `person:` entities.** Seeds
+  were already filtered, but the graph walk expanded through whatever
+  co-occurred with them, so on any database created before this release the
+  traversal was dominated by entities that were never people.
+- `DatabaseBackend` declared only one of the two contradiction lookups, so the
+  second was invisible to anything typing against the protocol.
+- OKF export: the memory id was emitted as a raw object on Postgres, breaking
+  the bundle; stale `MENTIONS` entries from metadata are rejected; edge and
+  alias ordering is pinned so exports are reproducible.
+
+### Upgrading
+
+- Apply `sql/migrations/048_activation_skips_person_entities.sql`. Without it,
+  spreading activation keeps traversing person entities.
+- If your database was created from a schema file rather than grown through the
+  migrations, apply `027_audit_log_backfill.sql` and `038_data_api_grants.sql`
+  to close the two gaps above. Both are idempotent and both no-op on vanilla
+  Postgres, where the guarded roles do not exist.
+
+### Notes and limits
+
+- **Edge qualifiers are not in the bundle.** No `strength`, `valid_from`,
+  `fact_id` or `derived_from`, so provenance chains and edge weights do not
+  travel with an export. `store_triple` hardcodes `strength` and `valid_from`,
+  so carrying those fields would advertise a fidelity the write path cannot
+  deliver. They get designed alongside a write path that can accept them.
+- Only current edges are exported (`valid_to IS NULL`). Superseded history stays
+  in the database.
+- **Ogham older than v0.18 imports entity concepts as memories.** Older releases
+  walk every `.md` file and filter by file name, so they cannot tell an entity
+  concept from a memory. Import a bundle with the version that wrote it or
+  newer.
+- A profile with no entities exports exactly the bundle earlier releases
+  produced, byte for byte: no `entities/`, no `context.jsonld`, no
+  `ogham_graph_version`.
+- An OKF-only consumer reads the bundle unchanged. Every `.md` file carries the
+  one field OKF requires, `type`; entity concepts declare `type: Entity`, and
+  `context.jsonld` is invisible to a walker looking for markdown.
+- An OKF export is a full plaintext dump of the profile written to the current
+  working directory. It is not a backup -- it omits superseded edges, edge
+  qualifiers, and everything import cannot restore.
+
 ## [0.17.2] - 2026-08-03 -- Supersession ranking, embedding batch integrity, quieter hooks
 
 ### Added

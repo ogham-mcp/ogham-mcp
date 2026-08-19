@@ -58,6 +58,9 @@ def backfill_entities(
         memory_id = str(row["id"])
         content = row.get("content") or ""
         row_profile = row.get("profile") or profile or "default"
+        # person: dropped for the same reason as the live write path
+        # (TBU-242) -- this is an independent entry point, so without it a
+        # single backfill run re-seeds every junk entity the fix removed.
         entity_tags = extract_entities(content)
         if entity_tags:
             try:

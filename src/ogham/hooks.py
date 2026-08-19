@@ -849,8 +849,11 @@ def _extract_memory_content(
         return _extract_edit_memory(tool_input, cwd)
     if tool_name == "Write":
         return _extract_write_memory(tool_input, tool_response, cwd)
-    if tool_name == "Bash":
-        return _extract_bash_memory(tool_input, tool_response[:2000], cwd)
+    # Bash is deliberately NOT captured (TBU-231). It produced 65% of the store
+    # and every sampled row had access_count 0 -- none of it was ever recalled.
+    # The matcher written by `ogham hooks install` is scoped to Edit|Write so
+    # these events should not arrive at all; this returns None as a backstop for
+    # installs whose settings.json still carries the old match-all matcher.
     return None
 
 

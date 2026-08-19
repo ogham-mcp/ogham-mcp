@@ -78,7 +78,15 @@ def test_join_result_shape():
 
 
 def test_entity_graph_protocol_signature():
-    """Any class implementing the six methods should satisfy the Protocol."""
+    """Any class implementing every protocol method should satisfy the Protocol.
+
+    Was "the six methods" until TBU-130 added the three enumeration primitives.
+    Note what this test costs: because ``EntityGraph`` is ``runtime_checkable``,
+    widening it silently un-conforms every existing implementer. That is fine
+    here -- the only implementers are our two backends, both updated in the same
+    change -- but it is the reason to think twice before adding a seventh method
+    if anything outside this repo ever implements the protocol.
+    """
     from ogham.entity_graph import EntityGraph
 
     class Dummy:
@@ -110,6 +118,15 @@ def test_entity_graph_protocol_signature():
 
         def find_citing_edges(self, *, source_edge_id, source_memory_id, profile):
             return []
+
+        def list_entities(self, profile):
+            return []
+
+        def list_edges(self, profile, *, current_only=True):
+            return []
+
+        def list_aliases(self, profile):
+            return {}
 
     # runtime_checkable Protocol lets us assert this cheaply
     assert isinstance(Dummy(), EntityGraph)

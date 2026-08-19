@@ -49,3 +49,22 @@ def test_make_filename_uses_first_8_hex_of_uuid():
 def test_make_filename_handles_empty_content():
     memory = {"id": "00000000-0000-0000-0000-000000000000", "content": ""}
     assert make_filename(memory) == "untitled-00000000.md"
+
+
+def test_make_filename_accepts_a_uuid_object_id():
+    """psycopg returns memories.id as uuid.UUID; PostgREST returns a string.
+
+    Every unit fixture in this suite uses a string id, so the UUID path was
+    never exercised -- and `ogham export --format okf` crashed with
+    "'UUID' object has no attribute 'replace'" on the FIRST memory, on the
+    Postgres backend, from v0.15.0 (when OKF export shipped) until this fix.
+    Found by exporting against a real database, not by any test.
+    """
+    import uuid
+
+    memory_id = uuid.UUID("d2b3e6b9-1996-4e1d-97f9-53bb27a3ffe9")
+    assert make_filename({"id": memory_id, "content": "hello world"}) == "hello-world-d2b3e6b9.md"
+    # and the string form is unchanged
+    assert make_filename({"id": str(memory_id), "content": "hello world"}) == (
+        "hello-world-d2b3e6b9.md"
+    )

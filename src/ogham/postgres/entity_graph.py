@@ -253,6 +253,74 @@ class PostgresEntityGraph:
             )
             return [self._row_to_edge(r) for r in cur.fetchall()]
 
+    # -- enumeration (TBU-130) ---------------------------------------
+
+    def list_entities(self, profile: str) -> list[Entity]:
+        """Every entity reachable in ``profile``, ordered by id.
+
+        NOT a table scan: `entities` is global (no profile column), so the
+        profile scope comes from `memory_entities` plus both endpoints of
+        `entity_edges`. Including both endpoints is what guarantees every edge
+        an OKF export writes has its object present as a concept.
+        """
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, canonical_name, entity_type
+                  FROM entities
+                 WHERE id IN (
+                        SELECT entity_id FROM memory_entities WHERE profile = %(p)s
+                        UNION
+                        SELECT subject_id FROM entity_edges WHERE profile = %(p)s
+                        UNION
+                        SELECT object_id  FROM entity_edges WHERE profile = %(p)s
+                       )
+                 ORDER BY id
+                """,
+                {"p": profile},
+            )
+            return [
+                Entity(
+                    id=int(row["id"]),
+                    canonical_name=row["canonical_name"],
+                    entity_type=row["entity_type"],
+                )
+                for row in cur.fetchall()
+            ]
+
+    def list_edges(self, profile: str, *, current_only: bool = True) -> list[EntityEdge]:
+        # The interpolated fragment is one of two literals chosen by a bool --
+        # no caller input reaches the SQL string. Values stay parameterised.
+        current_clause = "AND valid_to IS NULL" if current_only else ""
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT id, subject_id, predicate, object_id, profile, fact_id, strength,
+                       metadata, derived_from, valid_from, valid_to
+                  FROM entity_edges
+                 WHERE profile = %(p)s {current_clause}
+                 ORDER BY id
+                """,
+                {"p": profile},
+            )
+            return [self._row_to_edge(row) for row in cur.fetchall()]
+
+    def list_aliases(self, profile: str) -> dict[int, list[str]]:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT entity_id, alias
+                  FROM entity_aliases
+                 WHERE profile = %(p)s
+                 ORDER BY entity_id, alias
+                """,
+                {"p": profile},
+            )
+            out: dict[int, list[str]] = {}
+            for row in cur.fetchall():
+                out.setdefault(int(row["entity_id"]), []).append(row["alias"])
+            return out
+
     # -- helpers -----------------------------------------------------
 
     def _resolve_to_id(self, name_or_id: str | int, profile: str) -> int | None:

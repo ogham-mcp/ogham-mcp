@@ -1,11 +1,12 @@
 """Export and import memory data."""
 
 import json
+import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ogham.database import (
     batch_check_duplicates,
@@ -14,6 +15,11 @@ from ogham.database import (
     store_memories_batch,
 )
 from ogham.embeddings import generate_embeddings_batch
+
+if TYPE_CHECKING:
+    from ogham.entity_graph import Entity, EntityEdge
+
+logger = logging.getLogger(__name__)
 
 
 def _list_all_memories(profile: str) -> list[dict[str, Any]]:
@@ -33,6 +39,48 @@ def _get_producer_version() -> str:
         return "ogham-mcp/dev"
 
 
+def _fetch_graph(
+    profile: str,
+) -> tuple[list["Entity"], list["EntityEdge"], dict[int, list[str]], dict[str, list[int]]]:
+    """Read the whole entity graph for ``profile``, for the OKF bundle writer.
+
+    Fails OPEN, matching ``_demote_superseded`` in service.py: an install that
+    never ran the entity migrations (pre-036), or a backend with no entity-graph
+    implementation at all (gateway), must still get a valid memories-only
+    bundle. The graph layer is additive to the bundle -- refusing to export
+    anything because a join table is missing would be the wrong trade.
+
+    The whole fetch is one try block on purpose. These four reads are one
+    consistent view of the graph, and a partial one is worse than none: edges
+    without their entities are the dangling links the bundle format is built to
+    make impossible.
+    """
+    # Imported lazily and by module, not by name: the test suite patches
+    # ``ogham.database.get_entity_graph_and_vocab``, and a module-level
+    # ``from ... import`` would bind the original past the patch.
+    from ogham.database import get_entity_graph_and_vocab, get_memory_entities
+
+    # Accumulate into locals and publish only on full success. Assigning the
+    # four results directly would leave the earlier ones populated when a later
+    # read raises, returning exactly the partial view this docstring rules out.
+    #
+    # That is not a rare race. `derived_from` is added to entity_edges by
+    # ALTER TABLE in migration 046, and `list_edges` names it while
+    # `list_entities` does not -- so on an install sitting at 041-045 the second
+    # read fails *deterministically* while the first succeeds. An install at
+    # 041/042 loses aliases the same way (entity_aliases arrives in 043).
+    try:
+        graph, _vocab = get_entity_graph_and_vocab()
+        fetched_entities = graph.list_entities(profile)
+        fetched_edges = graph.list_edges(profile)
+        fetched_aliases = graph.list_aliases(profile)
+        fetched_mem_entities = get_memory_entities(profile)
+    except Exception as exc:
+        logger.warning("OKF export: graph layer unavailable, exporting memories only: %s", exc)
+        return [], [], {}, {}
+    return fetched_entities, fetched_edges, fetched_aliases, fetched_mem_entities
+
+
 def export_memories(profile: str, format: str = "json", *, include_viewer: bool = True) -> str:
     """Export all memories in a profile to a string or bundle path.
 
@@ -45,7 +93,10 @@ def export_memories(profile: str, format: str = "json", *, include_viewer: bool 
     memories = _list_all_memories(profile)
 
     if format == "okf":
-        from ogham.okf import export_okf_bundle
+        # Imported from the defining module, not the ``ogham.okf`` package
+        # re-export: patching the package attribute would leave this binding
+        # untouched, so tests could not observe what the bundle writer is handed.
+        from ogham.okf.bundle import export_okf_bundle
 
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         bundle_dir = Path.cwd() / f"ogham-okf-{profile}-{stamp}"
@@ -54,7 +105,17 @@ def export_memories(profile: str, format: str = "json", *, include_viewer: bool 
             "exported_at": datetime.now(timezone.utc).isoformat(),
             "profile": profile,
         }
-        export_okf_bundle(memories, bundle_dir, manifest, include_viewer=include_viewer)
+        entities, edges, aliases, mem_entities = _fetch_graph(profile)
+        export_okf_bundle(
+            memories,
+            bundle_dir,
+            manifest,
+            include_viewer=include_viewer,
+            entities=entities,
+            edges=edges,
+            aliases=aliases,
+            memory_entities=mem_entities,
+        )
         return str(bundle_dir)
 
     if format == "markdown":
