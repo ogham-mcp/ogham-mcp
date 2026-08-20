@@ -119,3 +119,106 @@ def entity_to_frontmatter(
     if dangling:
         fm["ogham_dangling"] = dangling
     return fm
+
+
+#: Entity-id suffix minted by ``make_entity_filename``. Parsing it back is how
+#: an imported edge target resolves to a concept without a second index.
+_ENTITY_ID_SUFFIX = re.compile(r"-e(\d+)$")
+
+
+def entity_id_from_note_name(note_name: str) -> int | None:
+    """Recover the SOURCE entity id from a note name, or None.
+
+    Source, not local: the id identifies the concept within the bundle it came
+    from. Import maps it to a local id by natural key, never by trusting it.
+    """
+    m = _ENTITY_ID_SUFFIX.search(note_name)
+    return int(m.group(1)) if m else None
+
+
+class ParsedEntityConcept:
+    """One entity concept read back from a bundle. Marshalling only, no ids."""
+
+    __slots__ = (
+        "canonical_name",
+        "entity_type",
+        "source_entity_id",
+        "aliases",
+        "edges",
+        "note_name",
+    )
+
+    def __init__(
+        self,
+        canonical_name: str,
+        entity_type: str,
+        source_entity_id: int | None,
+        aliases: list[str],
+        edges: list[tuple[str, str]],
+        note_name: str = "",
+    ):
+        self.canonical_name = canonical_name
+        self.entity_type = entity_type
+        self.source_entity_id = source_entity_id
+        self.aliases = aliases
+        #: (predicate, target NOTE NAME) -- resolution to an id happens later
+        self.edges = edges
+        #: this concept's own note name, which is what other concepts' edges
+        #: point at. Resolution is by note name, never by source id.
+        self.note_name = note_name
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (
+            f"ParsedEntityConcept({self.entity_type}:{self.canonical_name!r}, "
+            f"src={self.source_entity_id}, edges={len(self.edges)})"
+        )
+
+
+def frontmatter_to_entity(fm: dict, note_name: str = "") -> ParsedEntityConcept | None:
+    """Parse an entity concept's frontmatter. Returns None if it is not one.
+
+    **Allowlist, not denylist.** Only the 16 predicates in ``allowed_predicates``
+    are read as edges. The drafted alternative enumerated what is *not* a triple,
+    which meant any unknown list-valued key holding wiki-link-shaped values
+    became an edge -- and vault-ld SPEC 4.3 names three host-tool keys a
+    conforming tool MUST NOT emit as triples (`tags`, `aliases`, `cssclasses`),
+    of which the draft covered one. An allowlist is both more correct and
+    shorter.
+
+    ``ogham_dangling`` is deliberately NOT read back as edges: the exporter
+    writes it precisely because those objects were absent from the bundle, so
+    there is nothing to point at.
+    """
+    from ogham.entity_graph import V1_PREDICATES
+
+    if not isinstance(fm, dict) or fm.get("type") != ENTITY_OKF_TYPE:
+        return None
+    canonical_name = fm.get("canonical_name")
+    entity_type = fm.get("entity_type")
+    if not isinstance(canonical_name, str) or not canonical_name:
+        return None
+    if not isinstance(entity_type, str) or not entity_type:
+        return None
+
+    source_id = fm.get("entity_id")
+    if not isinstance(source_id, int):
+        source_id = entity_id_from_note_name(note_name)
+
+    raw_aliases = fm.get("aliases")
+    aliases = (
+        [a for a in raw_aliases if isinstance(a, str) and a]
+        if isinstance(raw_aliases, list)
+        else []
+    )
+
+    edges: list[tuple[str, str]] = []
+    for predicate in sorted(V1_PREDICATES):
+        values = fm.get(predicate)
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            target = resolve_wiki_link(value)
+            if target:
+                edges.append((predicate, target))
+
+    return ParsedEntityConcept(canonical_name, entity_type, source_id, aliases, edges, note_name)

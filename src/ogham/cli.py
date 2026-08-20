@@ -655,8 +655,28 @@ def import_cmd(
     file: str = typer.Argument(help="JSON file to import"),
     profile: str = typer.Option(None, help="Profile to import into"),
     dedup: float = typer.Option(0.8, help="Dedup threshold (0 to disable)"),
+    with_graph: bool = typer.Option(
+        False,
+        "--with-graph",
+        help="Also import the bundle's entities/ graph layer (OKF bundles only)",
+    ),
+    graph_dry_run: bool = typer.Option(
+        False,
+        "--graph-dry-run",
+        help="With --with-graph, report what the graph import would do and write nothing",
+    ),
 ):
-    """Import memories from a JSON export file."""
+    """Import memories from a JSON export file, or an OKF bundle directory.
+
+    The bundle's entity graph is imported only with --with-graph, because
+    `entities` is global -- it has no profile column -- so a graph import
+    mutates rows every profile reads.
+
+    There is no reliable undo: importing into a populated profile MERGES rather
+    than restores, and snapshotting first does not help because the snapshot is
+    built from the same export path. Use --graph-dry-run to look before you
+    write.
+    """
     from ogham.flow_control import disabled_message, inscribe_enabled
 
     if not inscribe_enabled():
@@ -713,12 +733,35 @@ def import_cmd(
             dedup_threshold=dedup,
             on_progress=on_progress,
             on_embed_progress=on_embed_progress,
+            import_graph=with_graph,
+            graph_dry_run=graph_dry_run,
         )
 
     console.print(
         f"[green]Imported {result['imported']} memories, "
         f"skipped {result['skipped']} duplicates.[/green]"
     )
+
+    graph = result.get("graph")
+    if graph:
+        if not graph.get("graph_present"):
+            console.print("[dim]No entities/ layer in this bundle.[/dim]")
+        elif graph.get("dry_run"):
+            console.print(
+                f"[yellow]DRY RUN -- nothing written.[/yellow] Would create "
+                f"{graph.get('entities_new', 0)} entities "
+                f"({graph.get('entities_existing', 0)} already exist) and "
+                f"{graph.get('edges_written', 0)} edges "
+                f"({graph.get('edges_already_present', 0)} already present, "
+                f"{graph.get('unresolved_edges', 0)} unresolved)."
+            )
+        else:
+            console.print(
+                f"[green]Graph: {graph.get('entities_new', 0)} entities created, "
+                f"{graph.get('edges_written', 0)} edges written "
+                f"({graph.get('edges_already_present', 0)} already present, "
+                f"{graph.get('unresolved_edges', 0)} unresolved).[/green]"
+            )
 
 
 @app.command(name="import-claude-code")

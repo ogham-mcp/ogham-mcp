@@ -22,6 +22,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class _SkipAudit(Exception):
+    """Internal: a dry run mutated nothing, so there is nothing to audit."""
+
+
 def _list_all_memories(profile: str) -> list[dict[str, Any]]:
     """Fetch all memories for a profile. Extracted so tests can patch it."""
     return get_all_memories_full(profile)
@@ -226,6 +230,8 @@ def import_memories(
     dedup_threshold: float = 0.0,
     on_progress: Callable[[int, int, int], None] | None = None,
     on_embed_progress: Callable[[int, int], None] | None = None,
+    import_graph: bool = False,
+    graph_dry_run: bool = False,
 ) -> dict[str, Any]:
     """Import memories from a JSON string or an OKF bundle directory path.
 
@@ -237,9 +243,22 @@ def import_memories(
     The existing JSON path (``data`` is a JSON string) keeps working exactly
     as v0.9.1 ships -- issue #20 fix stays valid for all existing users.
 
+    The bundle's ``entities/`` layer is read only when ``import_graph=True``.
+    It defaults OFF because ``entities`` has no profile column -- it is global,
+    scoped only through ``memory_entities`` and ``entity_edges`` -- so importing
+    a graph mutates rows every profile reads. Profiles are a convenience
+    namespace rather than a trust boundary here (decided 2026-08-20), which
+    makes that acceptable when asked for and surprising when not.
+
+    Scope: this imports YOUR OWN bundles. Importing a third-party bundle is not
+    supported -- see the caps in ``okf/bundle.py``.
+
     Args:
         on_progress: Optional callback(imported, skipped, total) called after each memory.
         on_embed_progress: Optional callback(embedded, total) called after each batch.
+        import_graph: Also read ``entities/`` back into the entity graph.
+        graph_dry_run: With ``import_graph``, report what the graph import
+            would do and write nothing. Memories are still imported.
     """
     # ── OKF bundle path ────────────────────────────────────────────────
     if isinstance(data, str) and _looks_like_okf_bundle_dir(data):
@@ -310,7 +329,7 @@ def import_memories(
             store_memories_batch(rows_to_insert)
             inserted = len(rows_to_insert)
 
-        return {
+        result: dict[str, Any] = {
             "status": "complete",
             "profile": profile,
             "imported": upserted + inserted,
@@ -319,6 +338,35 @@ def import_memories(
             "missing_id_count": stats["missing_id_count"],
             "skipped_count": stats["skipped_count"],
         }
+
+        if import_graph:
+            from ogham.database import emit_audit_event, get_entity_graph_and_vocab
+            from ogham.okf.bundle import import_okf_graph
+            from ogham.okf.graph_import import apply_okf_graph
+
+            concepts, graph_stats = import_okf_graph(bundle_dir)
+            if concepts:
+                graph, _vocab = get_entity_graph_and_vocab()
+                applied = apply_okf_graph(concepts, profile, graph, dry_run=graph_dry_run)
+                graph_stats.update(applied)
+                # Audit: without this, "the import did something to my graph and
+                # I cannot tell what" is not diagnosable even in principle.
+                try:
+                    if graph_dry_run:
+                        raise _SkipAudit  # a dry run changed nothing to audit
+                    emit_audit_event(
+                        profile=profile,
+                        operation="import_okf_graph",
+                        outcome="success",
+                        metadata=graph_stats,
+                    )
+                except _SkipAudit:
+                    pass
+                except Exception as exc:
+                    logger.debug("audit event for graph import skipped: %s", exc)
+            result["graph"] = graph_stats
+
+        return result
 
     # ── JSON string path (v0.9.1 behaviour, unchanged) ─────────────────
     parsed = json.loads(data)

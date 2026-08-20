@@ -8,6 +8,12 @@ class _FakeGraph:
         self._by_name = entities_by_name
         self._aliases = aliases  # (alias, profile) -> entity_id
 
+    def upsert_entity(self, canonical_name: str, entity_type: str) -> int:
+        return 1
+
+    def find_entity(self, canonical_name: str, entity_type: str) -> int | None:
+        return None
+
     def store_triple(self, *args, **kwargs):
         raise NotImplementedError
 

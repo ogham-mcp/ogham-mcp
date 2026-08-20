@@ -10,7 +10,13 @@ from typing import Any
 from ogham.entity_graph import Entity, EntityEdge
 from ogham.okf.concept import frontmatter_to_memory, memory_to_frontmatter
 from ogham.okf.context import CONTEXT_FILENAME, build_context
-from ogham.okf.entities import ENTITIES_DIR, entity_to_frontmatter, make_entity_filename
+from ogham.okf.entities import (
+    ENTITIES_DIR,
+    ParsedEntityConcept,
+    entity_to_frontmatter,
+    frontmatter_to_entity,
+    make_entity_filename,
+)
 from ogham.okf.identity import make_filename
 from ogham.okf.serialization import read_concept, write_concept
 
@@ -249,3 +255,77 @@ def import_okf_bundle(bundle_dir: Path) -> tuple[list[dict[str, Any]], dict[str,
         "skipped_count": skipped_count,
     }
     return memories, stats
+
+
+#: Bounds for graph import. Kevin's ruling 2026-08-20: importing a bundle from
+#: someone else's install is NOT supported, so these are corruption guards, not
+#: an adversarial threat model. They exist so a malformed bundle fails with a
+#: number instead of hanging.
+MAX_ENTITY_CONCEPTS = 50_000
+MAX_ENTITY_FILE_BYTES = 1_000_000
+
+
+def import_okf_graph(bundle_dir: Path) -> tuple[list[ParsedEntityConcept], dict[str, Any]]:
+    """Read a bundle's ``entities/`` layer into parsed concepts + stats.
+
+    The reader for ``ogham_graph_version: 1``. IO and parsing only -- resolving
+    concepts to local ids and writing them is the caller's job, exactly as
+    ``import_okf_bundle`` returns memory dicts rather than storing them.
+
+    Returns concepts in filename order so a run is reproducible.
+
+    **Scope, decided 2026-08-20:** this imports YOUR OWN bundles. Profiles are a
+    convenience namespace here rather than a trust boundary, so writing shared
+    ``entities`` rows is accepted; and bundles are not treated as untrusted
+    input. Importing a third-party bundle is not supported -- see the caps above.
+
+    Stats: ``total`` concepts parsed, ``skipped_count`` files that were not
+    valid entity concepts, ``edge_count`` edges found, ``oversize_count`` files
+    rejected by the size cap.
+    """
+    bundle_dir = Path(bundle_dir)
+    if not bundle_dir.is_dir():
+        raise ValueError(f"{bundle_dir} is not a directory")
+
+    entity_dir = bundle_dir / ENTITIES_DIR
+    concepts: list[ParsedEntityConcept] = []
+    skipped_count = 0
+    oversize_count = 0
+    if not entity_dir.is_dir():
+        return concepts, {
+            "total": 0,
+            "skipped_count": 0,
+            "edge_count": 0,
+            "oversize_count": 0,
+            "graph_present": False,
+        }
+
+    for md_path in sorted(entity_dir.rglob("*.md")):
+        if md_path.name in _RESERVED_FILENAMES:
+            continue
+        if len(concepts) >= MAX_ENTITY_CONCEPTS:
+            break
+        try:
+            if md_path.stat().st_size > MAX_ENTITY_FILE_BYTES:
+                oversize_count += 1
+                continue
+            fm, _body = read_concept(md_path)
+        except (ValueError, OSError):
+            skipped_count += 1
+            continue
+        concept = frontmatter_to_entity(fm, md_path.stem)
+        if concept is None:
+            # A concept in entities/ that is not an Entity is a malformed
+            # bundle, not a memory -- surface it rather than silently widening
+            # what import_okf_bundle returns.
+            skipped_count += 1
+            continue
+        concepts.append(concept)
+
+    return concepts, {
+        "total": len(concepts),
+        "skipped_count": skipped_count,
+        "edge_count": sum(len(c.edges) for c in concepts),
+        "oversize_count": oversize_count,
+        "graph_present": True,
+    }

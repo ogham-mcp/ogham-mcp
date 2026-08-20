@@ -19,6 +19,7 @@ partial-failure scenario if this needs hardening later.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -26,7 +27,7 @@ from uuid import UUID
 
 from postgrest import SyncPostgrestClient
 
-from ogham.entity_graph import Entity, EntityEdge, JoinResult, Predicate
+from ogham.entity_graph import Entity, EntityEdge, JoinResult, Predicate, split_entity_ref
 
 
 def _rows(data: Any) -> list[dict[str, Any]]:
@@ -48,6 +49,9 @@ def _row(data: Any) -> dict[str, Any]:
     if not isinstance(data, Mapping):
         raise TypeError(f"Expected PostgREST row response, got {type(data).__name__}")
     return {str(key): value for key, value in data.items()}
+
+
+logger = logging.getLogger(__name__)
 
 
 class SupabaseEntityGraph:
@@ -375,19 +379,88 @@ class SupabaseEntityGraph:
 
     # -- helpers -----------------------------------------------------
 
-    def _resolve_to_id(self, name_or_id: str | int, profile: str) -> int | None:
-        if isinstance(name_or_id, int):
-            return name_or_id
-        # Try canonical name first
+    def find_entity(self, canonical_name: str, entity_type: str) -> int | None:
+        """Read-only lookup on the exact natural key. Mirrors the Postgres backend."""
         result = (
             self._client.table("entities")
             .select("id")
-            .eq("canonical_name", name_or_id)
+            .eq("canonical_name", canonical_name)
+            .eq("entity_type", entity_type)
             .limit(1)
             .execute()
         )
         rows = _rows(result.data)
+        return int(rows[0]["id"]) if rows else None
+
+    def upsert_entity(self, canonical_name: str, entity_type: str) -> int:
+        """Get or create by natural key. Mirrors the Postgres backend.
+
+        ``mention_count`` is untouched: an import is not a mention.
+        """
+        existing = (
+            self._client.table("entities")
+            .select("id")
+            .eq("canonical_name", canonical_name)
+            .eq("entity_type", entity_type)
+            .limit(1)
+            .execute()
+        )
+        rows = _rows(existing.data)
         if rows:
+            return int(rows[0]["id"])
+        created = (
+            self._client.table("entities")
+            .insert({"canonical_name": canonical_name, "entity_type": entity_type})
+            .execute()
+        )
+        new_rows = _rows(created.data)
+        if not new_rows:
+            raise RuntimeError(f"could not create entity {entity_type}:{canonical_name}")
+        return int(new_rows[0]["id"])
+
+    def _resolve_to_id(self, name_or_id: str | int, profile: str) -> int | None:
+        """Resolve a name, a qualified ``type:name`` ref, or an id to an entity id.
+
+        Mirrors the Postgres backend exactly. ``entities`` is
+        UNIQUE (canonical_name, entity_type), so a BARE NAME IS NOT A KEY --
+        every ``*Error`` lands under both ``entity:`` and ``error:``. The
+        previous name-only ``limit(1)`` resolved between them arbitrarily.
+        """
+        if isinstance(name_or_id, int):
+            return name_or_id
+        entity_type, name = split_entity_ref(name_or_id)
+        # Exact natural key when the caller qualified the reference.
+        if entity_type is not None:
+            result = (
+                self._client.table("entities")
+                .select("id")
+                .eq("canonical_name", name)
+                .eq("entity_type", entity_type)
+                .limit(1)
+                .execute()
+            )
+            rows = _rows(result.data)
+            if rows:
+                return int(rows[0]["id"])
+        # Unqualified: deterministic, and say so when it was ambiguous.
+        result = (
+            self._client.table("entities")
+            .select("id,entity_type")
+            .eq("canonical_name", name_or_id)
+            .order("id")
+            .execute()
+        )
+        rows = _rows(result.data)
+        if rows:
+            if len(rows) > 1:
+                logger.warning(
+                    "entity reference %r is ambiguous across types %s -- resolving to "
+                    "id=%s. Qualify it as '<type>:%s' to be explicit.",
+                    name_or_id,
+                    [r.get("entity_type") for r in rows],
+                    rows[0]["id"],
+                    name_or_id,
+                )
             return int(rows[0]["id"])
         # Fall back to alias
         result = (

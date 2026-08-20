@@ -4,6 +4,78 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.19.0] - 2026-08-20 -- Reading the graph back, and entities that say how they were established
+
+### Added
+
+- **`ogham import <bundle> --with-graph` reads a bundle's entity graph back in.**
+  v0.18.0 started writing `entities/` into OKF bundles but nothing could read it,
+  so a bundle round-tripped your memories and left the graph behind. It no longer
+  does. Use `--graph-dry-run` first: it reports exactly what the import would do
+  -- entities to create, edges to write, edges already present, edges whose
+  target is missing from the bundle -- and writes nothing.
+
+  Graph import is **opt-in** because the `entities` table is shared across
+  profiles rather than scoped to one, so importing a graph touches rows every
+  profile reads. Without the flag, nothing about your graph changes.
+
+  Two things to know before you use it. It **merges rather than restores**: into
+  a fresh profile the result is exact, but into a profile that already has a
+  graph, matching edges move forward instead of reverting to the bundle's state.
+  And there is **no undo** -- taking an export first does not give you one,
+  because edge qualifiers do not survive the round trip. That is why the dry run
+  exists. Re-running after a failure is safe: an edge that already exists is
+  skipped rather than rewritten.
+
+  This is for bundles you exported yourself. Importing a bundle from someone
+  else's install is not supported yet.
+
+- **Entities now record how they were established.** Each carries an
+  `evidence_class` of `syntactic` (an unambiguous marker in the text -- interior
+  capitalisation, a path separator, an `Error` suffix), `inferred` (a dictionary
+  or keyword match, such as a place or a preference), or `structured` (derived
+  from an adapter rather than from text).
+
+  It is not a confidence score and deliberately not a number. A score invites
+  code to multiply it into a relevance ranking, which is how a low-quality tag
+  quietly became load-bearing before v0.18.0 removed it. Your existing entities
+  are classified automatically on upgrade, and nothing in search reads the value
+  yet -- it exists so that when a suggestion and a fact end up in the same table,
+  you can tell them apart.
+
+### Fixed
+
+- **An entity reference could resolve to the wrong entity.** Entities are keyed
+  on name *and* type, but lookups matched on the name alone and took whichever
+  row came back first. This is reachable from ordinary notes: a word like
+  `ValueError` is recorded both as a general entity and as an error, so a
+  `store_triple` edge could attach to one when you meant the other, and
+  `walk_knowledge` could start from the wrong one -- with nothing reported.
+
+  You can now pass a qualified reference, `error:ValueError`, to be exact. An
+  unqualified name still works, resolves the same way every time, and logs when
+  it had to choose between candidates.
+
+- Benchmark harnesses now populate the entity graph they were meant to be
+  exercising, and check that the graph is actually reachable before reporting.
+  This does not change the server; it means our own retrieval measurements now
+  cover the graph layer rather than silently skipping it.
+
+### Upgrading
+
+Migration `049_entity_evidence_class.sql` adds the `evidence_class` column and
+classifies existing entities from their type. It is additive -- no data is
+rewritten and no column is removed. Fresh installs get it from the schema files.
+
+### Notes and limits
+
+- Nothing in retrieval uses `evidence_class` yet. Using it to decide which
+  entities the graph walk traverses was tried and rejected: it would exclude
+  places, events and preferences, which are usually correct and are exactly the
+  associations the walk exists to follow.
+- Edge qualifiers (`strength`, `valid_from`) still do not travel in a bundle,
+  because the write path does not accept them.
+
 ## [0.18.0] - 2026-08-19 -- Graph in the bundle, person entities out, RLS on the audit log
 
 ### Added

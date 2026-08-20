@@ -289,6 +289,54 @@ def pg_test_profile():
     )
 
 
+#: Postgres never reclaims a dropped column's attnum slot, and the hard ceiling
+#: is 1600 per table. ``pg_fresh_db`` drops the migration-025 lifecycle columns
+#: on every setup AND teardown, so a long-lived scratch database burns slots on
+#: `memories` steadily -- 1,580 of 1,600 were consumed on this machine before
+#: anyone noticed (2026-08-20).
+#:
+#: The failure mode is the problem: at the ceiling EVERY Postgres test dies with
+#: ``tables can have at most 1600 columns``, an error that names no fixture, no
+#: migration and no column, and that no amount of reading the diff explains. The
+#: database has to be recreated; nothing in the repo is wrong.
+_ATTNUM_CEILING = 1600
+_ATTNUM_WARN_AT = 1400
+
+
+def _check_attnum_headroom(backend) -> None:
+    """Fail loudly, and with the remedy, before the ceiling makes it cryptic."""
+    try:
+        row = backend._execute(
+            "SELECT count(*) AS used, count(*) FILTER (WHERE a.attisdropped) AS dropped "
+            "FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'public' AND c.relname = 'memories' AND a.attnum > 0",
+            {},
+            fetch="one",
+        )
+    except Exception:
+        return  # never let the guard itself break a run
+    if not row:
+        return
+    used = int(row.get("used") or 0)
+    dropped = int(row.get("dropped") or 0)
+    if used < _ATTNUM_WARN_AT:
+        return
+    pytest.fail(
+        f"scratch database is out of column headroom: `memories` has used "
+        f"{used}/{_ATTNUM_CEILING} attribute slots, {dropped} of them from dropped "
+        f"columns that Postgres never reclaims.\n\n"
+        f"Nothing in the repo is wrong. This fixture drops the migration-025 "
+        f"lifecycle columns on every setup and teardown, and the slots accumulate "
+        f"across runs.\n\n"
+        f"Recreate the scratch database:\n"
+        f"  docker exec -e PGPASSWORD=ogham_dev ogham-postgres psql -U ogham -d postgres \\\n"
+        f"    -c 'DROP DATABASE IF EXISTS ogham_scratch WITH (FORCE)' \\\n"
+        f"    -c 'CREATE DATABASE ogham_scratch'\n"
+        f"  then re-create the vector, pg_trgm and uuid-ossp extensions in it."
+    )
+
+
 @pytest.fixture
 def pg_fresh_db():
     """Migration harness fixture.
@@ -309,6 +357,7 @@ def pg_fresh_db():
     from ogham.database import get_backend
 
     backend = cast(Any, get_backend())
+    _check_attnum_headroom(backend)
     profile = "test-025"
 
     class _Harness:

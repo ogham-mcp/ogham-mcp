@@ -961,6 +961,10 @@ CREATE TABLE IF NOT EXISTS entities (
     mention_count integer NOT NULL DEFAULT 0,
     temporal_span float NOT NULL DEFAULT 1.0,
     session_count integer NOT NULL DEFAULT 1,
+    -- How this entity was established (TBU-261, migration 049). NOT a
+    -- confidence score -- a fixed class per rule, nothing estimated.
+    evidence_class text NOT NULL DEFAULT 'inferred'
+        CHECK (evidence_class IN ('structured', 'syntactic', 'inferred')),
     UNIQUE (canonical_name, entity_type)
 );
 
@@ -1009,6 +1013,43 @@ CREATE INDEX IF NOT EXISTS idx_memory_entities_entity_profile
 -- else -- there is no migration pass -- so a function that lives only in a
 -- migration never arrives. Held by
 -- tests/test_schema_parity.py::test_migration_functions_are_backported_into_every_schema
+-- Evidence class mapping (TBU-261, migration 049). Kept as functions so the
+-- write path and any backfill share one definition.
+CREATE OR REPLACE FUNCTION entity_evidence_class(p_entity_type text)
+RETURNS text
+LANGUAGE sql IMMUTABLE
+SET search_path = public, extensions
+AS $$
+    SELECT CASE p_entity_type
+        WHEN 'entity'   THEN 'syntactic'
+        WHEN 'file'     THEN 'syntactic'
+        WHEN 'error'    THEN 'syntactic'
+        WHEN 'quantity' THEN 'syntactic'
+        ELSE 'inferred'
+    END;
+$$;
+
+COMMENT ON COLUMN entities.evidence_class IS
+    'How this entity was established: structured (adapter provenance), '
+    'syntactic (unambiguous marker in the text), inferred (dictionary or '
+    'keyword lookup). NOT a confidence score -- see TBU-261 and migration 049.';
+
+COMMENT ON FUNCTION entity_evidence_class(text) IS
+    'Maps an entity_type to its evidence class (TBU-261). Single source of '
+    'truth -- link_memory_entities and the 049 backfill both call this.';
+
+CREATE OR REPLACE FUNCTION entity_evidence_rank(p_class text)
+RETURNS integer
+LANGUAGE sql IMMUTABLE
+SET search_path = public, extensions
+AS $$
+    SELECT CASE p_class
+        WHEN 'structured' THEN 3
+        WHEN 'syntactic'  THEN 2
+        ELSE 1
+    END;
+$$;
+
 CREATE OR REPLACE FUNCTION link_memory_entities(
     p_memory_id uuid,
     p_profile text,
@@ -1032,10 +1073,16 @@ BEGIN
         WHERE t LIKE '%:%' AND length(split_part(t, ':', 2)) > 0
     ),
     entity_upsert AS (
-        INSERT INTO entities (canonical_name, entity_type, mention_count)
-        SELECT cn, et, 1 FROM parsed
+        INSERT INTO entities (canonical_name, entity_type, mention_count, evidence_class)
+        SELECT cn, et, 1, entity_evidence_class(et) FROM parsed
         ON CONFLICT (canonical_name, entity_type) DO UPDATE
-            SET mention_count = entities.mention_count + 1
+            SET mention_count = entities.mention_count + 1,
+                evidence_class = CASE
+                    WHEN entity_evidence_rank(EXCLUDED.evidence_class)
+                       > entity_evidence_rank(entities.evidence_class)
+                    THEN EXCLUDED.evidence_class
+                    ELSE entities.evidence_class
+                END
         RETURNING id
     ),
     edge_insert AS (
@@ -1141,6 +1188,8 @@ $$;
 -- v0.14: lock down entity-graph SECURITY DEFINER functions to service_role
 -- only. Migration 037 mirrors this for existing deployments.
 REVOKE EXECUTE ON FUNCTION link_memory_entities(uuid, text, text[]) FROM anon, authenticated, PUBLIC;
+REVOKE EXECUTE ON FUNCTION entity_evidence_class(text) FROM anon, authenticated, PUBLIC;
+REVOKE EXECUTE ON FUNCTION entity_evidence_rank(text) FROM anon, authenticated, PUBLIC;
 REVOKE EXECUTE ON FUNCTION refresh_entity_temporal_span(bigint) FROM anon, authenticated, PUBLIC;
 REVOKE EXECUTE ON FUNCTION spread_entity_activation_memories(text[], text, integer, double precision, double precision, integer) FROM anon, authenticated, PUBLIC;
 

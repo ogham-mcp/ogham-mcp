@@ -95,6 +95,43 @@ def make_predicate(value: str, allowed: Iterable[str]) -> Predicate:
     return Predicate(value)
 
 
+# Entity types produced by ``extract_entities``. Used to recognise a qualified
+# reference like "error:KeyError" so it can be resolved on the exact natural key
+# rather than by name alone -- ``entities`` is UNIQUE (canonical_name,
+# entity_type), so a bare name is not a key.
+KNOWN_ENTITY_TYPES: frozenset[str] = frozenset(
+    {
+        "entity",
+        "file",
+        "error",
+        "quantity",
+        "location",
+        "event",
+        "activity",
+        "emotion",
+        "relationship",
+        "preference",
+        "person",
+    }
+)
+
+
+def split_entity_ref(ref: str) -> tuple[str | None, str]:
+    """Split ``"error:KeyError"`` into ``("error", "KeyError")``.
+
+    Returns ``(None, ref)`` when ``ref`` carries no recognised type prefix, so
+    callers can fall back to a name-only lookup.
+
+    Only splits on a KNOWN type prefix. A name that merely contains a colon --
+    a URL, a namespaced id, a Windows path -- is left whole, which is why this
+    does not simply ``split(":", 1)``.
+    """
+    prefix, sep, rest = ref.partition(":")
+    if sep and rest and prefix in KNOWN_ENTITY_TYPES:
+        return prefix, rest
+    return None, ref
+
+
 @dataclass(frozen=True)
 class Entity:
     id: int
@@ -244,6 +281,37 @@ class EntityGraph(Protocol):
     # -- enumeration (TBU-130) ---------------------------------------
     # query_join walks and fetch_edge fetches one; nothing could list a whole
     # profile. OKF export needs that.
+
+    def find_entity(self, canonical_name: str, entity_type: str) -> int | None:
+        """Read-only lookup on the exact natural key. None if absent.
+
+        Distinct from ``resolve_alias`` on a qualified ``type:name`` string,
+        which can only split on a type it RECOGNISES -- and the recognised set
+        is the 11 types ``extract_entities`` produces. An imported bundle may
+        carry any type at all, so import needs a lookup that takes the two parts
+        separately rather than re-parsing them out of a string.
+
+        Distinct from ``upsert_entity`` because a dry run must not create.
+        """
+        ...
+
+    def upsert_entity(self, canonical_name: str, entity_type: str) -> int:
+        """Get or create an entity by its natural key, returning its id.
+
+        The natural key is (canonical_name, entity_type) -- the table's UNIQUE
+        constraint. A bare name is not a key (TBU-274).
+
+        There was no Python-level way to create an entity before this: the only
+        creation path was the ``link_memory_entities`` RPC, which needs a memory
+        to hang the entity off. Graph import has no memory, so it needed the
+        primitive that was missing rather than a memory-shaped detour.
+
+        Deliberately NOT profile-scoped: ``entities`` is global, and profiles are
+        a convenience namespace rather than a trust boundary (decided
+        2026-08-20). ``mention_count`` is left alone -- an import is not a
+        mention, and inflating it would shift ranking in every profile.
+        """
+        ...
 
     def list_entities(self, profile: str) -> list[Entity]:
         """Every entity reachable in ``profile``, ordered by id.

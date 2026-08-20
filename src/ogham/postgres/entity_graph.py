@@ -8,6 +8,7 @@ lives here; the domain module never sees it. See
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
@@ -16,7 +17,9 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from ogham.entity_graph import Entity, EntityEdge, JoinResult, Predicate
+from ogham.entity_graph import Entity, EntityEdge, JoinResult, Predicate, split_entity_ref
+
+logger = logging.getLogger(__name__)
 
 
 class PostgresEntityGraph:
@@ -323,18 +326,81 @@ class PostgresEntityGraph:
 
     # -- helpers -----------------------------------------------------
 
-    def _resolve_to_id(self, name_or_id: str | int, profile: str) -> int | None:
-        if isinstance(name_or_id, int):
-            return name_or_id
+    def find_entity(self, canonical_name: str, entity_type: str) -> int | None:
+        """Read-only lookup on the exact natural key. See the protocol docstring."""
         with self._pool.connection() as conn, conn.cursor() as cur:
-            # Try canonical name first
             cur.execute(
-                "SELECT id FROM entities WHERE canonical_name = %s LIMIT 1",
-                (name_or_id,),
+                "SELECT id FROM entities WHERE canonical_name = %s AND entity_type = %s",
+                (canonical_name, entity_type),
             )
             row = cur.fetchone()
-            if row:
-                return int(row["id"])
+            return int(row["id"]) if row else None
+
+    def upsert_entity(self, canonical_name: str, entity_type: str) -> int:
+        """Get or create by natural key. See the protocol docstring.
+
+        ``mention_count`` is untouched on both branches: an import is not a
+        mention, and it feeds ranking in every profile.
+        """
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO entities (canonical_name, entity_type)
+                VALUES (%s, %s)
+                ON CONFLICT (canonical_name, entity_type) DO UPDATE
+                    SET canonical_name = EXCLUDED.canonical_name
+                RETURNING id
+                """,
+                (canonical_name, entity_type),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            assert row is not None, "INSERT ... RETURNING always yields a row"
+            return int(row["id"])
+
+    def _resolve_to_id(self, name_or_id: str | int, profile: str) -> int | None:
+        """Resolve a name, a qualified ``type:name`` ref, or an id to an entity id.
+
+        ``entities`` is UNIQUE (canonical_name, entity_type), so a BARE NAME IS
+        NOT A KEY. Ordinary extraction produces the same name under two types
+        routinely -- every ``*Error`` matches both the CamelCase rule and the
+        Error-suffix rule, giving ``entity:KeyError`` and ``error:KeyError``
+        (18 such names on the live store, 2026-08-20). The previous
+        ``LIMIT 1`` with no ORDER BY resolved between them arbitrarily, so a
+        ``store_triple`` edge could attach to whichever row the planner
+        happened to return.
+        """
+        if isinstance(name_or_id, int):
+            return name_or_id
+        entity_type, name = split_entity_ref(name_or_id)
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            # Exact natural key when the caller qualified the reference.
+            if entity_type is not None:
+                cur.execute(
+                    "SELECT id FROM entities WHERE canonical_name = %s AND entity_type = %s",
+                    (name, entity_type),
+                )
+                row = cur.fetchone()
+                if row:
+                    return int(row["id"])
+            # Unqualified: deterministic, and say so when it was ambiguous
+            # rather than picking silently.
+            cur.execute(
+                "SELECT id, entity_type FROM entities WHERE canonical_name = %s ORDER BY id",
+                (name_or_id,),
+            )
+            rows = cur.fetchall() or []
+            if rows:
+                if len(rows) > 1:
+                    logger.warning(
+                        "entity reference %r is ambiguous across types %s -- resolving to "
+                        "id=%s. Qualify it as '<type>:%s' to be explicit.",
+                        name_or_id,
+                        [r["entity_type"] for r in rows],
+                        rows[0]["id"],
+                        name_or_id,
+                    )
+                return int(rows[0]["id"])
             # Fall back to alias
             cur.execute(
                 """

@@ -128,5 +128,11 @@ def test_entity_graph_protocol_signature():
         def list_aliases(self, profile):
             return {}
 
+        def upsert_entity(self, canonical_name, entity_type):
+            return 1
+
+        def find_entity(self, canonical_name, entity_type):
+            return None
+
     # runtime_checkable Protocol lets us assert this cheaply
     assert isinstance(Dummy(), EntityGraph)

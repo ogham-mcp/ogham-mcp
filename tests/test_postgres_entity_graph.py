@@ -55,6 +55,26 @@ class _Router:
         q = " ".join(query.split())
         self.calls.append((q, params))
 
+        # Qualified natural-key lookup: canonical_name + entity_type. Added with
+        # the fix for ambiguous entity refs -- `entities` is
+        # UNIQUE (canonical_name, entity_type), so a bare name is not a key.
+        if "SELECT id FROM entities WHERE canonical_name" in q and "entity_type = %s" in q:
+            name, etype = params
+            for eid, row in self.entities_by_id.items():
+                if row["canonical_name"] == name and row["entity_type"] == etype:
+                    return {"id": eid}
+            return None
+
+        # Unqualified lookup now returns EVERY matching row, ordered, so the
+        # caller can detect ambiguity instead of silently taking LIMIT 1.
+        if "SELECT id, entity_type FROM entities WHERE canonical_name" in q:
+            (name,) = params
+            return [
+                {"id": eid, "entity_type": row["entity_type"]}
+                for eid, row in sorted(self.entities_by_id.items())
+                if row["canonical_name"] == name
+            ]
+
         if "SELECT id FROM entities WHERE canonical_name" in q:
             (name,) = params
             eid = self.entities.get(name)

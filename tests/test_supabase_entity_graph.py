@@ -45,6 +45,7 @@ class _FakeBuilder:
         self._ignore_duplicates: bool = False
         self._filters: dict[str, Any] = {}
         self._not_filters: dict[str, Any] = {}
+        self._order: tuple[str, bool] | None = None
 
     # -- operation entrypoints --
     def select(self, columns: str):
@@ -83,6 +84,14 @@ class _FakeBuilder:
         return self
 
     def limit(self, n):
+        return self
+
+    def order(self, col: str, desc: bool = False):
+        # Mirrors postgrest-py's chainable .order(). The real client pushes the
+        # sort to the database; recording it here keeps the double faithful to
+        # the surface _resolve_to_id actually uses (TBU-245: two sides agreeing
+        # by different mechanisms is how parity bugs hide).
+        self._order = (col, desc)
         return self
 
     def contains(self, col: str, val: Any):
