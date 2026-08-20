@@ -321,6 +321,7 @@ ogham export --format markdown  # Export as Obsidian-compatible markdown
 ogham export --format okf       # Export as Open Knowledge Format v0.1 bundle
 ogham import backup.json        # Import a JSON export
 ogham import <okf-bundle-dir>   # Import an OKF bundle directory (auto-detected)
+ogham import <dir> --with-graph # ...including its entities/ graph layer (opt-in)
 ogham cleanup                   # Remove expired memories
 ogham hooks install             # Auto-detect client + configure hooks
 ogham hooks recall              # Read from the stone (load project context)
@@ -502,6 +503,38 @@ Admin operations such as config, health, stats, audit, export, delete, and clean
 | `store_triple` | Write a typed edge against a controlled predicate vocabulary; supersedes the prior current edge for the same subject + predicate + object | `subject`, `predicate`, `object`, `profile`, `source_memory_id` |
 | `query_join` | Walk a typed predicate path from a start entity; returns the entities (BFS order), edges, and citations along the path -- no fuzzy ranking | `start_entity`, `predicate_path[]`, `hop_limit` (required), `direction` |
 
+**Referring to an entity (v0.19).** Entities are keyed on
+`(canonical_name, entity_type)`, so a bare name is not always enough to identify
+one. The same word can legitimately land under two types -- `ValueError` is both
+an `entity:` (interior capitalisation) and an `error:` (the `Error` suffix). Pass
+a qualified reference to be explicit:
+
+```
+store_triple(subject="error:ValueError", ...)   # exactly the error node
+store_triple(subject="ValueError", ...)         # lowest-id match, and logs the collision
+```
+
+An unqualified reference still resolves, deterministically, and warns when it had
+to choose. Before v0.19 it chose silently.
+
+**Evidence class (v0.19).** Every entity now records **how it was established**:
+
+| class | meaning |
+|-------|---------|
+| `syntactic` | an unambiguous marker in the text -- interior capitalisation, a path separator, an `Error` suffix, a number with a unit |
+| `inferred` | a dictionary or keyword lookup with no marker -- places, events, preferences, emotions |
+| `structured` | derived from adapter provenance rather than from text |
+
+It is deliberately **not** a confidence score. Calibration is a property of an
+estimated probability ([Guo, Pleiss, Sun and Weinberger, ICML 2017](https://arxiv.org/abs/1706.04599));
+a fixed class per rule estimates nothing, so a float here would invite consumers
+to multiply it into a relevance score as though it meant something. It is an
+enumerated value with a `CHECK` constraint.
+
+Existing entities are classified from their type on upgrade. Nothing in retrieval
+reads it yet -- it exists so that when enrichment does start writing entities, a
+machine-suggested one is distinguishable from adapter-derived fact.
+
 **Importers**
 
 | Tool | Description | Key parameters |
@@ -595,10 +628,14 @@ The bundle is a directory tree:
 
 ```
 ogham-okf-<profile>-<timestamp>/
-├── index.md                     # declares okf_version: "0.1"
+├── index.md                     # declares okf_version: "0.1" (+ ogham_graph_version: 1)
+├── context.jsonld               # predicate URIs, with Schema.org alignments where they fit
 ├── viewer.html                  # self-contained Cytoscape.js graph (opens with file://)
-└── memories/
-    ├── <slug>-<uuid8>.md        # one markdown file per memory
+├── memories/
+│   ├── <slug>-<uuid8>.md        # one markdown file per memory
+│   └── ...
+└── entities/                    # present only if the profile has a typed-edge graph
+    ├── <slug>-e<entity_id>.md   # one file per entity, edges as frontmatter triples
     └── ...
 ```
 
@@ -611,6 +648,38 @@ Import behaviour:
 - Memories with the `id:` extension upsert by UUID (idempotent re-imports).
 - Memories without `id:` insert as new; the count surfaces as `missing_id_count` in the result.
 - The importer requires a bundle-root `index.md` with `okf_version` declared so pointing it at a random directory fails fast.
+
+**Importing the entity graph** is opt-in and off by default:
+
+```bash
+# See what it would do -- writes nothing
+ogham import <bundle> --with-graph --graph-dry-run
+
+# Actually import the entities/ layer
+ogham import <bundle> --with-graph
+```
+
+The default is off because the `entities` table has no profile column -- it is
+global, scoped only through `memory_entities` and `entity_edges` -- so importing
+a graph touches rows every profile reads.
+
+Two things worth knowing before you run it:
+
+- **It merges, it does not restore.** Importing into a profile that already has
+  a graph moves matching edges forward rather than returning the profile to the
+  bundle's state. Into a fresh profile the result is exact.
+- **There is no undo, so there is a dry run.** Snapshotting the profile first
+  does not give you one -- the snapshot is built from this same export path, and
+  edge qualifiers do not round-trip through it. `--graph-dry-run` reports exactly
+  what the real run would do: entities to create, edges to write, edges already
+  present, and edges whose target is missing from the bundle.
+
+Re-running is safe. An edge that already exists is skipped rather than rewritten,
+so a retry after a partial failure converges instead of churning.
+
+Scope: this is for **your own bundles**. Importing a bundle from someone else's
+install is not supported -- the reader is bounded against corruption, not against
+a hostile bundle.
 
 User-facing write-up: [Ogham v0.15 speaks Open Knowledge Format](https://ogham-mcp.dev/blog/okf-round-trip-v015/).
 
