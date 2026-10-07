@@ -370,7 +370,7 @@ When `profiles` is set, results include memories from all listed profiles with a
 | `OLLAMA_EMBED_MODEL` | No | `embeddinggemma` | Ollama embedding model |
 | `MISTRAL_EMBED_MODEL` | No | `mistral-embed` | Mistral embedding model |
 | `VOYAGE_EMBED_MODEL` | No | `voyage-4-lite` | Voyage embedding model |
-| `GEMINI_EMBED_MODEL` | No | `gemini-embedding-2-preview` | Gemini embedding model |
+| `GEMINI_EMBED_MODEL` | No | `gemini-embedding-2` | Gemini embedding model |
 | `RERANK_ENABLED` | No | `false` | Enable FlashRank cross-encoder reranking |
 | `RERANK_ALPHA` | No | `0.55` | Cross-encoder score weight (0-1) |
 | `DEFAULT_MATCH_THRESHOLD` | No | `0.7` | Similarity threshold (see below) |
@@ -387,7 +387,7 @@ When `profiles` is set, results include memories from all listed profiles with a
 | Ollama | 512 | 0.70 | Tight clustering, scores run 0.8-0.9 |
 | Mistral | 1024 | 0.60 | Fixed 1024 dims, can't truncate. Schema must be `vector(1024)` |
 | Voyage | 512 (schema default) | 0.45 | Moderate spread |
-| Gemini | 512 | 0.35 | `gemini-embedding-2-preview`, supports MRL truncation |
+| Gemini | 512 | 0.35 | `gemini-embedding-2`, supports MRL truncation |
 | ONNX | 1024 | 0.35 | Local BGE-M3 inference, dense + sparse vectors. See ONNX section |
 
 `EMBEDDING_DIM` must match the `vector(N)` column in your database schema. The default schema uses `vector(512)`. If you use Mistral, you need to alter the column to `vector(1024)` before storing anything.
