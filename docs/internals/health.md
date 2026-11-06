@@ -26,8 +26,8 @@ Checks connectivity to both external dependencies:
         "provider": "ollama",
         "model": "embeddinggemma",
         "dimension": 512,
-        "dimension_match": True
-    }
+        "dimension_match": True,
+    },
 }
 ```
 

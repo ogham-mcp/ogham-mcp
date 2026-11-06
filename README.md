@@ -340,6 +340,7 @@ hybrid_search(query="architecture decisions", profiles=["work", "shared"])
 
 # Python library
 from ogham.service import search_memories_enriched
+
 results = search_memories_enriched(
     query="architecture decisions",
     profile="work",

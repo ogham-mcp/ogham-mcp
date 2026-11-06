@@ -27,7 +27,9 @@ client.rpc("hybrid_search_memories", {"query_embedding": [...], "query_text": ".
 
 **Listing** uses PostgREST query builder with ordering and filtering:
 ```python
-client.table("memories").select("*").eq("profile", profile).order("created_at", desc=True).limit(n).execute()
+client.table("memories").select("*").eq("profile", profile).order("created_at", desc=True).limit(
+    n
+).execute()
 ```
 
 ### Differences from PostgresBackend
