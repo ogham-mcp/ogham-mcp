@@ -5,28 +5,33 @@
 ## Hook Events
 
 ### `session_start(cwd, profile, limit)`
+
 - Searches ogham for memories relevant to the current project directory
 - Returns markdown with top matches for context injection
 - Used to prime the AI with project-specific knowledge at session start
 - Returns nothing when recall is disabled
 
 ### `post_tool(hook_input, profile)`
+
 - Called after every tool execution in a Claude Code session
 - Decides whether the tool execution is worth storing as a memory
 - Implements multi-layer filtering to avoid noise
 - No-ops when inscribe is disabled
 
 ### `user_prompt_submit(prompt, cwd, session_id, profile)`
+
 - Called for `UserPromptSubmit` hook events
 - Captures durable user-stated preferences, decisions, facts, corrections, and personal context
 - Skips short prompts and pure questions
 
 ### `pre_compact(session_id, cwd, profile)`
+
 - Drains session context to ogham before Claude Code compacts conversation
 - Stores a timestamped "session drain" marker
 - No-ops when inscribe is disabled
 
 ### `post_compact(cwd, profile, limit)`
+
 - Rehydrates context after compaction
 - Searches for recent decisions and work related to the project
 - Returns markdown for re-injection
@@ -37,42 +42,51 @@
 The `post_tool` hook applies several filters before storing:
 
 ### 1. Self-skip
+
 - Skips any tool starting with `mcp__ogham__`, `ogham_`, `store_memory`, `hybrid_search`
 - Prevents infinite loops
 
 ### 2. Always-skip tools
+
 - `Read`, `Glob`, `Grep`, `ListDir` — reconnaissance, not action
 - `TaskCreate`, `TaskUpdate`, `TaskGet`, `TaskList`, `TaskOutput` — task management noise
 - `ToolSearch`, `Skill`, `AskUserQuestion`
 
 ### 3. Response-gated tools
+
 - `Edit` is captured only when the old/new snippet yields a meaningful code-change memory
 - `Write` is captured only when it looks like a new file with a useful docstring/comment summary
 - Tiny typo edits and overwrites are skipped
 
 ### 4. Noise command filtering (Bash)
+
 - Skips: `ls`, `pwd`, `cd`, `cat`, `head`, `tail`, `wc`, `echo`, `date`, `whoami`, `which`, `type`, `clear`, `history`
 
 ### 5. Git filtering
+
 - **Signal** (capture): `commit`, `push`, `merge`, `rebase`, `tag`, `release`, `reset`, `revert`, `cherry-pick`
 - **Noise** (skip): `add`, `status`, `diff`, `log`, `show`, `branch`, `checkout`, `switch`, `fetch`, `pull`, `stash`, `clean`, `gc`, `remote`, `config`
 - Unknown git subcommands: only captured if they contain signal keywords
 
 ### 6. Bash response extraction
+
 - `git commit -m ...` stores the human commit message
 - failed commands store the first useful error line from `tool_response`
 - publish/deploy/release commands store the outcome when it can be extracted
 - `gh pr/issue/release` commands store the PR, issue, or release action
 
 ### 7. Signal keyword requirement (Bash)
+
 - For routine tools (currently just Bash), content must contain at least one signal keyword to be captured
 - Keywords cover: errors, decisions, infrastructure, DevOps, testing, security, database, workarounds, package management
 
 ### 8. Importance gate
+
 - Hook-derived memory candidates are scored with the existing no-LLM importance heuristic
 - Low-value candidates are skipped before storage
 
 ### 9. Session dedup
+
 - Tracks `(session_id, tool_name, target_path)` tuples with timestamps
 - Same `(tool, target)` within 5 minutes is suppressed
 - Entries older than 30 minutes are pruned
@@ -104,6 +118,7 @@ All matches are replaced with `***MASKED***`. This runs on every store path — 
 ## Configuration
 
 Hooks config is loaded from `hooks_config.yaml` (YAML file adjacent to `hooks.py`). Falls back to hardcoded defaults if YAML or PyYAML is unavailable. The config controls:
+
 - Signal keywords
 - Noise commands
 - Always-skip tools

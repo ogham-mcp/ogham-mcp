@@ -9,6 +9,7 @@ A module-level `_active_profile` variable tracks the current profile. All tools 
 ## Content Validation (`_require_content`)
 
 Before storing, content is validated:
+
 - Must be non-empty, ≥10 chars, ≤100,000 chars
 - Rejects noise: git diffs, shell dumps, binary content (detected by regex patterns like `^diff --git`, `^@@`, null bytes)
 - If ≥2 noise patterns match, raises `ValueError` suggesting the user store a summary instead

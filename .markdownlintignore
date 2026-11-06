@@ -1,0 +1,8 @@
+# Not ours.
+node_modules/
+.venv/
+
+# Third-party pages kept verbatim (docs/snapshots/*: fetched specs with
+# provenance headers). Restyling them would make them stop matching the
+# source they were fetched from.
+docs/snapshots/

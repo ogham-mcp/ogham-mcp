@@ -25,6 +25,7 @@ Run `health_check` first if the user reports problems. It tests database connect
 ### Stats overview
 
 Run `get_stats` and `list_profiles` to give the user a picture of their memory:
+
 - Total memories and breakdown by profile
 - Top sources (which clients are storing)
 - Top tags (what categories dominate)
@@ -50,6 +51,7 @@ If they want to export a specific profile, switch to it first with `switch_profi
 This is needed after switching embedding providers (e.g. Ollama to OpenAI). It regenerates every vector in the active profile.
 
 Before running:
+
 1. Confirm the user has switched providers in their config
 2. Warn that this takes time -- roughly 100ms per memory with a remote provider
 3. Run `re_embed_all` which reports progress as it goes
@@ -71,11 +73,13 @@ Report how many links were created when it finishes.
 `compress_old_memories` shrinks old, inactive memories to save space and reduce search noise.
 
 Three levels:
+
 - Full text (default, recent memories)
 - Condensed (key sentences, code blocks preserved, ~30% of original)
 - Trace (one-line summary with tags)
 
 Before running:
+
 1. Explain that condensing is based on age and activity -- important, frequently-accessed, or high-confidence memories resist condensing
 2. Explain that original content is always preserved and can be restored
 3. Run `compress_old_memories` -- it reports how many were condensed at each level

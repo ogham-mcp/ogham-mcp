@@ -30,6 +30,14 @@ repos:
     hooks:
       - id: gitleaks
 
+  # Markdown style. `.markdownlint.yaml` says which rules are off and why;
+  # `.markdownlintignore` says which files are exempt and why. Same hook and
+  # rev as the other repos (voice-app-macalla et al).
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.49.1
+    hooks:
+      - id: markdownlint
+
   - repo: local
     hooks:
       - id: pyright

@@ -15,8 +15,10 @@ Defines MCP prompt resources that clients can request. These are pre-built promp
 Each prompt returns a `GetPromptResult` with a descriptive name and a list of messages (role + content) that the client can use to invoke the corresponding memory operation.
 
 ### Example
+
 The `recall` prompt for topic "authentication" would return:
-```
+
+```text
 Search your memory for everything you know about: authentication
 Include related context and any decisions made.
 ```
@@ -26,6 +28,7 @@ Include related context and any decisions made.
 Generates an OpenAPI 3.1.0 specification from the registered MCP tools.
 
 ### How It Works
+
 1. Iterates over all tools registered on the FastMCP server
 2. For each tool, creates a POST endpoint at `/tools/{tool_name}`
 3. Extracts parameter schemas from the tool's input model (Pydantic)
@@ -33,13 +36,16 @@ Generates an OpenAPI 3.1.0 specification from the registered MCP tools.
 5. Outputs valid OpenAPI JSON
 
 ### CLI Integration
+
 Available via `ogham openapi` CLI command. Useful for:
+
 - Documentation generation
 - Gateway/proxy configuration
 - Client SDK generation
 - API testing tools (Postman, etc.)
 
 ### Output Structure
+
 ```json
 {
   "openapi": "3.1.0",

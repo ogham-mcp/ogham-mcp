@@ -28,6 +28,7 @@
 ## Key findings
 
 ### Performance
+
 - **512 dims is ~15-20% faster** than 1024 on search operations across all providers
 - **OpenAI and Voyage are neck-and-neck** on raw embedding + import speed
 - **Ollama is ~2.3x slower on import** (85 ms/mem vs 36 ms/mem) — expected, since embeddings run locally on CPU
@@ -37,6 +38,7 @@
 - **Search latency is comparable across all providers** — the bottleneck is Neon, not embedding speed
 
 ### Auto-linking
+
 - **Auto-link threshold 0.85 is not provider-neutral.** Each provider has a different similarity score distribution:
   - **Mistral** clusters related content tightly — 468 links at 0.85 threshold
   - **Voyage** moderate spread — 62-63 links at 0.85
@@ -51,23 +53,27 @@
 ### Provider-specific notes
 
 **Ollama (`embeddinggemma`)**
+
 - Supports MRL truncation via the `dimensions` parameter (128, 256, 512, 768)
 - Import is CPU-bound — 2.3x slower than cloud providers, but no API costs
 - Search latency is the same as cloud providers (bottleneck is Neon, not embedding)
 - Moderate auto-link density at 0.85 threshold
 
 **Mistral (`mistral-embed`)**
+
 - Fixed 1024 dimensions — does **not** support the `output_dimension` parameter
 - Tight similarity clustering means higher auto-link yield at default thresholds
 - Small batch size (16K token limit) makes bulk import slower
 
 **Voyage (`voyage-4-lite`)**
+
 - Supports discrete dimensions only: 256, 512, 1024, 2048
 - `output_dimension` parameter works as expected
 - 1,000 inputs per batch request limit
 - Best speed/quality ratio at 512 dims
 
 **OpenAI (`text-embedding-3-small`)**
+
 - Supports any dimension up to 1536 via Matryoshka representation
 - Widest similarity spread — needs lowest match/auto-link thresholds
 - Largest batch capacity (2,048 inputs)

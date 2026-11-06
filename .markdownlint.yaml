@@ -1,0 +1,26 @@
+# markdownlint configuration, same rule set as voice-app-macalla. Every
+# disabled rule has a reason; nothing is off because it was inconvenient to fix.
+
+default: true
+
+# Line length. Prose wraps by hand, but tables, long URLs, SQL and benchmark
+# rows do not, and reflowing them would make them less readable.
+MD013: false
+
+# Table pipe spacing. Tables are hand-aligned to read well in a plain editor.
+MD060: false
+
+# Repeated headings are fine under different parents -- a CHANGELOG has an
+# "Added" and a "Fixed" under every release on purpose.
+MD024:
+  siblings_only: true
+
+# Bare URLs are allowed in provenance lines, where the URL IS the evidence and
+# wrapping it in a link label hides what was actually fetched.
+MD034: false
+
+# Collapsible sections in the README (<details><summary>) render on GitHub and
+# PyPI and keep the long install matrix scannable. Only those elements, plus
+# the bold tags used inside a <summary>, are allowed.
+MD033:
+  allowed_elements: [details, summary, b, strong]

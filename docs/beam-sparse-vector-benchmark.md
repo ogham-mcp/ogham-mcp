@@ -64,6 +64,7 @@ Two SQL functions with identical structure except the keyword CTE:
 ### Evaluation
 
 For each of the 400 probing questions:
+
 1. Dense query embedding generated via Ollama
 2. Sparse query vector generated via FlagEmbedding (sparse mode only)
 3. `search_memories_enriched()` called with limit=50
@@ -197,6 +198,7 @@ uv run python3 benchmarks/beam_benchmark.py --compare --bucket 100K
 ## Raw data
 
 Full per-question results are in:
+
 - `benchmarks/beam_results/eval_100K_all.json` (tsvector)
 - `benchmarks/beam_results/eval_100K_all_sparse.json` (sparse)
 - `benchmarks/beam_results/ingest_100K.json` (ingestion stats)
