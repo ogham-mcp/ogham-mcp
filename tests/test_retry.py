@@ -1,3 +1,4 @@
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -70,7 +71,10 @@ def test_embedding_generation_retries_on_connection_error():
     with patch("ogham.embeddings.settings") as mock_settings:
         mock_settings.embedding_provider = "ollama"
         mock_settings.embedding_dim = 1024
-        mock_settings.embedding_cache_dir = None
+        # Not None: None means "the default", i.e. the developer's real
+        # ~/.cache/ogham/embeddings.db. A mocked settings object bypasses the
+        # conftest isolation, so point it at the per-test dir that set up.
+        mock_settings.embedding_cache_dir = os.environ["EMBEDDING_CACHE_DIR"]
         mock_settings.ollama_url = "http://localhost:11434"
         mock_settings.ollama_embed_model = "mxbai-embed-large"
         mock_settings.embedding_cache_max_size = 1000
