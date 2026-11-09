@@ -1,6 +1,6 @@
 [project]
 name = "ogham-mcp"
-version = "0.19.0"
+version = "0.19.1"
 description = "Shared memory MCP server — persistent, searchable, cross-client"
 # Without `readme` the published METADATA carries a zero-byte description, so
 # the PyPI page shows the one-line summary and no route to the repo or docs.
@@ -34,7 +34,10 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "fastmcp>=3.4.2,<4",
+    # Security floors (2026-11-06 audit). fastmcp 3.4.10 fixes GHSA-7xgj-8392-5q4r.
+    # fastmcp only asks for mcp>=1.24, so mcp is floored here directly.
+    "fastmcp>=3.4.10,<4",
+    "mcp>=1.30,<2",
     "postgrest>=2.0",
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",
@@ -65,7 +68,7 @@ postgres = [
     "psycopg-pool>=3.1",
     "psycopg[binary]>=3.1",
 ]
-mistral = ["mistralai>=1.0"]
+mistral = ["mistralai>=1.0,<2"]
 voyage = ["voyageai>=0.3"]
 gemini = ["google-genai>=1.0"]
 # Local CPU embeddings via BGE-M3 ONNX (Josh @ ninthhousestudios, PR #14).
@@ -76,7 +79,7 @@ gemini = ["google-genai>=1.0"]
 onnx = ["onnxruntime>=1.17", "tokenizers>=0.19"]
 rerank = ["flashrank>=0.2"]
 dashboard = ["prefab-ui>=0.18", "fastapi>=0.115", "uvicorn>=0.34"]
-all = ["mistralai>=1.0", "voyageai>=0.3", "google-genai>=1.0", "psycopg-pool>=3.1", "psycopg[binary]>=3.1", "flashrank>=0.2", "prefab-ui>=0.18", "fastapi>=0.115", "uvicorn>=0.34"]
+all = ["mistralai>=1.0,<2", "voyageai>=0.3", "google-genai>=1.0", "psycopg-pool>=3.1", "psycopg[binary]>=3.1", "flashrank>=0.2", "prefab-ui>=0.18", "fastapi>=0.115", "uvicorn>=0.34"]
 
 [project.scripts]
 ogham = "ogham.cli:main"
