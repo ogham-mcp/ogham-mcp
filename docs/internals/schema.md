@@ -3,11 +3,13 @@
 Source: `sql/schema_postgres.sql` (for vanilla PostgreSQL/Neon, no Supabase RLS).
 
 ## Extensions
+
 - `pgvector` — vector similarity search
 
 ## Tables
 
 ### `memories`
+
 | Column | Type | Default | Notes |
 |--------|------|---------|-------|
 | `id` | uuid | `gen_random_uuid()` | PK |
@@ -32,6 +34,7 @@ Source: `sql/schema_postgres.sql` (for vanilla PostgreSQL/Neon, no Supabase RLS)
 | `fts` | tsvector | generated | `to_tsvector('english', content)`, GIN indexed |
 
 ### `memory_relationships`
+
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | bigint | IDENTITY PK |
@@ -45,12 +48,14 @@ Source: `sql/schema_postgres.sql` (for vanilla PostgreSQL/Neon, no Supabase RLS)
 | **Constraint** | | `UNIQUE (source_id, target_id, relationship)` |
 
 ### `profile_settings`
+
 | Column | Type | Notes |
 |--------|------|-------|
 | `profile` | text | PK |
 | `ttl_days` | integer | CHECK ≥ 1 or NULL |
 
 ## Enum: `relationship_type`
+
 `similar`, `related`, `contradicts`, `supports`, `follows`, `derived_from`
 
 ## Indexes
@@ -73,8 +78,10 @@ Source: `sql/schema_postgres.sql` (for vanilla PostgreSQL/Neon, no Supabase RLS)
 ## Key Functions
 
 ### `match_memories()` — Pure Vector Search
+
 **Relevance formula:**
-```
+
+```text
 relevance = cosine_similarity
            × softplus(ACT-R_score)
            × confidence
@@ -82,7 +89,8 @@ relevance = cosine_similarity
 ```
 
 **ACT-R component** (cognitive architecture model):
-```
+
+```text
 B(M) = ln(access_count + 1) - 0.5 × ln(age_days / (access_count + 1))
 softplus(B) = ln(1 + exp(B))
 ```
@@ -92,18 +100,22 @@ This models human memory: frequently-accessed and recently-accessed memories ran
 **Graph boost:** Sum of relationship edge strengths for all edges touching this memory, scaled by 0.2.
 
 ### `hybrid_search_memories()` — RRF Hybrid Search
+
 Combines:
+
 - **Semantic search**: Top 3×limit by cosine similarity (via HNSW index)
 - **Keyword search**: Top 3×limit by `ts_rank_cd` on `websearch_to_tsquery`
 
 **Fusion:**
-```
+
+```text
 score = semantic_weight(0.7) × cosine_similarity
       + full_text_weight(0.3) × keyword_rank
 ```
 
 **Final relevance:**
-```
+
+```text
 relevance = score
            × (1 + ln(access_count + 1) × 0.1)
            × confidence
@@ -111,14 +123,18 @@ relevance = score
 ```
 
 ### `update_confidence()` — Bayesian Update
-```
+
+```text
 posterior = (current × signal) / (current × signal + (1-current) × (1-signal))
 new_confidence = 0.95 × posterior + 0.025
 ```
+
 The `0.95/0.025` constants prevent confidence from reaching exactly 0 or 1 (laplace smoothing).
 
 ### `explore_memory_graph()` — Graph Traversal
+
 Uses `WITH RECURSIVE`:
+
 1. Seed from `hybrid_search_memories()` results
 2. Traverse `memory_relationships` edges bidirectionally
 3. Relevance propagates: `parent_relevance × edge_strength`
@@ -126,10 +142,12 @@ Uses `WITH RECURSIVE`:
 5. Return ordered by depth ASC, relevance DESC
 
 ### `auto_link_memory()` — Auto-linking
+
 1. Find top-N most similar memories (cosine > threshold) in same profile
 2. Insert `'similar'` relationship edges
 3. `ON CONFLICT DO NOTHING` prevents duplicate edges
 
 ### `batch_check_duplicates()` — Import Dedup
+
 - Lowers `hnsw.ef_search` to 40 for fast approximate matching
 - Returns boolean array: true if any memory exceeds similarity threshold

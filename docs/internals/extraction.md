@@ -7,6 +7,7 @@
 Finds dates in content and returns sorted ISO strings.
 
 **Detection layers:**
+
 1. ISO dates: `2024-01-15`, `2024/01/15`
 2. Natural dates: `January 15, 2024`, `15 January 2024`, abbreviated months
 3. Relative dates (via parsedatetime): `last Tuesday`, `yesterday`, `3 weeks ago`
@@ -66,6 +67,7 @@ Day name recognition for recurrence extraction covers all 16 languages plus adve
 Detects recurring day-of-week patterns. Returns sorted list of day indices (0=Sun..6=Sat) or None.
 
 **Detection:**
+
 1. Check for "every"/"each"/"weekly" keyword in 16 languages
 2. If no "every" keyword, check for German adverbial day forms ("montags")
 3. Scan for day names across all 16 languages (longest-first matching to avoid partial matches)

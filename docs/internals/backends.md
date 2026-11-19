@@ -20,23 +20,28 @@
 Direct PostgreSQL via `psycopg` connection pool.
 
 ### Connection Pool
+
 - `psycopg_pool.ConnectionPool` with min_size=1, max_size=5
 - Lazily created on first use
 - Uses `dict_row` row factory — all results are plain dicts
 
 ### Query Pattern
+
 All queries go through `_execute(query, params, fetch)`:
+
 - `fetch="all"` → `fetchall()` → `list[dict]`
 - `fetch="one"` → `fetchone()` → `dict | None`
 - `fetch="scalar"` → first value of first row
 - `fetch="none"` → no fetch (side-effect queries)
 
 ### SQL Injection Prevention
+
 - All values are parameterised (`%(name)s` placeholders)
 - Column names in `update_memory` and `store_memories_batch` are validated against `_ALLOWED_MEMORY_COLUMNS` allowlist
 - Embedding vectors are formatted as Postgres vector literals: `[0.1,0.2,...]`
 
 ### Database Functions Used
+
 The backend calls several PostgreSQL functions defined in the `sql/` schema:
 
 | Function | Purpose |
@@ -57,9 +62,11 @@ The backend calls several PostgreSQL functions defined in the `sql/` schema:
 | `batch_update_embeddings()` | Update embeddings for array of IDs |
 
 ### Pagination
+
 `get_all_memories_full` and `get_all_memories_content` use keyset pagination (cursor-based) with batch size 1000, using `(created_at, id)` or `(id)` as cursor keys.
 
 ### Retry
+
 All search/retrieval methods are decorated with `@with_retry(max_attempts=2, base_delay=0.3)`.
 
 ## SupabaseBackend (`backends/supabase.py`)
@@ -73,12 +80,15 @@ HTTP proxy that delegates all operations to a remote Ogham gateway REST API. Con
 ## Database Schema
 
 ### Tables
+
 - `memories` — main table: id (UUID), content, embedding (vector), metadata (JSONB), source, profile, tags (text[]), confidence, importance, surprise, compression_level, original_content, recurrence_days, access_count, last_accessed_at, created_at, updated_at, expires_at, fts (tsvector)
 - `memory_relationships` — edges: source_id, target_id, relationship (enum type), strength, created_by, metadata
 - `profile_settings` — per-profile config: profile (unique), ttl_days
 
 ### Relationship Types
+
 Defined as a PostgreSQL enum `relationship_type`: `supports`, `contradicts`, `similar`, `relates_to`, etc.
 
 ### Migrations
+
 15 incremental migrations covering: cognitive scoring → confidence → embedding model switch → hybrid search → batch dedup → set-based batch update → CCF search → memory relationships → graph explorer → impact analysis → graph centrality boost → temporal columns → halfvec compression → LZ4 TOAST compression → temporal auto-extract.

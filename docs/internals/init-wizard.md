@@ -26,22 +26,26 @@ Platform-aware config paths for macOS, Linux, and Windows.
 ## Wizard Steps
 
 ### 1. Database Configuration (`_configure_database`)
+
 - Prompts for PostgreSQL connection string
 - Tests connection with `psycopg.connect()` + pgvector extension check (`SELECT 'vector'::regtype`)
 - Validates that the connection actually works before proceeding
 
 ### 2. Embedding Provider (`_configure_embeddings`)
+
 - Choice of: Ollama (local/free), OpenAI, Mistral, Voyage
 - For Ollama: tests model availability via `ollama.Client().show(model)`
 - For API providers: prompts for API key
 - Sets `EMBEDDING_DIM` based on provider defaults
 
 ### 3. Schema Migration (`_run_migrations`)
+
 - Checks for `sql/schema_postgres.sql` in package directory
 - Runs full schema via `psycopg` if user approves
 - Falls back to printing manual instructions if file not found
 
 ### 4. Client Configuration (`_configure_clients`)
+
 - Auto-detects installed MCP clients by checking config file existence
 - Lets user select which clients to configure
 - Generates appropriate JSON/TOML config block
@@ -49,6 +53,7 @@ Platform-aware config paths for macOS, Linux, and Windows.
 - Creates backup before modifying any config file
 
 ### 5. Env File (`_write_env`)
+
 - Writes configuration to `~/.ogham/.env`
 - Creates directory if needed
 - Stores: `DATABASE_URL`, `DATABASE_BACKEND=postgres`, `EMBEDDING_PROVIDER`, provider-specific settings, `EMBEDDING_DIM`
@@ -56,6 +61,7 @@ Platform-aware config paths for macOS, Linux, and Windows.
 ## Client Config Generation
 
 For uvx mode:
+
 ```json
 {
   "command": "uvx",
@@ -68,6 +74,7 @@ For uvx mode:
 ```
 
 For Docker mode:
+
 ```json
 {
   "command": "docker",

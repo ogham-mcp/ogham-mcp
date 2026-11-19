@@ -12,7 +12,7 @@ Ogham is a **persistent, searchable memory system** exposed as an MCP (Model Con
 
 ## High-Level Data Flow
 
-```
+```text
 AI Client (Claude Code, etc.)
     │
     │  MCP protocol (stdio or SSE)
@@ -56,6 +56,7 @@ AI Client (Claude Code, etc.)
 ## Module Map
 
 ### Entry Points
+
 | File | Role |
 |------|------|
 | `server.py` | MCP server startup — validates health, runs FastMCP |
@@ -63,6 +64,7 @@ AI Client (Claude Code, etc.)
 | `app.py` | FastMCP application instance (`mcp = FastMCP(...)`) |
 
 ### Core Pipeline
+
 | File | Role |
 |------|------|
 | `service.py` | **Orchestrator** — enrichment pipeline for store and search |
@@ -71,6 +73,7 @@ AI Client (Claude Code, etc.)
 | `extraction.py` | NLP utilities — date extraction, entity extraction, importance scoring, temporal intent detection |
 
 ### Storage Backends (`backends/`)
+
 | File | Role |
 |------|------|
 | `protocol.py` | Abstract protocol defining the backend interface |
@@ -79,12 +82,14 @@ AI Client (Claude Code, etc.)
 | `gateway.py` | HTTP gateway backend (delegates to a remote Ogham gateway API) |
 
 ### MCP Interface (`tools/`)
+
 | File | Role |
 |------|------|
 | `memory.py` | All MCP tool definitions — store, search, delete, update, profiles, TTL, linking, graph exploration, compression, re-embed |
 | `stats.py` | Cache statistics tool |
 
 ### Supporting
+
 | File | Role |
 |------|------|
 | `config.py` | Pydantic Settings — loads from `.env` or `~/.ogham/config.env` |
@@ -104,6 +109,7 @@ AI Client (Claude Code, etc.)
 ## Configuration (`config.py`)
 
 Uses `pydantic-settings` with env file cascade:
+
 1. Project `.env` (highest priority)
 2. `~/.ogham/config.env` (global fallback)
 
@@ -152,28 +158,33 @@ When a memory is stored, it goes through this enrichment pipeline:
 Search is surprisingly sophisticated, with multiple retrieval strategies:
 
 ### Standard Path
+
 - Generate query embedding
 - Hybrid search (vector similarity + full-text keyword matching via RRF)
 - Optional graph traversal (follow relationship edges)
 - Optional temporal re-ranking
 
 ### Ordering Queries (detected by `is_ordering_query`)
+
 - Elastic K: fetch 10x the limit
 - **Strided retrieval** — divides timeline into N equal buckets, round-robin top result from each
 - **Entity threading** — two-pass: Pass 1 identifies entities, Pass 2 searches for all occurrences
 - Chronological sort
 
 ### Multi-hop Temporal Queries (detected by `is_multi_hop_temporal`)
+
 - **Bridge retrieval** — extracts entity anchors, runs separate searches per entity
 - Interleaves results round-robin across anchors
 - Merges with standard search, logarithmic boost for bridge results
 - Entity threading on merged results
 
 ### Broad Summary Queries (detected by `is_broad_summary_query`)
+
 - Strided retrieval for timeline coverage
 - **MMR re-ranking** (Maximal Marginal Relevance) — balances relevance with diversity
 
 ### Temporal Re-ranking
+
 - Gaussian decay centered on anchor date (σ=3 days)
 - Directional hard penalty (0.1x for wrong side of "after"/"before")
 - Same-day grace period (1.5x boost)
@@ -182,14 +193,17 @@ Search is surprisingly sophisticated, with multiple retrieval strategies:
 ## Database Layer
 
 ### Facade Pattern (`database.py`)
+
 All database operations go through `database.py`, which lazily creates a singleton backend based on `settings.database_backend`. The facade is a collection of thin delegate functions — each one just calls `get_backend().method(...)`.
 
 ### Backend Selection
+
 - `"supabase"` → `SupabaseBackend` — uses PostgREST client library, calls Supabase RPC functions
 - `"postgres"` → `PostgresBackend` — direct SQL via `psycopg` connection pool
 - `"gateway"` → `GatewayBackend` — HTTP proxy to a remote Ogham gateway
 
 ### Key Operations
+
 - `store_memory()` — insert with embedding vector
 - `hybrid_search_memories()` — combined vector similarity + full-text search (RRF)
 - `auto_link_memory()` — find similar memories and create edges
@@ -201,25 +215,30 @@ All database operations go through `database.py`, which lazily creates a singlet
 ## Embedding System (`embeddings.py`)
 
 ### Multi-Provider Architecture
+
 Four providers supported via adapter pattern:
+
 - **Ollama** (default) — local, free, uses `embeddinggemma` model
 - **OpenAI** — `text-embedding-3-small`, supports dimension reduction
 - **Mistral** — `mistral-embed`
 - **Voyage** — `voyage-4-lite`, supports dimension control
 
 ### Caching
+
 - SQLite-backed persistent cache (`embedding_cache.py`)
 - Cache key = SHA256(provider + dim + text)
 - Switching providers/dimensions automatically invalidates cache
 - Supports batch embedding with cache-first strategy
 
 ### Retry
+
 - `@with_retry(max_attempts=3, base_delay=0.5)` on all provider calls
 - Catches `ConnectionError` and `OSError`
 
 ## Memory Graph
 
 Memories can be linked via relationship edges:
+
 - **Auto-linking** — on store, finds top-N similar memories (cosine sim > threshold) and creates edges
 - **Manual linking** — `store_decision()` accepts `related_memories` UUIDs
 - **Graph traversal** — `get_related_memories(depth, min_strength, relationship_types)`
@@ -231,6 +250,7 @@ Edge types: `supports`, `contradicts`, `similar`, `relates_to`, etc.
 ## Compression System (`compression.py`)
 
 Tiered compression to manage memory growth:
+
 - **Level 0** (recent) — full text preserved
 - **Level 1** (7+ days, low activity) — compressed to key sentences (~30%)
 - **Level 2** (30+ days, low activity) — compressed to one-line summary + tags
@@ -240,6 +260,7 @@ High-importance, frequently-accessed, or high-confidence memories resist compres
 ## Profile System
 
 Memories are partitioned into **profiles** (like `"default"`, `"work"`, `"personal"`). Each profile is an independent memory namespace:
+
 - Searches only return results from the active profile
 - Profiles can have TTL settings (memories auto-expire)
 - Export/import operates per-profile
@@ -247,6 +268,7 @@ Memories are partitioned into **profiles** (like `"default"`, `"work"`, `"person
 ## Hook System (`hooks.py`)
 
 Integration with Claude Code's hook mechanism:
+
 - Auto-captures relevant context from conversations
 - Secret masking before storage
 - `ogham hooks install` — sets up Claude Code hooks config
@@ -255,6 +277,7 @@ Integration with Claude Code's hook mechanism:
 ## SQL Schema
 
 Located in `sql/`:
+
 - `schema.sql` — base schema (Supabase)
 - `schema_postgres.sql` — self-hosted PostgreSQL schema
 - `sql/migrations/` — incremental migrations (cognitive scoring, confidence, hybrid search, relationships, graph, temporal columns, halfvec compression, etc.)
