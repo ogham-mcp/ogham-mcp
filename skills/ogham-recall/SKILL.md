@@ -50,6 +50,7 @@ When the user is starting work on something, proactively search for relevant con
 Run 2-3 targeted searches to pull in useful background. Present it as a brief summary, not a wall of text. Something like:
 
 "Found 4 relevant memories from previous sessions:
+
 - You decided to use OpenAI embeddings at 512 dims because Mistral can't truncate (stored March 10)
 - There's a gotcha with Neon PgBouncer -- ALTER TABLE silently fails on the pooler endpoint (stored March 8)
 - The auto-link threshold of 0.85 produces very different results per provider (stored March 9)"
@@ -59,6 +60,7 @@ Let the user ask for more detail on any of these rather than dumping everything.
 ## Presenting results
 
 Keep it scannable. For each relevant memory:
+
 - One-line summary of what it says
 - When it was stored (relative time is fine -- "last week", "March 10")
 - Tags if they help (especially `type:decision` or `type:gotcha`)

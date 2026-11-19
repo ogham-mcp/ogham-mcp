@@ -20,6 +20,7 @@ Every memory goes through three checks:
 ### 1. Is it worth storing?
 
 Not everything deserves a memory. Skip anything that's:
+
 - Obvious from the code or docs (someone can just read the file)
 - Temporary or in-progress (store when it's settled)
 - Generic knowledge (how Python imports work, what Docker does)
@@ -77,14 +78,14 @@ If an MCP call fails with a Pydantic validation error about "Input should be a v
 
 When the user is capturing a decision (chose X over Y, picked an architecture, settled a debate), use `store_decision` instead of `store_memory`. It structures the rationale and links to related context automatically.
 
-```
+```python
 store_decision(
-  decision="Use UUID primary keys instead of bigint",
-  rationale="Supabase recommends UUIDs for distributed systems. Bigint requires sequences which don't work well across regions.",
-  alternatives=["bigint with sequences", "ULID", "nanoid"],
-  reasoning_trace="Evaluated 4 options. Bigint needs sequences which break across regions. ULID is sortable but adds a dependency. Nanoid is short but not universally supported. UUID is native to Postgres and Supabase recommends it.",
-  tags=["type:decision", "project:ogham", "database"],
-  related_memories=["<id-of-related-memory-if-known>"]
+    decision="Use UUID primary keys instead of bigint",
+    rationale="Supabase recommends UUIDs for distributed systems. Bigint requires sequences which don't work well across regions.",
+    alternatives=["bigint with sequences", "ULID", "nanoid"],
+    reasoning_trace="Evaluated 4 options. Bigint needs sequences which break across regions. ULID is sortable but adds a dependency. Nanoid is short but not universally supported. UUID is native to Postgres and Supabase recommends it.",
+    tags=["type:decision", "project:ogham", "database"],
+    related_memories=["<id-of-related-memory-if-known>"],
 )
 ```
 
@@ -93,6 +94,7 @@ The `reasoning_trace` is optional but valuable. It captures the full chain of th
 ## After storing
 
 Report what you did:
+
 1. How many memories you checked for duplicates
 2. How many you skipped (already existed)
 3. How many you stored, with their tags

@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 
@@ -26,6 +27,12 @@ PROVIDER_DEFAULT_DIMS: dict[str, int] = {
     "voyage": 1024,
     "gemini": 512,
 }
+
+
+_log = logging.getLogger(__name__)
+
+_GEMINI_GA_MODEL = "gemini-embedding-2"
+_GEMINI_PREVIEW_MODEL = "gemini-embedding-2-preview"
 
 
 def _find_env_files() -> tuple[str, ...]:
@@ -186,6 +193,23 @@ class Settings(BaseSettings):
         allowed = {"ollama", "openai", "mistral", "voyage", "gemini", "onnx"}
         if v not in allowed:
             raise ValueError(f"embedding_provider must be one of {allowed}, got {v!r}")
+        return v
+
+    @field_validator("gemini_embed_model")
+    @classmethod
+    def retire_gemini_preview(cls, v: str) -> str:
+        # Google retired the Preview on 2026-11-06. Requests naming it are
+        # redirected to the GA model for now (same schema, same embedding
+        # space, so no re-index), but Google warns the old name may stop
+        # working. Rewrite it here rather than send it.
+        if v == _GEMINI_PREVIEW_MODEL:
+            _log.warning(
+                "GEMINI_EMBED_MODEL=%s was retired by Google on 2026-11-06; using %s "
+                "(same embedding space, no re-embed needed). Update your config.",
+                _GEMINI_PREVIEW_MODEL,
+                _GEMINI_GA_MODEL,
+            )
+            return _GEMINI_GA_MODEL
         return v
 
     @field_validator("server_transport")
