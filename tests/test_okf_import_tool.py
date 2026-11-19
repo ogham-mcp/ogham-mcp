@@ -152,6 +152,10 @@ def test_supabase_upsert_includes_importance_surprise_defaults():
     mock_client = MagicMock()
     mock_upsert_chain = mock_client.from_.return_value.upsert.return_value
     mock_upsert_chain.execute.return_value.data = [{"id": "abc", "content": "test content"}]
+    # A fresh INSERT: the existence lookup finds no row (TBU-253 -- on an
+    # existing row an absent importance is left out of the payload instead).
+    lookup = mock_client.from_.return_value.select.return_value.eq.return_value.limit.return_value
+    lookup.execute.return_value.data = []
 
     with patch.object(backend, "_get_client", return_value=mock_client):
         # Memory dict deliberately omits importance + surprise (simulates OKF
@@ -260,15 +264,22 @@ def test_import_rejects_non_okf_directory(tmp_path):
         import_memories_tool(data=str(tmp_path))
 
 
-def test_import_rejects_directory_with_invalid_index(tmp_path):
-    """A directory with index.md that lacks okf_version should raise."""
+def test_import_rejects_directory_with_an_index_but_no_concepts(tmp_path):
+    """OKF v0.3 §11.2/§12 forbid refusing a bundle over a missing okf_version,
+    so the version is no longer the gate. What still refuses is a directory
+    with no concept at all -- the "pointed at the wrong path" case the old
+    index check existed to catch."""
     (tmp_path / "memories").mkdir()
-    # Write an index.md but without okf_version frontmatter
+    # An index.md without okf_version, and a README that is not a concept.
     (tmp_path / "index.md").write_text(
         "---\nproducer: test\n---\n# Not a real bundle\n", encoding="utf-8"
+    )
+    (tmp_path / "README.md").write_text("# Notes\n", encoding="utf-8")
+    (tmp_path / "memories" / "note.md").write_text(
+        "---\ntitle: frontmatter but no type\n---\nbody\n", encoding="utf-8"
     )
 
     from ogham.tools.memory import import_memories_tool
 
-    with pytest.raises(ValueError, match="okf_version"):
+    with pytest.raises(ValueError, match="no OKF concept files"):
         import_memories_tool(data=str(tmp_path))

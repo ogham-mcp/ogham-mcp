@@ -632,10 +632,15 @@ def search_memories_enriched(
         _lifecycle_submit(strengthen_edges, ids)
 
     # Demote memories a NEWER memory contradicts, before any caller reads the
-    # ranking. This lives here rather than in the MCP tool because the CLI,
-    # the hooks and the benchmarks all come through this function and none of
-    # them go through that tool -- wiring it one layer up silently fixed
-    # nothing for most callers. See TBU-207.
+    # ranking. This lives here rather than in the MCP tool because callers
+    # outside the tool (the benchmarks) come through this function -- wiring
+    # it one layer up silently fixed nothing for them. See TBU-207.
+    #
+    # NOT every search path comes through here. The recall hooks call
+    # `database.hybrid_search_memories` directly and call `_demote_superseded`
+    # themselves, and so does `ogham search` (cli._search_impl, TBU-301).
+    # The extract_facts path below still skips demotion: the extractor reads
+    # every row, so ordering would not change what it sees.
     if results and not extract_facts:
         results = _demote_superseded(results, profile)
 

@@ -1,6 +1,7 @@
-"""OKF bundle (directory) read/write orchestration."""
+"""OKF bundle (directory) read/write orchestration. OKF v0.3."""
 
 import json
+import logging
 import shutil
 import tempfile
 from datetime import datetime, timezone
@@ -8,25 +9,49 @@ from pathlib import Path
 from typing import Any
 
 from ogham.entity_graph import Entity, EntityEdge
-from ogham.okf.concept import frontmatter_to_memory, memory_to_frontmatter
+from ogham.okf.concept import (
+    MEMORIES_DIR,
+    frontmatter_to_memory,
+    memory_to_body,
+    memory_to_frontmatter,
+)
 from ogham.okf.context import CONTEXT_FILENAME, build_context
 from ogham.okf.entities import (
     ENTITIES_DIR,
     ParsedEntityConcept,
+    entity_to_body,
     entity_to_frontmatter,
     frontmatter_to_entity,
     make_entity_filename,
 )
 from ogham.okf.identity import make_filename
+from ogham.okf.links import x_key
 from ogham.okf.serialization import read_concept, write_concept
 
-_OKF_VERSION = "0.1"
+logger = logging.getLogger(__name__)
+
+#: Declared in the bundle-root index.md. A quoted string per OKF §8.1 -- yaml
+#: dumps a Python str that looks like a number with quotes.
+_OKF_VERSION = "0.3"
 
 #: Version of Ogham's own graph layer -- the `entities/` directory and the
 #: frontmatter-triple shape inside it. `okf_version` covers the OKF container
-#: and says nothing about this (D11). v0.18 mints the format, so declaring it
-#: costs nothing here and gives a later importer something to branch on.
-_GRAPH_VERSION = 1
+#: and says nothing about this (D11). 1 = v0.18 shape (bare keys, wiki-link
+#: values). 2 = v0.20 shape (`x-ogham-*` keys, relative-path values, a body
+#: Relations section). The importer reads both.
+_GRAPH_VERSION = 2
+
+#: Index key for the graph version, and the v0.18 spelling still read.
+GRAPH_VERSION_KEYS = (x_key("graph-version"), "ogham_graph_version")
+
+_DEFAULT_TITLE = "Ogham memory export"
+_DEFAULT_DESCRIPTION = (
+    "Memories exported from an Ogham profile, one concept per memory. "
+    "Use it to read or move that profile's knowledge."
+)
+
+#: Index keys Ogham owns outright and always rewrites.
+_INDEX_SPEC_KEYS = ("okf_version", "title", "description", "license")
 
 
 #: Governing @base for the bundle's JSON-LD context when the caller names none.
@@ -35,19 +60,79 @@ _GRAPH_VERSION = 1
 _DEFAULT_BASE = "https://ogham-mcp.dev/bundle/"
 
 
-def write_index(bundle_dir: Path, manifest: dict) -> None:
-    """Write the bundle-root index.md with okf_version declaration.
+def build_index_frontmatter(
+    manifest: dict,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    license: str | None = None,
+    existing: dict | None = None,
+) -> dict:
+    """Compose the bundle-root index.md frontmatter (OKF §8.1).
 
-    Per OKF spec §11 + §6: the bundle-root index.md is the ONLY index.md where
-    frontmatter is permitted, and is where the supported OKF version is declared.
+    Precedence for `title`, `description` and `license`: an explicit argument,
+    then the value already in the bundle's index.md, then (title and
+    description only) a default. `license` is never invented -- absent unless a
+    caller or the existing file supplies one.
+
+    §8.1: a producer that regenerates index.md MUST keep the existing
+    frontmatter, so every other key from ``existing`` survives. ``manifest``
+    keys are Ogham's own bookkeeping and overwrite stale values of the same
+    name; `okf_version` is always the version this writer produces.
     """
-    frontmatter = {"okf_version": _OKF_VERSION, **manifest}
+    existing = dict(existing or {})
+    fm: dict = {
+        "okf_version": _OKF_VERSION,
+        "title": title or existing.get("title") or _DEFAULT_TITLE,
+        "description": description or existing.get("description") or _DEFAULT_DESCRIPTION,
+    }
+    chosen_license = license or existing.get("license")
+    if chosen_license:
+        fm["license"] = chosen_license
+    for key, value in existing.items():
+        if key not in _INDEX_SPEC_KEYS and key not in manifest:
+            fm[key] = value
+    fm.update(manifest)
+    return fm
+
+
+def write_index(
+    bundle_dir: Path,
+    manifest: dict,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    license: str | None = None,
+    existing: dict | None = None,
+) -> None:
+    """Write the bundle-root index.md with the okf_version declaration.
+
+    The bundle-root index.md is the only index.md that may carry frontmatter
+    (OKF §8), and is where the OKF version is declared (§8.1). See
+    ``build_index_frontmatter`` for how existing frontmatter is kept.
+    """
+    frontmatter = build_index_frontmatter(
+        manifest, title=title, description=description, license=license, existing=existing
+    )
     body = (
         "# Memories\n\n"
         "This bundle was produced by Ogham. "
         "See individual concept files in `memories/`.\n"
     )
     write_concept(bundle_dir / "index.md", frontmatter, body)
+
+
+def _read_existing_index(bundle_dir: Path) -> dict | None:
+    """Frontmatter of the index.md a re-export is about to replace, if any."""
+    index_path = bundle_dir / "index.md"
+    if not index_path.is_file():
+        return None
+    try:
+        fm, _ = read_concept(index_path)
+    except (ValueError, OSError) as exc:
+        logger.warning("OKF export: existing %s unreadable, not preserved: %s", index_path, exc)
+        return None
+    return fm
 
 
 def filter_expired(memories: list[dict]) -> list[dict]:
@@ -92,8 +177,11 @@ def export_okf_bundle(
     aliases: dict[int, list[str]] | None = None,
     memory_entities: dict[str, list[int]] | None = None,
     base: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    license: str | None = None,
 ) -> None:
-    """Export a list of memories to an OKF v0.1 bundle directory.
+    """Export a list of memories to an OKF v0.3 bundle directory.
 
     Atomicity guarantee:
     - Fresh targets (bundle_dir absent): os.rename(staging, bundle_dir) is a
@@ -114,27 +202,35 @@ def export_okf_bundle(
 
     The graph layer (``entities``/``edges``/``aliases``/``memory_entities``) is
     additive and every parameter is keyword-only with a None default: called
-    with memories alone, this writes exactly the bundle it wrote before the
-    graph layer existed, byte for byte. That is the compatibility guarantee, and
-    tests/test_okf_bundle_entities.py asserts it on file contents.
+    with memories alone, this writes no `entities/`, no `context.jsonld` and no
+    graph version. tests/test_okf_bundle_entities.py asserts that on file
+    contents.
 
     ``base`` is the governing @base for context.jsonld; the default is used when
     the caller has no better IRI, which is the normal case for a portable
     bundle.
 
-    Export only -- nothing here reads a bundle back into the graph. Import of
-    the entities layer is a later release (D10); v0.18's only import-side
-    obligation is not to mistake entity concepts for memories.
+    ``title``/``description``/``license`` go into the bundle-root index.md
+    (OKF §8.1). An existing index.md at ``bundle_dir`` has its frontmatter
+    kept, per §8.1; see ``build_index_frontmatter``.
+
+    A memory dict with a truthy ``superseded_by`` (a memory id) is exported as
+    ``status: deprecated``, with a ``superseded_by`` path when that memory is
+    in the bundle too (OKF §5.4).
     """
     bundle_dir = Path(bundle_dir)
     fresh = filter_expired(memories)
+    existing_index = _read_existing_index(bundle_dir)
 
     entity_list = list(entities or [])
     # One table, built before any file is written, so memory concepts and entity
     # concepts resolve their links against identical paths. Values are
-    # bundle-relative and carry no `.md`, matching the wiki-link grammar
-    # (§4.4.1) where the extension is never part of the target.
+    # bundle-relative and carry no `.md`.
     path_by_id = {e.id: f"{ENTITIES_DIR}/{make_entity_filename(e)[:-3]}" for e in entity_list}
+    name_by_id = {e.id: e.canonical_name for e in entity_list}
+    # Same idea for memories: a superseded memory links to its replacement's
+    # file, and only a replacement that is actually being written may be named.
+    memory_path_by_id = {str(m["id"]): f"{MEMORIES_DIR}/{make_filename(m)}" for m in fresh}
     # Edges are emitted on the subject only (D4), so group them once here rather
     # than rescanning the full edge list per entity.
     edges_by_subject: dict[int, list[EntityEdge]] = {}
@@ -145,7 +241,7 @@ def export_okf_bundle(
         # Copied, never mutated: the manifest belongs to the caller, and
         # export_memories builds one and reuses it. Absent on a memories-only
         # bundle, which has no graph layer to version.
-        manifest = {**manifest, "ogham_graph_version": _GRAPH_VERSION}
+        manifest = {**manifest, GRAPH_VERSION_KEYS[0]: _GRAPH_VERSION}
 
     # Use a sibling temp dir so the final rename is on the same filesystem.
     parent = bundle_dir.parent
@@ -153,34 +249,59 @@ def export_okf_bundle(
     with tempfile.TemporaryDirectory(dir=parent, prefix=".okf-tmp-") as tmp:
         staging = Path(tmp) / "bundle"
         staging.mkdir()
-        write_index(staging, manifest)
-        memories_dir = staging / "memories"
+        if existing_index is not None:
+            # A re-export replaces a bundle that may carry an older Ogham's
+            # graph-version key. Keeping both would declare two versions.
+            existing_index = {
+                k: v for k, v in existing_index.items() if k not in GRAPH_VERSION_KEYS
+            }
+        write_index(
+            staging,
+            manifest,
+            title=title,
+            description=description,
+            license=license,
+            existing=existing_index,
+        )
+        memories_dir = staging / MEMORIES_DIR
         memories_dir.mkdir()
         for memory in fresh:
             # An entity id with no exported concept would produce a link to a
             # file that is not there, so filter against the same path table the
             # entity concepts use rather than assuming the two agree.
-            linked = (memory_entities or {}).get(str(memory["id"]), [])
+            linked = [
+                eid
+                for eid in (memory_entities or {}).get(str(memory["id"]), [])
+                if eid in path_by_id
+            ]
+            superseded_id = memory.get("superseded_by")
             fm = memory_to_frontmatter(
                 memory,
-                entity_paths=[path_by_id[eid] for eid in linked if eid in path_by_id],
+                entity_paths=[path_by_id[eid] for eid in linked],
+                superseded_by_path=(
+                    memory_path_by_id.get(str(superseded_id)) if superseded_id else None
+                ),
             )
-            body = memory.get("content") or ""
-            filename = make_filename(memory)
-            write_concept(memories_dir / filename, fm, body)
+            body = memory_to_body(
+                memory.get("content") or "",
+                [(name_by_id[eid], path_by_id[eid]) for eid in linked],
+            )
+            write_concept(memories_dir / make_filename(memory), fm, body)
         if entity_list:
             entities_dir = staging / ENTITIES_DIR
             entities_dir.mkdir()
             for entity in entity_list:
+                subject_edges = edges_by_subject.get(entity.id, [])
                 fm = entity_to_frontmatter(
                     entity,
-                    edges_by_subject.get(entity.id, []),
+                    subject_edges,
                     (aliases or {}).get(entity.id, []),
                     path_by_id,
                 )
-                # Entity bodies are empty: SPEC §5.3 reserves the body for prose
-                # and entities have none.
-                write_concept(entities_dir / make_entity_filename(entity), fm, "")
+                # An entity has no prose, so its body is only the marked
+                # Relations section -- the edges as OKF v0.3 links -- or empty.
+                body = entity_to_body(entity, subject_edges, path_by_id, name_by_id)
+                write_concept(entities_dir / make_entity_filename(entity), fm, body)
             # Written only alongside entities. A memories-only bundle has no
             # predicates to give terms to, and stays byte-identical to what
             # every prior release produced.
@@ -210,15 +331,17 @@ def import_okf_bundle(bundle_dir: Path) -> tuple[list[dict[str, Any]], dict[str,
     not upserts, when the caller writes them).
 
     Reserved filenames (index.md, log.md per spec §3.1) are skipped at every
-    directory level.
+    directory level, and so are dot-paths (§3.2 rule 4: not part of the bundle,
+    which matters for a bundle distributed as a git repository).
 
-    The `entities/` graph layer is deliberately skipped, not consumed. Entity
-    concepts are valid OKF concepts, so nothing here would refuse them -- they
-    would simply arrive as memories with no id and an empty body. Reading them
-    back into the entity graph is a later release's job (D10): it means mutating
-    the globally-scoped `entities` table from a bundle that may not be ours, and
-    that trust boundary is not settled. Skipping is not an oversight, and a
-    skipped entity is not a dropped memory, so it is not counted in
+    A `.md` file whose frontmatter has no non-empty `type` is not a concept
+    (OKF §3.2 rule 2) and is skipped, counted in `not_concept_count`. This is
+    what keeps a README.md, or a directory of some other tool's notes, from
+    becoming memories now that a missing index.md no longer stops the import
+    (§11.2).
+
+    The `entities/` graph layer is skipped here; ``import_okf_graph`` reads it.
+    A skipped entity is not a dropped memory, so it is not counted in
     `skipped_count`.
     """
     bundle_dir = Path(bundle_dir)
@@ -229,8 +352,11 @@ def import_okf_bundle(bundle_dir: Path) -> tuple[list[dict[str, Any]], dict[str,
     memories: list[dict] = []
     missing_id_count = 0
     skipped_count = 0
+    not_concept_count = 0
     for md_path in sorted(bundle_dir.rglob("*.md")):
         if md_path.name in _RESERVED_FILENAMES:
+            continue
+        if any(part.startswith(".") for part in md_path.relative_to(bundle_dir).parts):
             continue
         # Containment, not a filename or single-parent check: rglob descends, so
         # a nested layout under entities/ has to be excluded too. Placed before
@@ -244,6 +370,10 @@ def import_okf_bundle(bundle_dir: Path) -> tuple[list[dict[str, Any]], dict[str,
             # import tool can warn the operator.
             skipped_count += 1
             continue
+        concept_type = fm.get("type")
+        if not isinstance(concept_type, str) or not concept_type.strip():
+            not_concept_count += 1
+            continue
         memory = frontmatter_to_memory(fm, body)
         if memory["id"] is None:
             missing_id_count += 1
@@ -253,6 +383,7 @@ def import_okf_bundle(bundle_dir: Path) -> tuple[list[dict[str, Any]], dict[str,
         "total": len(memories),
         "missing_id_count": missing_id_count,
         "skipped_count": skipped_count,
+        "not_concept_count": not_concept_count,
     }
     return memories, stats
 
@@ -268,7 +399,9 @@ MAX_ENTITY_FILE_BYTES = 1_000_000
 def import_okf_graph(bundle_dir: Path) -> tuple[list[ParsedEntityConcept], dict[str, Any]]:
     """Read a bundle's ``entities/`` layer into parsed concepts + stats.
 
-    The reader for ``ogham_graph_version: 1``. IO and parsing only -- resolving
+    Reads both graph-layer shapes: version 1 (``ogham_graph_version: 1``, bare
+    keys, wiki-link values) and version 2 (``x-ogham-graph-version: 2``,
+    ``x-ogham-*`` keys, relative paths). IO and parsing only -- resolving
     concepts to local ids and writing them is the caller's job, exactly as
     ``import_okf_bundle`` returns memory dicts rather than storing them.
 

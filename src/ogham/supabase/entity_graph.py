@@ -27,7 +27,14 @@ from uuid import UUID
 
 from postgrest import SyncPostgrestClient
 
-from ogham.entity_graph import Entity, EntityEdge, JoinResult, Predicate, split_entity_ref
+from ogham.entity_graph import (
+    Entity,
+    EntityEdge,
+    JoinResult,
+    Predicate,
+    check_evidence_class,
+    split_entity_ref,
+)
 
 
 def _rows(data: Any) -> list[dict[str, Any]]:
@@ -392,11 +399,14 @@ class SupabaseEntityGraph:
         rows = _rows(result.data)
         return int(rows[0]["id"]) if rows else None
 
-    def upsert_entity(self, canonical_name: str, entity_type: str) -> int:
+    def upsert_entity(self, canonical_name: str, entity_type: str, *, evidence_class: str) -> int:
         """Get or create by natural key. Mirrors the Postgres backend.
 
         ``mention_count`` is untouched: an import is not a mention.
+        ``evidence_class`` is written on insert only; an existing row keeps its
+        class.
         """
+        check_evidence_class(evidence_class)
         existing = (
             self._client.table("entities")
             .select("id")
@@ -410,7 +420,13 @@ class SupabaseEntityGraph:
             return int(rows[0]["id"])
         created = (
             self._client.table("entities")
-            .insert({"canonical_name": canonical_name, "entity_type": entity_type})
+            .insert(
+                {
+                    "canonical_name": canonical_name,
+                    "entity_type": entity_type,
+                    "evidence_class": evidence_class,
+                }
+            )
             .execute()
         )
         new_rows = _rows(created.data)

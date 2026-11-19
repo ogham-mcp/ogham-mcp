@@ -506,6 +506,11 @@ def pg_fresh_db():
             "043_entity_aliases",
             "045_predicate_uris",
             "046_edge_provenance",
+            # 049 adds entities.evidence_class and redefines
+            # link_memory_entities to stamp it. Without it every test after
+            # the first pg_fresh_db one ran against a pre-049 entities table,
+            # invisible until a write named the column (TBU-277, v0.20).
+            "049_entity_evidence_class",
         ):
             path = repo_root / "sql" / "migrations" / f"{name}.sql"
             backend._execute(path.read_text(), fetch="none")

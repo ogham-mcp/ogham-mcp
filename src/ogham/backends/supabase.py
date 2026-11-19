@@ -117,6 +117,12 @@ class SupabaseBackend:
             )
         return _rows(result.data)
 
+    def _memory_exists(self, memory_id: str) -> bool:
+        result = (
+            self._get_client().from_("memories").select("id").eq("id", memory_id).limit(1).execute()
+        )
+        return bool(_rows(result.data))
+
     def upsert_memory(self, memory: dict[str, Any]) -> dict[str, Any]:
         """INSERT or UPDATE a memory keyed by ``id`` for OKF round-trip imports.
 
@@ -133,12 +139,29 @@ class SupabaseBackend:
             "metadata": memory.get("metadata") or {},
             "source": memory.get("source"),
             "tags": memory.get("tags") or [],
-            # Provide explicit defaults so a fresh INSERT (no conflict) satisfies
-            # the NOT NULL DEFAULT 0.5 constraint even if PostgREST does not apply
-            # column defaults for absent keys on older versions.
-            "importance": memory.get("importance", 0.5),
-            "surprise": memory.get("surprise", 0.5),
         }
+        # TBU-253: merge-duplicates overwrites every column in the payload, so
+        # importance and surprise go in only when the record carries them, or
+        # when the row is new. A record without them must not replace stored
+        # values -- surprise used to be sent as 0.5 unconditionally, resetting
+        # it on every re-import (the Postgres path never touched it).
+        # PostgREST has no COALESCE-on-conflict, hence the existence check; a
+        # race with a concurrent insert costs at most the column defaults.
+        importance = memory.get("importance")
+        surprise = memory.get("surprise")
+        is_new: bool | None = None
+        if importance is None or surprise is None:
+            is_new = not self._memory_exists(memory["id"])
+        if importance is None and is_new:
+            importance = memory.get("importance_if_new", 0.5)
+        if surprise is None and is_new:
+            # Explicit default so a fresh INSERT satisfies NOT NULL DEFAULT 0.5
+            # even if PostgREST does not apply column defaults for absent keys.
+            surprise = 0.5
+        if importance is not None:
+            row["importance"] = importance
+        if surprise is not None:
+            row["surprise"] = surprise
         embedding = memory.get("embedding")
         if embedding is not None:
             row["embedding"] = str(embedding)
@@ -287,7 +310,7 @@ class SupabaseBackend:
                 .select(
                     "id, content, metadata, source, profile, tags,"
                     " created_at, updated_at, expires_at,"
-                    " access_count, last_accessed_at, confidence"
+                    " access_count, last_accessed_at, confidence, importance"
                 )
             )
             query = query.eq("profile", profile)

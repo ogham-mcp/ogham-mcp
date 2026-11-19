@@ -10,6 +10,13 @@
 #
 #   missing -- the migrations create it, the schema file does not
 #   changed -- both create it, with different definitions
+#   migration_errors -- {migration filename: reason}. A migration that RAISES when
+#           replayed onto the current schema and so did not apply. Unlike the two
+#           above this is a mapping, and the reason is mandatory. It is empty
+#           everywhere today; the only valid entry is "the schema is ahead
+#           and replaying this onto it can never succeed", not "it broke".
+#           (TBU-257: these used to print as informational and pass, which hid
+#           the 031 failure that broke v0.18.0.)
 #
 # 2026-08-05 (TBU-228): the gate was rebuilt to compare pg_dump DEFINITIONS
 # instead of catalog NAMES, and the old name-based baseline was replaced

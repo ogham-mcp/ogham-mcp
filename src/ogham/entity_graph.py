@@ -77,6 +77,18 @@ PREDICATE_URIS: dict[str, dict[str, str | None]] = {
     for pred in V1_PREDICATES
 }
 
+#: The enumeration `entities.evidence_class` CHECKs against (migration 049).
+#: Mirrored here so a Python caller fails before the round trip, with a message
+#: that names the allowed values.
+EVIDENCE_CLASSES: frozenset[str] = frozenset({"structured", "syntactic", "inferred"})
+
+
+def check_evidence_class(value: str) -> str:
+    """Return ``value`` if it is one of ``EVIDENCE_CLASSES``, else raise ValueError."""
+    if value not in EVIDENCE_CLASSES:
+        raise ValueError(f"evidence_class must be one of {sorted(EVIDENCE_CLASSES)}, got {value!r}")
+    return value
+
 
 def make_predicate(value: str, allowed: Iterable[str]) -> Predicate:
     """Construct a Predicate after validating against the vocabulary.
@@ -295,11 +307,17 @@ class EntityGraph(Protocol):
         """
         ...
 
-    def upsert_entity(self, canonical_name: str, entity_type: str) -> int:
+    def upsert_entity(self, canonical_name: str, entity_type: str, *, evidence_class: str) -> int:
         """Get or create an entity by its natural key, returning its id.
 
         The natural key is (canonical_name, entity_type) -- the table's UNIQUE
         constraint. A bare name is not a key (TBU-274).
+
+        ``evidence_class`` is required and keyword-only (TBU-277): a caller that
+        creates an entity has to say what evidence it has, rather than let the
+        column default say it silently. It applies to a NEW row only. An
+        existing row keeps its class, because evidence is monotone (migration
+        049) and an upsert is not a sighting.
 
         There was no Python-level way to create an entity before this: the only
         creation path was the ``link_memory_entities`` RPC, which needs a memory

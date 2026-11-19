@@ -17,7 +17,14 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from ogham.entity_graph import Entity, EntityEdge, JoinResult, Predicate, split_entity_ref
+from ogham.entity_graph import (
+    Entity,
+    EntityEdge,
+    JoinResult,
+    Predicate,
+    check_evidence_class,
+    split_entity_ref,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -336,22 +343,25 @@ class PostgresEntityGraph:
             row = cur.fetchone()
             return int(row["id"]) if row else None
 
-    def upsert_entity(self, canonical_name: str, entity_type: str) -> int:
+    def upsert_entity(self, canonical_name: str, entity_type: str, *, evidence_class: str) -> int:
         """Get or create by natural key. See the protocol docstring.
 
         ``mention_count`` is untouched on both branches: an import is not a
-        mention, and it feeds ranking in every profile.
+        mention, and it feeds ranking in every profile. ``evidence_class`` is
+        written on INSERT only; the conflict branch leaves the stored class
+        alone so an existing entity is never demoted.
         """
+        check_evidence_class(evidence_class)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO entities (canonical_name, entity_type)
-                VALUES (%s, %s)
+                INSERT INTO entities (canonical_name, entity_type, evidence_class)
+                VALUES (%s, %s, %s)
                 ON CONFLICT (canonical_name, entity_type) DO UPDATE
                     SET canonical_name = EXCLUDED.canonical_name
                 RETURNING id
                 """,
-                (canonical_name, entity_type),
+                (canonical_name, entity_type, evidence_class),
             )
             row = cur.fetchone()
             conn.commit()

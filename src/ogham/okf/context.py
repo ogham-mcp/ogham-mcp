@@ -28,6 +28,7 @@ JSON-LD processor dependency is needed for a context we control at both ends.
 """
 
 from ogham.entity_graph import PREDICATE_URIS
+from ogham.okf.entities import predicate_key
 
 CONTEXT_FILENAME = "context.jsonld"
 
@@ -62,9 +63,12 @@ def build_context(base: str) -> dict:
     for predicate in sorted(PREDICATE_URIS):
         uris = PREDICATE_URIS[predicate]
         # "@type": "@id" coerces values to IRIs. These are object properties
-        # whose values are wiki links, never literals (§4.3) -- without the
-        # coercion a processor reads `OWNS: "[[entities/x-e88]]"` as a string.
-        context[predicate] = {"@id": uris["ogham"], "@type": "@id"}
+        # whose values are links to concept files, never literals -- without
+        # the coercion a processor reads `x-ogham-owns: "x-e88.md"` as a string.
+        # Keyed by the frontmatter key the exporter writes since OKF v0.3
+        # (TBU-297), not the bare predicate name: a term for a key no file
+        # carries would map nothing.
+        context[predicate_key(predicate)] = {"@id": uris["ogham"], "@type": "@id"}
 
         schema_org = uris.get("schema_org")
         if schema_org:

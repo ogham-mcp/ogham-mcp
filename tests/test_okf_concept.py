@@ -5,6 +5,7 @@ import pytest
 from ogham.okf.concept import (
     derive_okf_type,
     frontmatter_to_memory,
+    generator_actor,
     memory_to_frontmatter,
     strip_type_tags,
 )
@@ -57,10 +58,14 @@ def test_memory_to_frontmatter_required_and_recommended_fields():
     }
     fm = memory_to_frontmatter(memory)
     assert fm["type"] == "Decision"
-    assert fm["id"] == "7da3c025-fa77-4f0b-9d2e-1ab84e6c3f99"
+    assert fm["x-ogham-id"] == "7da3c025-fa77-4f0b-9d2e-1ab84e6c3f99"
     assert fm["tags"] == ["project:ogham"]
-    assert fm["source"] == "claude-code"
-    assert fm["timestamp"] == "2026-06-17T08:51:03.613750Z"
+    assert fm["x-ogham-source"] == "claude-code"
+    # OKF v0.3 §5.2: generated {by, at} replaces the v0.1 `timestamp`.
+    assert fm["generated"]["at"] == "2026-06-17T08:51:03.613750Z"
+    assert fm["generated"]["by"].startswith("ogham/")
+    for legacy in ("id", "source", "timestamp"):
+        assert legacy not in fm
 
 
 def test_memory_to_frontmatter_timestamp_is_str_for_datetime_or_iso_string_created_at():
@@ -83,9 +88,18 @@ def test_memory_to_frontmatter_timestamp_is_str_for_datetime_or_iso_string_creat
     fm_from_str = memory_to_frontmatter({**base, "created_at": iso_str})
     fm_from_dt = memory_to_frontmatter({**base, "created_at": dt})
 
-    assert isinstance(fm_from_str["timestamp"], str)
-    assert isinstance(fm_from_dt["timestamp"], str)
-    assert fm_from_dt["timestamp"] == fm_from_str["timestamp"] == iso_str
+    assert isinstance(fm_from_str["generated"]["at"], str)
+    assert isinstance(fm_from_dt["generated"]["at"], str)
+    assert fm_from_dt["generated"]["at"] == fm_from_str["generated"]["at"] == iso_str
+
+
+def test_a_naive_datetime_is_written_with_a_utc_offset():
+    """OKF §5 rejects a date-time with no offset. created_at is timestamptz,
+    so a naive value can only be UTC that lost its tzinfo."""
+    fm = memory_to_frontmatter(
+        {"id": "x", "content": "x", "tags": [], "created_at": datetime(2026, 6, 17, 8, 0, 0)}
+    )
+    assert fm["generated"]["at"] == "2026-06-17T08:00:00+00:00"
 
 
 def test_memory_to_frontmatter_missing_created_at_is_none():
@@ -97,7 +111,8 @@ def test_memory_to_frontmatter_missing_created_at_is_none():
         "metadata": {},
     }
     fm = memory_to_frontmatter(memory)
-    assert fm["timestamp"] is None
+    # `by` is required in `generated`; `at` is only written when known.
+    assert fm["generated"] == {"by": generator_actor()}
 
 
 def test_memory_to_frontmatter_title_from_first_line():
@@ -154,7 +169,7 @@ def test_memory_to_frontmatter_omits_optional_fields_when_empty():
         "metadata": {},
     }
     fm = memory_to_frontmatter(memory)
-    assert "source" not in fm
+    assert "x-ogham-source" not in fm
     assert fm["tags"] == []  # empty list is OK
 
 
@@ -248,13 +263,15 @@ def test_memory_to_frontmatter_emits_mentions_for_linked_entities():
         memory,
         entity_paths=["entities/ogham-e42", "entities/supabase-e7"],
     )
-    assert fm["MENTIONS"] == ["[[entities/ogham-e42]]", "[[entities/supabase-e7]]"]
+    # Relative to memories/, per OKF §6 rule 3 -- not v0.1 wiki links.
+    assert fm["x-ogham-mentions"] == ["../entities/ogham-e42.md", "../entities/supabase-e7.md"]
+    assert "MENTIONS" not in fm
 
 
 def test_memory_to_frontmatter_omits_mentions_when_there_are_no_entities():
     memory = {"id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "content": "x", "tags": []}
-    assert "MENTIONS" not in memory_to_frontmatter(memory, entity_paths=[])
-    assert "MENTIONS" not in memory_to_frontmatter(memory)
+    assert "x-ogham-mentions" not in memory_to_frontmatter(memory, entity_paths=[])
+    assert "x-ogham-mentions" not in memory_to_frontmatter(memory)
 
 
 def test_metadata_cannot_overwrite_the_mentions_edges():
@@ -264,10 +281,10 @@ def test_metadata_cannot_overwrite_the_mentions_edges():
         "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         "content": "x",
         "tags": [],
-        "metadata": {"MENTIONS": "not-a-link"},
+        "metadata": {"x-ogham-mentions": "not-a-link"},
     }
     fm = memory_to_frontmatter(memory, entity_paths=["entities/ogham-e42"])
-    assert fm["MENTIONS"] == ["[[entities/ogham-e42]]"]
+    assert fm["x-ogham-mentions"] == ["../entities/ogham-e42.md"]
 
 
 def test_entity_paths_is_keyword_only():
@@ -295,13 +312,18 @@ def test_stale_mentions_in_metadata_never_reaches_the_bundle():
         "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         "content": "x",
         "tags": [],
-        "metadata": {"MENTIONS": "[[entities/ghost-e999]]"},
+        "metadata": {
+            "MENTIONS": "[[entities/ghost-e999]]",
+            "x-ogham-mentions": ["../entities/ghost-e999.md"],
+        },
     }
-    assert "MENTIONS" not in memory_to_frontmatter(memory, entity_paths=[])
-    assert "MENTIONS" not in memory_to_frontmatter(memory)
+    for fm in (memory_to_frontmatter(memory, entity_paths=[]), memory_to_frontmatter(memory)):
+        assert "MENTIONS" not in fm
+        assert "x-ogham-mentions" not in fm
     # And a real derivation still wins over the stale value.
     fm = memory_to_frontmatter(memory, entity_paths=["entities/ogham-e42"])
-    assert fm["MENTIONS"] == ["[[entities/ogham-e42]]"]
+    assert fm["x-ogham-mentions"] == ["../entities/ogham-e42.md"]
+    assert "MENTIONS" not in fm
 
 
 def test_frontmatter_id_is_serialisable_when_the_backend_returns_a_uuid():
@@ -315,5 +337,5 @@ def test_frontmatter_id_is_serialisable_when_the_backend_returns_a_uuid():
     memory_id = uuid.UUID("d2b3e6b9-1996-4e1d-97f9-53bb27a3ffe9")
     fm = memory_to_frontmatter({"id": memory_id, "content": "x", "tags": []})
 
-    assert fm["id"] == str(memory_id)
+    assert fm["x-ogham-id"] == str(memory_id)
     yaml.safe_dump(fm)  # must not raise

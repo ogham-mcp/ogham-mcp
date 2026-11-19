@@ -89,6 +89,10 @@ def test_supabase_upsert_sends_resolution_merge_duplicates(supabase_settings):
         "source": "test",
         "tags": [],
         "embedding": [0.1] * 512,
+        # Both carried, so upsert_memory skips the existence lookup (TBU-253)
+        # and the first request the hook captures is the upsert itself.
+        "importance": 0.5,
+        "surprise": 0.5,
     }
     with pytest.raises((Exception, APIError)):
         backend.upsert_memory(memory)

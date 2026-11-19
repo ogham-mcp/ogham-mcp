@@ -20,7 +20,8 @@ def test_write_index_emits_okf_version_in_frontmatter(tmp_path: Path):
     assert text.startswith("---\n")
     # okf_version declaration goes in the root index.md per OKF spec §11
     assert "okf_version:" in text
-    assert "'0.1'" in text or '"0.1"' in text or "0.1" in text
+    # OKF v0.3 §8.1: a QUOTED string. Unquoted, YAML reads 0.3 as a float.
+    assert "okf_version: '0.3'" in text or 'okf_version: "0.3"' in text
     assert "producer: ogham-mcp/0.15.0" in text
     assert "profile: work" in text
 
@@ -30,8 +31,53 @@ def test_write_index_yaml_round_trip(tmp_path: Path):
     text = (tmp_path / "index.md").read_text(encoding="utf-8")
     yaml_block = text.split("---\n", 2)[1]
     parsed = yaml.safe_load(yaml_block)
-    assert parsed["okf_version"] == "0.1"
+    assert parsed["okf_version"] == "0.3"
+    assert isinstance(parsed["okf_version"], str)
     assert parsed["producer"] == "p"
+    # §8.1 bundle metadata. No licence is invented when nobody supplies one.
+    assert parsed["title"]
+    assert parsed["description"]
+    assert "license" not in parsed
+
+
+def test_write_index_carries_a_supplied_license_and_title(tmp_path: Path):
+    write_index(tmp_path, {"producer": "p"}, title="Mine", license="CC-BY-4.0")
+    fm = yaml.safe_load((tmp_path / "index.md").read_text(encoding="utf-8").split("---\n", 2)[1])
+    assert fm["title"] == "Mine"
+    assert fm["license"] == "CC-BY-4.0"
+
+
+def test_reexport_keeps_the_existing_index_frontmatter(tmp_path: Path):
+    """OKF §8.1: a producer that regenerates index.md MUST keep the existing
+    frontmatter. A title, licence or foreign key a human added survives; the
+    version and Ogham's own bookkeeping are rewritten."""
+    out = tmp_path / "bundle"
+    memories = [{"id": "11111111-2222-3333-4444-555555555555", "content": "x", "tags": []}]
+    export_okf_bundle(memories, out, {"producer": "p", "exported_at": "first"})
+    index = out / "index.md"
+    text = index.read_text(encoding="utf-8")
+    fm = yaml.safe_load(text.split("---\n", 2)[1])
+    fm.update(
+        {
+            "okf_version": "0.1",
+            "ogham_graph_version": 1,
+            "title": "Hand-picked title",
+            "license": "MIT",
+            "x-acme-owner": "team:kb",
+        }
+    )
+    index.write_text("---\n" + yaml.safe_dump(fm, sort_keys=False) + "---\n# Index\n")
+
+    export_okf_bundle(memories, out, {"producer": "p", "exported_at": "second"})
+
+    after = yaml.safe_load(index.read_text(encoding="utf-8").split("---\n", 2)[1])
+    assert after["okf_version"] == "0.3"
+    assert after["title"] == "Hand-picked title"
+    assert after["license"] == "MIT"
+    assert after["x-acme-owner"] == "team:kb"
+    assert after["exported_at"] == "second"
+    # A memories-only re-export has no graph layer, so the stale v1 key goes.
+    assert "ogham_graph_version" not in after
 
 
 def test_filter_expired_removes_past_expires_at():

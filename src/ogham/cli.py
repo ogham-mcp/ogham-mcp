@@ -431,6 +431,11 @@ def _search_impl(
             limit=limit,
             tags=merged_tags or None,
         )
+        # TBU-301: this path calls the database directly, so it has to demote
+        # superseded memories itself, as the recall hooks do. Fail-open.
+        from ogham.service import _demote_superseded
+
+        results = _demote_superseded(results, target)
 
     if not results:
         if output_json:
@@ -453,6 +458,8 @@ def _search_impl(
         mem_id = str(r.get("id", "")) if full_id else str(r.get("id", ""))[:8]
         relevance = f"{r.get('relevance', 0):.3f}"
         content = r["content"][:120]
+        if r.get("superseded_by"):
+            content = f"(superseded) {content}"
         tags_str = ", ".join(r.get("tags", []))
         table.add_row(mem_id, relevance, content, tags_str)
 
@@ -595,7 +602,7 @@ def cleanup(
 def export_cmd(
     profile: str = typer.Option(None, help="Profile to export"),
     format: str = typer.Option(
-        "json", help="Output format: json, markdown, or okf (OKF v0.1 bundle directory)"
+        "json", help="Output format: json, markdown, or okf (OKF v0.3 bundle directory)"
     ),
     output: Optional[str] = typer.Option(
         None, "--output", "-o", help="Output file (stdout if omitted)"
@@ -690,7 +697,7 @@ def import_cmd(
 
     target = profile or settings.default_profile
 
-    # OKF v0.1 bundles are directories, not files. Hand the path through to
+    # OKF bundles are directories, not files. Hand the path through to
     # the importer as a string -- import_memories auto-detects bundle dirs.
     # JSON/markdown exports are still single files we read into memory.
     import os

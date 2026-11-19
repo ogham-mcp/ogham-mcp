@@ -920,7 +920,7 @@ def export_profile(format: str = "json", include_viewer: bool = True) -> dict[st
 
     Args:
         format: Output format -- "json", "markdown", or "okf".
-            "okf" writes an OKF v0.1 bundle directory to the current working
+            "okf" writes an OKF v0.3 bundle directory to the current working
             directory and returns its path in the "data" field.
         include_viewer: When format="okf", also write a self-contained
             viewer.html at the bundle root for offline graph browsing.
@@ -940,7 +940,7 @@ def import_memories_tool(data: str, dedup_threshold: float = 0.8) -> dict[str, A
 
     Args:
         data: Either a JSON string from a previous export_profile call, OR the
-              filesystem path to an OKF v0.1 bundle directory returned by
+              filesystem path to an OKF bundle directory returned by
               export_profile(format='okf'). Shape is auto-detected: if data is
               a string path to an existing directory, it's treated as an OKF
               bundle; otherwise as a JSON string.

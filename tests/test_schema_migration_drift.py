@@ -18,12 +18,20 @@ migration history on top, dump it again, and compare the two dumps object by
 object. Migrations are guarded (IF NOT EXISTS / WHERE NOT EXISTS), so a complete
 schema file yields an empty diff.
 
-Two things can go wrong, and this test names them separately:
+Three things can go wrong, and this test names them separately:
 
   MISSING -- an object the migrations create that the schema file does not.
              A fresh install lacks the feature entirely.
   CHANGED -- an object both create, with a DIFFERENT definition. A fresh install
              gets an older or divergent version of a function, index, or policy.
+
+  ERROR   -- a migration raised and did not apply at all. Its objects are not in
+             the "after" dump, so MISSING/CHANGED cannot see them: a break in
+             migration N hides everything N would have created. This is the
+             v0.18.0 failure (031 raised "cannot change return type of existing
+             function"; this gate printed it as informational and passed, TBU-257).
+             It fails unless the migration is listed under
+             `known_drift.<schema>.migration_errors` WITH a reason.
 
 CHANGED is the category this test was rebuilt to catch (TBU-228). The previous
 version compared catalog *names* -- `proname(identity_args)`, `indexname`,
@@ -179,7 +187,7 @@ def _parse_objects(dump: str) -> dict[str, str]:
     return {key: "\n".join(sorted(bodies)) for key, bodies in objects.items()}
 
 
-def _load_baseline(schema_key: str) -> tuple[set[str], set[str]]:
+def _load_baseline(schema_key: str) -> tuple[set[str], set[str], dict[str, str]]:
     """Per-schema debt register.
 
     Each shipping schema drifts differently -- the vanilla one has no RLS at all,
@@ -188,7 +196,11 @@ def _load_baseline(schema_key: str) -> tuple[set[str], set[str]]:
     """
     raw = yaml.safe_load(BASELINE_PATH.read_text()) or {}
     known = ((raw.get("known_drift") or {}).get(schema_key)) or {}
-    return set(known.get("missing") or []), set(known.get("changed") or [])
+    return (
+        set(known.get("missing") or []),
+        set(known.get("changed") or []),
+        dict(known.get("migration_errors") or {}),
+    )
 
 
 @pytest.mark.postgres_integration
@@ -261,26 +273,27 @@ def test_schema_file_is_not_behind_its_migrations(pg_url, schema_key):
                 if not p.name.startswith("DANGER_")
             )
             assert migrations, "no migrations found -- path drift?"
-            conflicts: list[str] = []
+            # {migration filename: first line of the error}
+            conflicts: dict[str, str] = {}
             for migration in migrations:
-                # A migration that cannot replay onto a CURRENT schema is not
-                # necessarily a fault. Once a function's final form is
+                # A migration that cannot replay onto a CURRENT schema is the
+                # schema being AHEAD: once a function's final form is
                 # backported, the migration that first created it tries to
-                # CREATE OR REPLACE an older signature, and Postgres refuses
-                # ("cannot change return type of existing function") --
-                # wiki_topic_search is replaced by 034, so 031 can no longer
-                # apply on top of the backported version.
+                # CREATE OR REPLACE an older signature and Postgres refuses
+                # ("cannot change return type of existing function"). That is
+                # not a user path (fresh installs apply the schema and stop;
+                # existing installs replay against an OLD schema, in order).
                 #
-                # That is the schema being AHEAD, the opposite of the drift this
-                # test hunts, and it is not a real user path: fresh installs
-                # apply the schema and stop; existing installs replay migrations
-                # against an OLD schema, in order, which works. So collect these
-                # rather than aborting -- the assertion that matters is whether
-                # any object appears or changes that the schema did not produce.
+                # But it is also exactly how a REAL break looks, and until
+                # TBU-257 this gate printed both as "informational" and passed
+                # -- including the 031 failure that broke v0.18.0. So collect
+                # the errors, keep running so one does not mask the rest, and
+                # FAIL on any that the baseline does not list with a reason.
+                # A migration that replays without error never lands here.
                 try:
                     conn.execute(migration.read_text())  # type: ignore[arg-type]
                 except psycopg.Error as exc:
-                    conflicts.append(f"{migration.name}: {str(exc).splitlines()[0]}")
+                    conflicts[migration.name] = str(exc).splitlines()[0]
                     # Migration files carry their own BEGIN/COMMIT, so a failure
                     # inside one leaves the session in an aborted transaction and
                     # every later statement dies with InFailedSqlTransaction.
@@ -301,13 +314,15 @@ def test_schema_file_is_not_behind_its_migrations(pg_url, schema_key):
 
     assert before, "parsed no objects from the schema-built dump -- parser drift?"
 
-    known_missing, known_changed = _load_baseline(schema_key)
+    known_missing, known_changed, known_errors = _load_baseline(schema_key)
     missing = {key for key in after if key not in before}
     changed = {key for key in after if key in before and after[key] != before[key]}
 
     new_missing = sorted(missing - known_missing)
     new_changed = sorted(changed - known_changed)
     resolved = sorted((known_missing - missing) | (known_changed - changed))
+    new_errors = {name: msg for name, msg in sorted(conflicts.items()) if name not in known_errors}
+    stale_errors = sorted(name for name in known_errors if name not in conflicts)
 
     if resolved:
         print(  # noqa: T201 - surfaced deliberately on an integration run
@@ -315,14 +330,27 @@ def test_schema_file_is_not_behind_its_migrations(pg_url, schema_key):
             f"remove these from {BASELINE_PATH.name}:\n"
             + "\n".join(f"  {item}" for item in resolved)
         )
-    if conflicts:
+    if stale_errors:
         print(  # noqa: T201
-            "\nmigrations that could not replay onto the current schema "
-            "(schema is AHEAD -- informational, not drift):\n"
-            + "\n".join(f"  {c}" for c in conflicts)
+            "\nmigration_errors entries that now replay cleanly -- "
+            f"remove these from {BASELINE_PATH.name}:\n"
+            + "\n".join(f"  {name}" for name in stale_errors)
+        )
+    tolerated = {name: msg for name, msg in conflicts.items() if name in known_errors}
+    if tolerated:
+        print(  # noqa: T201
+            "\nmigrations that raised but are baselined (schema is AHEAD -- "
+            "informational, reason recorded in the baseline):\n"
+            + "\n".join(f"  {name}: {msg}" for name, msg in tolerated.items())
         )
 
     report = []
+    if new_errors:
+        report.append(
+            "ERROR -- these migrations raised and did NOT apply, so everything they\n"
+            "create is invisible to this comparison:\n"
+            + "\n".join(f"    {name}: {msg}" for name, msg in new_errors.items())
+        )
     if new_missing:
         report.append(
             f"MISSING -- the migrations create these, {schema_path.name} does not.\n"
@@ -340,7 +368,8 @@ def test_schema_file_is_not_behind_its_migrations(pg_url, schema_key):
         + f"\n\n(schema under test: {schema_path.name})"
         + "\n\nBackport them into all three schema files, or -- if a fresh install is "
         f"genuinely not meant to have them -- add them under known_drift.{schema_key} "
-        f"in {BASELINE_PATH.name} with a reason."
+        f"in {BASELINE_PATH.name} with a reason. A migration that raises is listed under "
+        f"known_drift.{schema_key}.migration_errors as {{filename: reason}}."
     )
 
 
@@ -359,8 +388,18 @@ def test_baseline_file_is_well_formed():
     )
     for schema_key, known in raw["known_drift"].items():
         for kind in known or {}:
-            assert kind in {"missing", "changed"}, (
+            assert kind in {"missing", "changed", "migration_errors"}, (
                 f"unknown drift kind {kind!r} under known_drift.{schema_key}"
+            )
+        # A tolerated migration error without a reason is how "informational"
+        # became "ignored" (TBU-257), so the reason is mandatory.
+        errors = (known or {}).get("migration_errors") or {}
+        assert isinstance(errors, dict), (
+            f"known_drift.{schema_key}.migration_errors must map filename -> reason"
+        )
+        for name, reason in errors.items():
+            assert isinstance(reason, str) and reason.strip(), (
+                f"known_drift.{schema_key}.migration_errors.{name} needs a reason"
             )
 
 

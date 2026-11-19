@@ -115,23 +115,23 @@ class TestApply:
 class TestUpsertEntity:
     def test_upsert_is_get_or_create_on_the_natural_key(self, graph):
         name = f"Upsert{uuid.uuid4().hex[:6]}"
-        first = graph.upsert_entity(name, "project")
-        again = graph.upsert_entity(name, "project")
+        first = graph.upsert_entity(name, "project", evidence_class="inferred")
+        again = graph.upsert_entity(name, "project", evidence_class="inferred")
         assert first == again, "same natural key must return the same id"
 
     def test_same_name_different_type_is_a_different_entity(self, graph):
         """The whole reason a bare name is not a key (TBU-274)."""
         name = f"Dual{uuid.uuid4().hex[:6]}"
-        as_entity = graph.upsert_entity(name, "entity")
-        as_error = graph.upsert_entity(name, "error")
+        as_entity = graph.upsert_entity(name, "entity", evidence_class="inferred")
+        as_error = graph.upsert_entity(name, "error", evidence_class="inferred")
         assert as_entity != as_error
 
     def test_upsert_does_not_inflate_mention_count(self, graph, pg_url):
         """An import is not a mention -- mention_count feeds ranking everywhere."""
         name = f"Mention{uuid.uuid4().hex[:6]}"
-        eid = graph.upsert_entity(name, "project")
+        eid = graph.upsert_entity(name, "project", evidence_class="inferred")
         for _ in range(3):
-            graph.upsert_entity(name, "project")
+            graph.upsert_entity(name, "project", evidence_class="inferred")
         with ConnectionPool(
             pg_url, min_size=1, max_size=1, open=True, kwargs={"row_factory": dict_row}
         ) as p:
@@ -219,7 +219,8 @@ class TestDryRun:
         'already exists' (TBU-274)."""
         s = uuid.uuid4().hex[:6]
         profile = f"okf-{uuid.uuid4().hex[:8]}"
-        graph.upsert_entity(f"Dual{s}", "error")  # same name, DIFFERENT type
+        # same name, DIFFERENT type
+        graph.upsert_entity(f"Dual{s}", "error", evidence_class="inferred")
         concept = ParsedEntityConcept(f"Dual{s}", "project", 1, [], [], f"dual{s}-e1")
 
         stats = apply_okf_graph([concept], profile, graph, dry_run=True)

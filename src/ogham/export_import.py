@@ -85,10 +85,50 @@ def _fetch_graph(
     return fetched_entities, fetched_edges, fetched_aliases, fetched_mem_entities
 
 
+def _mark_superseded(memories: list[dict[str, Any]], profile: str) -> list[dict[str, Any]]:
+    """Copy ``memories``, setting ``superseded_by`` on each one a newer memory contradicts.
+
+    There is no ``superseded_by`` column: supersession is derived from
+    ``contradicts`` edges, oriented stale -> newer by created_at (migration 047,
+    TBU-207), exactly as search does in ``service._demote_superseded``. The same
+    ``find_superseded`` rule picks the newest corrector when there are several.
+
+    Fails OPEN, like ``_fetch_graph``: an install without 047, or a backend that
+    cannot express the lookup (Supabase returns [] here), still exports, just
+    without lifecycle marks. Never mutates the caller's dicts.
+    """
+    from ogham.database import in_result_contradictions
+    from ogham.supersession import find_superseded
+
+    if not memories:
+        return memories
+    try:
+        dates = {str(m["id"]): m.get("created_at") for m in memories}
+        pairs = [
+            {
+                "in_result_id": edge["stale_id"],
+                "other_id": edge["newer_id"],
+                "other_created_at": dates.get(str(edge["newer_id"])),
+                "strength": edge.get("strength"),
+            }
+            for edge in in_result_contradictions(profile, list(dates))
+        ]
+        superseded = find_superseded(memories, pairs)
+    except Exception as exc:  # noqa: BLE001 -- lifecycle marks are additive
+        logger.warning("OKF export: supersession lookup unavailable, no status marks: %s", exc)
+        return memories
+    return [
+        {**m, "superseded_by": superseded[str(m["id"])]["superseded_by"]}
+        if str(m["id"]) in superseded
+        else m
+        for m in memories
+    ]
+
+
 def export_memories(profile: str, format: str = "json", *, include_viewer: bool = True) -> str:
     """Export all memories in a profile to a string or bundle path.
 
-    For format='okf', writes an OKF v0.1 bundle directory to cwd and returns
+    For format='okf', writes an OKF v0.3 bundle directory to cwd and returns
     the directory path as a string. The bundle gets a self-contained viewer.html
     by default; pass include_viewer=False to skip it.
     For 'json'/'markdown', returns the data inline as a string and ignores
@@ -111,7 +151,7 @@ def export_memories(profile: str, format: str = "json", *, include_viewer: bool 
         }
         entities, edges, aliases, mem_entities = _fetch_graph(profile)
         export_okf_bundle(
-            memories,
+            _mark_superseded(memories, profile),
             bundle_dir,
             manifest,
             include_viewer=include_viewer,
@@ -119,6 +159,7 @@ def export_memories(profile: str, format: str = "json", *, include_viewer: bool 
             edges=edges,
             aliases=aliases,
             memory_entities=mem_entities,
+            title=f"Ogham memories: {profile}",
         )
         return str(bundle_dir)
 
@@ -133,7 +174,7 @@ def _export_json(profile: str, memories: list[dict[str, Any]]) -> str:
             "profile": profile,
             "exported_at": datetime.now(timezone.utc).isoformat(),
             "count": len(memories),
-            "memories": memories,
+            "memories": [_round_importance(m) for m in memories],
         },
         indent=2,
         default=str,
@@ -194,10 +235,53 @@ def _build_row(
         "metadata": mem.get("metadata") or {},
         "source": mem.get("source"),
         "tags": mem.get("tags") or [],
+        "importance": _resolve_importance(mem),
     }
     if expires_at is not None:
         row["expires_at"] = expires_at
     return row
+
+
+def _carried_importance(mem: dict[str, Any]) -> float | None:
+    """The importance the record carries, if it is usable: a number in [0, 1].
+
+    The record is untrusted input, so anything else counts as not carried.
+    """
+    value = mem.get("importance")
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and 0.0 <= value <= 1.0:
+        return float(value)
+    return None
+
+
+def _resolve_importance(mem: dict[str, Any]) -> float:
+    """Importance for a NEW memory created by import (TBU-253).
+
+    A carried value is preserved. A missing or malformed one is computed
+    exactly as the interactive write path does -- ``compute_importance(content,
+    tags)``, see ``service.store_memory_enriched`` -- instead of falling to the
+    column default of 0.5.
+
+    Only for inserts. An upsert onto an existing row must not replace a stored
+    importance with a computed guess; see the upsert call site.
+    """
+    from ogham.extraction import compute_importance
+
+    carried = _carried_importance(mem)
+    if carried is not None:
+        return carried
+    return compute_importance(mem.get("content") or "", list(mem.get("tags") or []))
+
+
+def _round_importance(memory: dict[str, Any]) -> dict[str, Any]:
+    """Export-side: importance to 4 decimal places (0.30000000000000004 -> 0.3).
+
+    A copy, so the caller's row is untouched. Import accepts whatever it is
+    given; rounding is a presentation choice made once, on the way out.
+    """
+    value = memory.get("importance")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return {**memory, "importance": round(float(value), 4)}
+    return memory
 
 
 def _upsert_memory(memory: dict[str, Any]) -> None:
@@ -224,6 +308,46 @@ def _looks_like_okf_bundle_dir(data: str) -> bool:
         return False
 
 
+def _check_okf_index(bundle_dir: Path) -> list[str]:
+    """Read the bundle-root index.md for diagnostics only. Never refuses.
+
+    OKF v0.3 §11.2: consumers MUST NOT reject a bundle for a missing index.md,
+    and §12 says a consumer SHOULD NOT refuse an unknown or missing version.
+    Up to v0.19 this rejected both. Each problem is logged as a warning and
+    returned so the caller can surface it.
+    """
+    from ogham.okf import SUPPORTED_OKF_VERSION
+    from ogham.okf.bundle import _GRAPH_VERSION, GRAPH_VERSION_KEYS
+    from ogham.okf.serialization import read_concept
+
+    warnings: list[str] = []
+    index_path = bundle_dir / "index.md"
+    fm: dict[str, Any] = {}
+    if not index_path.is_file():
+        warnings.append(f"{bundle_dir} has no index.md; importing it as an OKF bundle anyway")
+    else:
+        try:
+            fm, _ = read_concept(index_path)
+        except ValueError as exc:
+            warnings.append(f"{index_path} has no readable frontmatter ({exc}); continuing")
+        if fm and "okf_version" not in fm:
+            warnings.append(f"{index_path} declares no okf_version; reading it best-effort")
+        elif "okf_version" in fm and str(fm["okf_version"]) not in ("0.1", SUPPORTED_OKF_VERSION):
+            warnings.append(
+                f"{index_path} declares okf_version {fm['okf_version']!r}; this Ogham "
+                f"writes {SUPPORTED_OKF_VERSION} and reads it best-effort"
+            )
+    graph_version = next((fm[k] for k in GRAPH_VERSION_KEYS if k in fm), None)
+    if isinstance(graph_version, int) and graph_version > _GRAPH_VERSION:
+        warnings.append(
+            f"{index_path} declares graph version {graph_version}; this Ogham reads up "
+            f"to {_GRAPH_VERSION}, so some of the graph layer may be skipped"
+        )
+    for message in warnings:
+        logger.warning("OKF import: %s", message)
+    return warnings
+
+
 def import_memories(
     data: str,
     profile: str,
@@ -236,7 +360,8 @@ def import_memories(
     """Import memories from a JSON string or an OKF bundle directory path.
 
     Shape detection: if ``data`` is a string path to an existing directory,
-    it is treated as an OKF v0.1 bundle. Memories with an ``id`` in frontmatter
+    it is treated as an OKF bundle (v0.3, and the v0.1 shape earlier Ogham
+    releases wrote). Memories with an ``id`` in frontmatter
     are upserted (ON CONFLICT (id) DO UPDATE). Memories without an ``id`` are
     inserted as new (mint a new UUID via the standard insert path).
 
@@ -262,31 +387,22 @@ def import_memories(
     """
     # ── OKF bundle path ────────────────────────────────────────────────
     if isinstance(data, str) and _looks_like_okf_bundle_dir(data):
-        # Pre-flight: confirm this is actually an OKF bundle (has index.md declaring
-        # okf_version), not just any directory the user pointed at by accident.
         bundle_dir = Path(data)
-        index_path = bundle_dir / "index.md"
-        if not index_path.exists():
-            raise ValueError(
-                f"{data} is a directory but doesn't look like an OKF bundle "
-                f"(missing index.md with okf_version declaration)"
-            )
-        # Quick frontmatter check -- read just enough to confirm okf_version is declared.
-        from ogham.okf.serialization import read_concept as _read_concept
-
-        try:
-            fm, _ = _read_concept(index_path)
-        except ValueError as e:
-            raise ValueError(f"{data}/index.md is not a valid OKF bundle root: {e}") from e
-        if "okf_version" not in fm:
-            raise ValueError(
-                f"{data}/index.md exists but does not declare okf_version -- "
-                f"not a recognizable OKF bundle"
-            )
+        warnings = _check_okf_index(bundle_dir)
 
         from ogham.okf import import_okf_bundle
+        from ogham.okf.bundle import import_okf_graph as _read_graph
 
         okf_memories, stats = import_okf_bundle(bundle_dir)
+        if stats["total"] == 0 and _read_graph(bundle_dir)[1]["total"] == 0:
+            # The one refusal left (OKF §11.2 forbids refusing over index.md or
+            # version). A directory with no concept anywhere -- no .md file
+            # whose frontmatter has a `type` (§3.2) -- is not a bundle, and is
+            # most likely the wrong path.
+            raise ValueError(
+                f"{data} contains no OKF concept files (a .md file whose YAML "
+                f"frontmatter has a non-empty `type`) -- not an OKF bundle"
+            )
 
         # Split: memories with id → upsert; memories without id → regular insert.
         with_id: list[dict[str, Any]] = []
@@ -302,7 +418,16 @@ def import_memories(
                 all_texts_upsert, on_progress=on_embed_progress
             )
             for mem, embedding in zip(with_id, embeddings_upsert):
-                mem_with_embedding = {**mem, "embedding": embedding, "profile": profile}
+                mem_with_embedding = {
+                    **mem,
+                    "embedding": embedding,
+                    "profile": profile,
+                    # Carried value or None. None means "no opinion": the
+                    # backend keeps a stored importance on conflict and uses
+                    # importance_if_new only when the row is created.
+                    "importance": _carried_importance(mem),
+                    "importance_if_new": _resolve_importance(mem),
+                }
                 _upsert_memory(mem_with_embedding)
                 upserted += 1
 
@@ -337,6 +462,8 @@ def import_memories(
             "total": stats["total"],
             "missing_id_count": stats["missing_id_count"],
             "skipped_count": stats["skipped_count"],
+            "not_concept_count": stats["not_concept_count"],
+            "warnings": warnings,
         }
 
         if import_graph:

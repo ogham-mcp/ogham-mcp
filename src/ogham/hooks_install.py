@@ -42,15 +42,6 @@ def _install_claude_code():
             "matcher": "",
             "hooks": [{"type": "command", "command": "ogham hooks recall"}],
         },
-        # Scoped to the two tools whose captures are worth keeping (TBU-231).
-        # A matcher of "" means match-all, which fired on every Bash call and
-        # made 65% of the store command noise that was never once recalled.
-        # Claude Code evaluates a matcher of only letters/digits/_/-/space/,/|
-        # as an exact string or |-separated list of exact tool names.
-        "PostToolUse": {
-            "matcher": "Edit|Write",
-            "hooks": [{"type": "command", "command": "ogham hooks inscribe"}],
-        },
         "PreCompact": {
             "matcher": "",
             "hooks": [{"type": "command", "command": "ogham hooks inscribe"}],
@@ -60,6 +51,23 @@ def _install_claude_code():
             "hooks": [{"type": "command", "command": "ogham hooks recall"}],
         },
     }
+
+    # TBU-288: Edit/Write captures are off by default and are the only
+    # PostToolUse captures there are, so with capture off the PostToolUse hook
+    # is not installed at all (it would fire just to return nothing).
+    from ogham.hooks import _capture_file_edits
+
+    capture_edits = _capture_file_edits()
+    if capture_edits:
+        # Scoped to the two tools whose captures are worth keeping (TBU-231).
+        # A matcher of "" means match-all, which fired on every Bash call and
+        # made 65% of the store command noise that was never once recalled.
+        # Claude Code evaluates a matcher of only letters/digits/_/-/space/,/|
+        # as an exact string or |-separated list of exact tool names.
+        ogham_hooks["PostToolUse"] = {
+            "matcher": "Edit|Write",
+            "hooks": [{"type": "command", "command": "ogham hooks inscribe"}],
+        }
 
     for event, hook_entry in ogham_hooks.items():
         existing = hooks.get(event, [])
@@ -75,7 +83,10 @@ def _install_claude_code():
         json.dump(settings, f, indent=2)
 
     console.print(f"[green]Claude Code hooks installed to {settings_path}[/green]")
-    console.print("  SessionStart, PostToolUse, PreCompact, PostCompact")
+    events = ["SessionStart", "PreCompact", "PostCompact"]
+    if capture_edits:
+        events.insert(1, "PostToolUse")
+    console.print("  " + ", ".join(events))
 
 
 def _install_kiro():

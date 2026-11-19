@@ -18,6 +18,13 @@ def _clear_dedup_cache():
     _recent_actions.clear()
 
 
+@pytest.fixture(autouse=True)
+def _file_edit_capture_on(monkeypatch):
+    """These tests exercise Edit/Write extraction mechanics; the TBU-288 default
+    (off) is covered in test_recall_envelope.py."""
+    monkeypatch.setattr("ogham.hooks._capture_file_edits", lambda: True)
+
+
 def test_session_start_returns_context():
     from ogham.hooks import session_start
 
@@ -43,8 +50,8 @@ def test_session_start_returns_context():
 
     assert "Decided to use PostgreSQL" in result
     assert "psycopg" in result
-    assert "## Session Context" in result
-    assert "2 memories loaded" in result
+    assert result.startswith("\u27e6ogham\u27e7")
+    assert "[2026-03-20] Decided to use PostgreSQL (type:decision)" in result
 
 
 def test_session_start_empty_db():
@@ -578,8 +585,8 @@ def test_post_compact_returns_context():
         result = post_compact(cwd="/Users/dev/myproject", profile="work")
 
     assert "API uses REST" in result
-    assert "## Restored Context" in result
-    assert "1 memories restored" in result
+    assert "trigger: post-compact" in result
+    assert "[2026-03-20] API uses REST with JWT (type:architecture)" in result
 
 
 def test_post_compact_empty_db():

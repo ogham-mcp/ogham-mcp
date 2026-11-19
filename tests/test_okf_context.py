@@ -13,6 +13,7 @@ import json
 
 from ogham.entity_graph import PREDICATE_URIS, V1_PREDICATES
 from ogham.okf.context import CONTEXT_FILENAME, build_context
+from ogham.okf.entities import predicate_key
 
 BASE = "https://example.org/bundle/"
 
@@ -70,16 +71,19 @@ def test_base_is_normalised_to_end_in_a_slash():
 def test_every_predicate_gets_a_term_pointing_at_its_ogham_uri():
     ctx = _ctx()
     for predicate, uris in PREDICATE_URIS.items():
-        assert ctx[predicate]["@id"] == uris["ogham"]
+        # Keyed by the frontmatter key the bundle actually writes (OKF v0.3,
+        # TBU-297): a term for a key no file carries would map nothing.
+        assert ctx[predicate_key(predicate)]["@id"] == uris["ogham"]
+        assert predicate not in ctx
 
 
 def test_predicate_terms_coerce_their_values_to_iris():
-    """Predicates are object properties whose values are wiki links, never
-    literals (§4.3). Without "@type": "@id" a processor reads
-    `OWNS: "[[entities/x-e88]]"` as a string, not an edge."""
+    """Predicates are object properties whose values are links to concept
+    files, never literals. Without "@type": "@id" a processor reads
+    `x-ogham-owns: "x-e88.md"` as a string, not an edge."""
     ctx = _ctx()
     for predicate in V1_PREDICATES:
-        assert ctx[predicate]["@type"] == "@id"
+        assert ctx[predicate_key(predicate)]["@type"] == "@id"
 
 
 def test_the_context_covers_exactly_the_shipped_vocabulary():
@@ -88,8 +92,9 @@ def test_the_context_covers_exactly_the_shipped_vocabulary():
     unreconciled source of truth -- and it is the one frozen on someone else's
     disk."""
     ctx = _ctx()
-    terms = {k for k in ctx if k in V1_PREDICATES}
-    assert terms == V1_PREDICATES
+    keys = {predicate_key(p) for p in V1_PREDICATES}
+    terms = {k for k in ctx if k in keys}
+    assert terms == keys
     assert len(V1_PREDICATES) == 16
 
 
@@ -108,7 +113,7 @@ def test_alignments_are_data_not_term_definition_entries():
     """
     ctx = _ctx()
     for predicate in V1_PREDICATES:
-        assert set(ctx[predicate]) <= {"@id", "@type"}, (
+        assert set(ctx[predicate_key(predicate)]) <= {"@id", "@type"}, (
             f"{predicate} term definition carries a non-keyword entry"
         )
 
@@ -167,5 +172,6 @@ def test_context_is_deterministic():
 
 def test_predicate_terms_are_emitted_in_sorted_order():
     ctx = _ctx()
-    emitted = [k for k in ctx if k in V1_PREDICATES]
-    assert emitted == sorted(emitted)
+    keys = {predicate_key(p) for p in V1_PREDICATES}
+    emitted = [k for k in ctx if k in keys]
+    assert emitted == [predicate_key(p) for p in sorted(V1_PREDICATES)]

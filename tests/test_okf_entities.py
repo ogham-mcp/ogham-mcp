@@ -21,11 +21,14 @@ import pytest
 from ogham.entity_graph import V1_PREDICATES, Entity, EntityEdge, Predicate
 from ogham.okf.entities import (
     ENTITY_OKF_TYPE,
+    entity_to_body,
     entity_to_frontmatter,
     make_entity_filename,
+    predicate_key,
     resolve_wiki_link,
     wiki_link,
 )
+from ogham.okf.links import resolve_link_note_name
 
 OGHAM = Entity(id=42, canonical_name="Ogham", entity_type="project")
 GRAPH = Entity(id=88, canonical_name="Entity Graph", entity_type="component")
@@ -118,10 +121,14 @@ def test_edges_become_frontmatter_properties_keyed_by_predicate():
     fm = entity_to_frontmatter(OGHAM, [_edge(42, "OWNS", 88)], [], PATHS)
 
     assert fm["type"] == ENTITY_OKF_TYPE
-    assert fm["entity_id"] == 42
-    assert fm["canonical_name"] == "Ogham"
-    assert fm["entity_type"] == "project"
-    assert fm["OWNS"] == ["[[entities/entity-graph-e88]]"]
+    # OKF v0.3 §4.1: producer keys are x-<producer>-<name> (TBU-297).
+    assert fm["x-ogham-entity-id"] == 42
+    assert fm["x-ogham-canonical-name"] == "Ogham"
+    assert fm["x-ogham-entity-type"] == "project"
+    # A path relative to entities/ (OKF §6 rule 3), not a v0.1 wiki link.
+    assert fm["x-ogham-owns"] == ["entity-graph-e88.md"]
+    for legacy in ("entity_id", "canonical_name", "entity_type", "OWNS"):
+        assert legacy not in fm
 
 
 def test_multiple_objects_under_one_predicate_are_a_list_in_edge_order():
@@ -134,7 +141,7 @@ def test_multiple_objects_under_one_predicate_are_a_list_in_edge_order():
         [],
         PATHS,
     )
-    assert fm["OWNS"] == ["[[entities/entity-graph-e88]]", "[[entities/cli-e99]]"]
+    assert fm["x-ogham-owns"] == ["entity-graph-e88.md", "cli-e99.md"]
 
 
 def test_distinct_predicates_get_distinct_keys():
@@ -144,15 +151,16 @@ def test_distinct_predicates_get_distinct_keys():
         [],
         PATHS,
     )
-    assert fm["OWNS"] == ["[[entities/entity-graph-e88]]"]
-    assert fm["DEPENDS_ON"] == ["[[entities/cli-e99]]"]
+    assert fm["x-ogham-owns"] == ["entity-graph-e88.md"]
+    assert fm["x-ogham-depends-on"] == ["cli-e99.md"]
 
 
 def test_only_the_subjects_edges_are_emitted():
     """D4: emit the stored rows, synthesise no inverses. An edge whose subject
     is someone else must not appear on this concept even if it is passed in."""
     fm = entity_to_frontmatter(GRAPH, [_edge(42, "OWNS", 88)], [], PATHS)
-    assert "OWNS" not in fm
+    assert "x-ogham-owns" not in fm
+    assert entity_to_body(GRAPH, [_edge(42, "OWNS", 88)], PATHS, {}) == ""
 
 
 def test_written_links_resolve_back_to_the_note_they_name():
@@ -160,7 +168,32 @@ def test_written_links_resolve_back_to_the_note_they_name():
     Asserted even though nothing imports in v0.18 -- it is what stops the two
     halves drifting before the graph-import issue picks them up."""
     fm = entity_to_frontmatter(OGHAM, [_edge(42, "OWNS", 88)], [], PATHS)
-    assert resolve_wiki_link(fm["OWNS"][0]) == make_entity_filename(GRAPH)[:-3]
+    assert resolve_link_note_name(fm["x-ogham-owns"][0]) == make_entity_filename(GRAPH)[:-3]
+
+
+def test_the_body_carries_the_same_edges_as_markdown_links():
+    """OKF v0.3 §6.1: only [text](target) links are links. The body section is
+    what a v0.3 consumer counts; the predicate is the text next to the link."""
+    body = entity_to_body(
+        OGHAM,
+        [_edge(42, "OWNS", 88, edge_id=1), _edge(42, "DEPENDS_ON", 99, edge_id=2)],
+        PATHS,
+        {88: "Entity Graph", 99: "CLI"},
+    )
+    assert body == (
+        "<!-- x-ogham-relations -->\n"
+        "## Relations\n"
+        "\n"
+        "- DEPENDS_ON: [CLI](cli-e99.md)\n"
+        "- OWNS: [Entity Graph](entity-graph-e88.md)\n"
+        "<!-- /x-ogham-relations -->"
+    )
+
+
+def test_an_entity_with_no_linked_edges_has_an_empty_body():
+    assert entity_to_body(OGHAM, [], PATHS, {}) == ""
+    # A dangling edge has no file to link to, so it stays frontmatter-only.
+    assert entity_to_body(OGHAM, [_edge(42, "OWNS", 777)], PATHS, {}) == ""
 
 
 # ── what deliberately does NOT travel (D8) ────────────────────────────────
@@ -194,7 +227,7 @@ def test_no_qualifier_sidecar_is_emitted():
     for leaked in ("strength", "valid_from", "valid_to", "fact_id", "derived_from", "metadata"):
         assert leaked not in fm, f"{leaked} leaked into frontmatter"
     # The triple itself is still the point, and still there.
-    assert fm["OWNS"] == ["[[entities/entity-graph-e88]]"]
+    assert fm["x-ogham-owns"] == ["entity-graph-e88.md"]
 
 
 # ── dangling (§4.4.1 -- flag, never drop) ─────────────────────────────────
@@ -203,8 +236,8 @@ def test_no_qualifier_sidecar_is_emitted():
 def test_edges_whose_object_is_absent_are_reported_not_dropped():
     fm = entity_to_frontmatter(OGHAM, [_edge(42, "OWNS", 777)], [], PATHS)
 
-    assert fm.get("OWNS") is None
-    assert fm["ogham_dangling"] == [{"predicate": "OWNS", "object_id": 777}]
+    assert fm.get("x-ogham-owns") is None
+    assert fm["x-ogham-dangling"] == [{"predicate": "OWNS", "object_id": 777}]
 
 
 def test_a_dangling_edge_does_not_suppress_its_healthy_siblings():
@@ -214,13 +247,13 @@ def test_a_dangling_edge_does_not_suppress_its_healthy_siblings():
         [],
         PATHS,
     )
-    assert fm["OWNS"] == ["[[entities/entity-graph-e88]]"]
-    assert len(fm["ogham_dangling"]) == 1
+    assert fm["x-ogham-owns"] == ["entity-graph-e88.md"]
+    assert len(fm["x-ogham-dangling"]) == 1
 
 
 def test_no_dangling_key_when_every_endpoint_is_present():
     fm = entity_to_frontmatter(OGHAM, [_edge(42, "OWNS", 88)], [], PATHS)
-    assert "ogham_dangling" not in fm
+    assert "x-ogham-dangling" not in fm
 
 
 # ── aliases and minimal shape ─────────────────────────────────────────────
@@ -228,7 +261,10 @@ def test_no_dangling_key_when_every_endpoint_is_present():
 
 def test_aliases_are_carried():
     fm = entity_to_frontmatter(OGHAM, [], ["OpenBrain", "ogham-mcp"], PATHS)
+    # Unprefixed on purpose (Kevin, 2026-11-19): Obsidian reads `aliases`
+    # natively, and Obsidian is a supported source.
     assert fm["aliases"] == ["OpenBrain", "ogham-mcp"]
+    assert "x-ogham-aliases" not in fm
 
 
 def test_no_alias_key_when_there_are_none():
@@ -248,8 +284,19 @@ def test_type_comes_first_so_the_file_reads_as_okf_at_a_glance():
 
 
 def test_no_predicate_can_collide_with_a_reserved_frontmatter_key():
-    """Predicates become frontmatter keys, so a 17th predicate named `type` or
-    `aliases` would silently clobber an entity attribute. All 16 are
-    UPPER_SNAKE today; this fails the moment that stops being true."""
-    reserved = {"type", "entity_id", "canonical_name", "entity_type", "aliases", "ogham_dangling"}
-    assert not (V1_PREDICATES & reserved)
+    """Predicates become frontmatter keys, so a 17th predicate whose key
+    spelling lands on `x-ogham-aliases` or `x-ogham-entity-id` would silently
+    clobber an entity attribute. This fails the moment that becomes true."""
+    reserved = {
+        "type",
+        "x-ogham-entity-id",
+        "x-ogham-canonical-name",
+        "x-ogham-entity-type",
+        "aliases",
+        "x-ogham-aliases",
+        "x-ogham-dangling",
+    }
+    assert not ({predicate_key(p) for p in V1_PREDICATES} & reserved)
+    # The v0.1 spellings are still read, so they must stay disjoint too.
+    legacy = {"type", "entity_id", "canonical_name", "entity_type", "aliases", "ogham_dangling"}
+    assert not (V1_PREDICATES & legacy)

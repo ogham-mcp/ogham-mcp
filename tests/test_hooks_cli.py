@@ -17,6 +17,12 @@ def clear_flow_overrides():
     clear_flow_overrides()
 
 
+@pytest.fixture(autouse=True)
+def _file_edit_capture_on(monkeypatch):
+    """Routing test needs an Edit capture; the TBU-288 default is tested elsewhere."""
+    monkeypatch.setattr("ogham.hooks._capture_file_edits", lambda: True)
+
+
 def test_hooks_inscribe_dry_run_previews_tool_memory():
     from ogham.hooks_cli import hooks_app
 
@@ -100,6 +106,22 @@ def test_hooks_inscribe_no_inscribe_skips_hooks():
     assert result.exit_code == 0
     post_tool.assert_not_called()
     pre_compact.assert_not_called()
+
+
+def test_install_omits_post_tool_use_when_file_edit_capture_off(tmp_path, monkeypatch):
+    """TBU-288. With capture off (the default) nothing would be captured, so the
+    PostToolUse hook must not be installed at all."""
+    import json
+
+    from ogham import hooks_install
+
+    monkeypatch.setattr("ogham.hooks._capture_file_edits", lambda: False)
+    monkeypatch.setattr(hooks_install.Path, "home", staticmethod(lambda: tmp_path))
+    hooks_install._install_claude_code()
+
+    settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+    assert "PostToolUse" not in settings["hooks"]
+    assert set(settings["hooks"]) == {"SessionStart", "PreCompact", "PostCompact"}
 
 
 def test_install_scopes_post_tool_use_to_edit_and_write(tmp_path, monkeypatch):

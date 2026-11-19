@@ -28,6 +28,16 @@ from ogham.okf.entities import ParsedEntityConcept
 
 logger = logging.getLogger(__name__)
 
+#: Evidence class stamped on entities that graph import creates (TBU-277).
+#: Set here on purpose rather than inherited from the column default, so the
+#: choice is visible and reviewable. 'inferred' is the weakest of migration
+#: 049's three classes, and the safe one: a bundle carries no record of HOW an
+#: entity was established, so claiming 'syntactic' or 'structured' would assert
+#: evidence the import does not have. Under-claiming costs at most a later
+#: upgrade; over-claiming is the `person:` failure in a new place. Existing
+#: entities keep their class -- the upsert never demotes.
+IMPORTED_EVIDENCE_CLASS = "inferred"
+
 
 def apply_okf_graph(
     concepts: list[ParsedEntityConcept],
@@ -83,7 +93,11 @@ def apply_okf_graph(
                 pending_notes.add(concept.note_name)
             continue
 
-        local_id = graph.upsert_entity(concept.canonical_name, concept.entity_type)
+        local_id = graph.upsert_entity(
+            concept.canonical_name,
+            concept.entity_type,
+            evidence_class=IMPORTED_EVIDENCE_CLASS,
+        )
         if concept.note_name:
             note_to_local_id[concept.note_name] = local_id
         for alias in concept.aliases:

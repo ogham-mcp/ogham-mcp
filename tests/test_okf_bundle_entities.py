@@ -71,17 +71,19 @@ def test_exported_entity_carries_the_edge_as_a_frontmatter_triple(tmp_path):
     out = tmp_path / "bundle"
     export_okf_bundle(MEMORIES, out, {"producer": "t"}, entities=ENTITIES, edges=EDGES)
     fm, body = read_concept(out / "entities" / "ogham-e42.md")
-    assert fm["OWNS"] == ["[[entities/entity-graph-e88]]"]
-    assert body.strip() == ""
+    assert fm["x-ogham-owns"] == ["entity-graph-e88.md"]
+    # OKF v0.3: the body carries the same edge as a Markdown link (§6.1).
+    assert "- OWNS: [Entity Graph](entity-graph-e88.md)" in body
 
 
 def test_an_edge_appears_only_on_its_subject(tmp_path):
     """D4: edges are emitted once, on the subject, and no inverse is synthesised."""
     out = tmp_path / "bundle"
     export_okf_bundle(MEMORIES, out, {"producer": "t"}, entities=ENTITIES, edges=EDGES)
-    fm, _ = read_concept(out / "entities" / "entity-graph-e88.md")
-    assert "OWNS" not in fm
-    assert "OWNED_BY" not in fm
+    fm, body = read_concept(out / "entities" / "entity-graph-e88.md")
+    assert "x-ogham-owns" not in fm
+    assert "x-ogham-owned-by" not in fm
+    assert body == ""
 
 
 def test_aliases_reach_the_entity_concept(tmp_path):
@@ -95,7 +97,9 @@ def test_aliases_reach_the_entity_concept(tmp_path):
         aliases={42: ["OpenBrain", "ogham-mcp"]},
     )
     fm, _ = read_concept(out / "entities" / "ogham-e42.md")
+    # Unprefixed on purpose: Obsidian reads `aliases` natively.
     assert fm["aliases"] == ["OpenBrain", "ogham-mcp"]
+    assert "x-ogham-aliases" not in fm
     other, _ = read_concept(out / "entities" / "entity-graph-e88.md")
     assert "aliases" not in other
 
@@ -132,14 +136,17 @@ def test_index_declares_the_graph_layer_version(tmp_path):
     out = tmp_path / "bundle"
     export_okf_bundle(MEMORIES, out, {"producer": "t"}, entities=ENTITIES, edges=EDGES)
     fm, _ = read_concept(out / "index.md")
-    assert fm["ogham_graph_version"] == 1
-    assert fm["okf_version"] == "0.1"
+    # 2 = the v0.20 shape (x-ogham-* keys, path values, body links).
+    assert fm["x-ogham-graph-version"] == 2
+    assert "ogham_graph_version" not in fm
+    assert fm["okf_version"] == "0.3"
 
 
 def test_memories_only_index_declares_no_graph_version(tmp_path):
     out = tmp_path / "bundle"
     export_okf_bundle(MEMORIES, out, {"producer": "t"})
     fm, _ = read_concept(out / "index.md")
+    assert "x-ogham-graph-version" not in fm
     assert "ogham_graph_version" not in fm
 
 
@@ -154,7 +161,7 @@ def test_the_index_is_written_exactly_once(tmp_path):
     with patch.object(bundle_mod, "write_index", wraps=bundle_mod.write_index) as spy:
         export_okf_bundle(MEMORIES, out, {"producer": "t"}, entities=ENTITIES, edges=EDGES)
     assert spy.call_count == 1
-    assert spy.call_args.args[1]["ogham_graph_version"] == 1
+    assert spy.call_args.args[1]["x-ogham-graph-version"] == 2
 
 
 def test_the_caller_manifest_is_not_mutated(tmp_path):
@@ -194,8 +201,10 @@ def test_memory_concepts_link_to_entities_when_the_bridge_is_supplied(tmp_path):
         edges=EDGES,
         memory_entities={"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee": [42]},
     )
-    fm, _ = read_concept(next((out / "memories").glob("*.md")))
-    assert fm["MENTIONS"] == ["[[entities/ogham-e42]]"]
+    fm, body = read_concept(next((out / "memories").glob("*.md")))
+    assert fm["x-ogham-mentions"] == ["../entities/ogham-e42.md"]
+    assert body.startswith("hello\n\n<!-- x-ogham-mentions -->\n")
+    assert "- [Ogham](../entities/ogham-e42.md)" in body
 
 
 def test_a_memory_linked_to_an_unexported_entity_emits_no_broken_link(tmp_path):
@@ -210,8 +219,9 @@ def test_a_memory_linked_to_an_unexported_entity_emits_no_broken_link(tmp_path):
         edges=EDGES,
         memory_entities={"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee": [42, 777]},
     )
-    fm, _ = read_concept(next((out / "memories").glob("*.md")))
-    assert fm["MENTIONS"] == ["[[entities/ogham-e42]]"]
+    fm, body = read_concept(next((out / "memories").glob("*.md")))
+    assert fm["x-ogham-mentions"] == ["../entities/ogham-e42.md"]
+    assert "777" not in body
 
 
 def test_entity_concepts_are_not_imported_as_memories(tmp_path):

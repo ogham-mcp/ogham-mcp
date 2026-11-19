@@ -399,8 +399,11 @@ class PostgresBackend:
         """INSERT or UPDATE a memory keyed by ``id`` for OKF round-trip imports.
 
         ON CONFLICT (id) DO UPDATE overwrites content, tags, metadata, embedding,
-        source, and updated_at. access_count, last_accessed_at, and created_at are
-        PRESERVED -- they are runtime state that should not be clobbered on re-import.
+        source, and updated_at. ``importance`` is overwritten only when the
+        record carries one; when it is None the stored value stands, and a new
+        row takes ``importance_if_new``. access_count, last_accessed_at, and
+        created_at are PRESERVED -- they are runtime state that should not be
+        clobbered on re-import.
         Mirrors the ON CONFLICT style used in set_profile_ttl and hebbian_strengthen_edges.
         """
         memory_id = memory["id"]
@@ -413,7 +416,8 @@ class PostgresBackend:
             raise ValueError(f"upsert_memory requires an embedding for id={memory_id!r}")
         embedding_literal = _embedding_literal(embedding)
         row = self._execute(
-            """INSERT INTO memories (id, content, embedding, profile, metadata, source, tags)
+            """INSERT INTO memories
+                   (id, content, embedding, profile, metadata, source, tags, importance)
                VALUES (
                    %(id)s,
                    %(content)s,
@@ -421,7 +425,8 @@ class PostgresBackend:
                    %(profile)s,
                    %(metadata)s,
                    %(source)s,
-                   %(tags)s
+                   %(tags)s,
+                   COALESCE(%(importance)s::float, %(importance_if_new)s::float)
                )
                ON CONFLICT (id) DO UPDATE SET
                    content      = EXCLUDED.content,
@@ -429,6 +434,9 @@ class PostgresBackend:
                    metadata     = EXCLUDED.metadata,
                    source       = EXCLUDED.source,
                    tags         = EXCLUDED.tags,
+                   -- A record that carries no importance has no opinion,
+                   -- so the stored value stands (TBU-253).
+                   importance   = COALESCE(%(importance)s::float, memories.importance),
                    updated_at   = now()
                RETURNING id, content, metadata, source, profile, tags,
                          created_at, updated_at, expires_at, access_count,
@@ -441,6 +449,10 @@ class PostgresBackend:
                 "metadata": Jsonb(memory.get("metadata") or {}),
                 "source": memory.get("source"),
                 "tags": memory.get("tags") or [],
+                # TBU-253: `importance` is what the record carries (or None);
+                # `importance_if_new` is used only when the row is created.
+                "importance": memory.get("importance"),
+                "importance_if_new": memory.get("importance_if_new", 0.5),
             },
             fetch="one",
         )
@@ -922,7 +934,7 @@ class PostgresBackend:
                 params["last_id"] = last_id
             where = " AND ".join(conditions)
             sql = (
-                f"SELECT {_COLUMNS} FROM memories WHERE {where}"
+                f"SELECT {_COLUMNS}, importance FROM memories WHERE {where}"
                 " ORDER BY created_at, id LIMIT %(batch)s"
             )
             page = self._execute(sql, params)

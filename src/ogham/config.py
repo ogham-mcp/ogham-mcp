@@ -176,6 +176,12 @@ class Settings(BaseSettings):
     recall_enabled: bool = Field(default=True, validation_alias="OGHAM_RECALL_ENABLED")
     inscribe_enabled: bool = Field(default=True, validation_alias="OGHAM_INSCRIBE_ENABLED")
 
+    # TBU-288: Edit/Write/MultiEdit hook captures are bare "Edit: <path>"
+    # breadcrumbs with no content. Off by default; opt in with this switch.
+    hooks_capture_file_edits: bool = Field(
+        default=False, validation_alias="OGHAM_HOOKS_CAPTURE_FILE_EDITS"
+    )
+
     gateway_url: str = Field(default="", validation_alias="OGHAM_GATEWAY_URL")
     gateway_api_key: str = Field(default="", validation_alias="OGHAM_API_KEY")
 

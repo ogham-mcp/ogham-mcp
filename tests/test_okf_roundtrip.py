@@ -19,10 +19,14 @@ from pathlib import Path
 
 import pytest
 
-from ogham.entity_graph import Entity, EntityEdge, Predicate
+from ogham.entity_graph import V1_PREDICATES, Entity, EntityEdge, Predicate
 from ogham.okf.bundle import export_okf_bundle, import_okf_bundle
-from ogham.okf.entities import resolve_wiki_link
+from ogham.okf.entities import predicate_key
+from ogham.okf.links import resolve_link_note_name
 from ogham.okf.serialization import read_concept
+
+#: frontmatter key -> predicate, for every edge-carrying key the exporter writes.
+_PREDICATE_BY_KEY = {predicate_key(p): p for p in V1_PREDICATES}
 
 
 def _make_memory(id_: str, content: str, tags: list[str], metadata: dict | None = None) -> dict:
@@ -100,7 +104,7 @@ def test_okf_roundtrip_handles_default_type_memory(tmp_path: Path):
 
 
 def test_okf_roundtrip_index_md_declares_okf_version(tmp_path: Path):
-    """Exported bundle is conformant: index.md declares okf_version: 0.1."""
+    """Exported bundle is conformant: index.md declares okf_version: "0.3"."""
     import yaml
 
     from ogham.okf import export_okf_bundle
@@ -113,7 +117,7 @@ def test_okf_roundtrip_index_md_declares_okf_version(tmp_path: Path):
     index_text = (tmp_path / "index.md").read_text(encoding="utf-8")
     yaml_block = index_text.split("---\n", 2)[1]
     parsed = yaml.safe_load(yaml_block)
-    assert parsed["okf_version"] == "0.1"
+    assert parsed["okf_version"] == "0.3"
 
 
 # --- graph export fidelity (TBU-130) ---------------------------------------
@@ -193,18 +197,22 @@ def _entity_fm(bundle: Path, name: str) -> dict:
     return fm
 
 
-def _wiki_targets(fm: dict):
-    """Every wiki-link target in a frontmatter dict, scalar or list-valued.
+def _link_targets(fm: dict, body: str = ""):
+    """Every link target in a concept: path-valued frontmatter and body links.
 
-    Deliberately not keyed on a known predicate list: a link that appears under
-    an unexpected key still has to point at a real file, and hard-coding the
-    vocabulary here would let a new predicate escape the dangling check.
+    Deliberately not keyed on a known predicate list: any frontmatter value
+    that looks like a link to a concept file (`*.md`) still has to point at a
+    real file, and hard-coding the vocabulary here would let a new predicate
+    escape the dangling check. Body links are the OKF v0.3 carrier (§6.1).
     """
+    import re
+
     for value in fm.values():
         for item in value if isinstance(value, list) else [value]:
-            target = resolve_wiki_link(item)
-            if target is not None:
-                yield target
+            if isinstance(item, str) and item.endswith(".md"):
+                yield resolve_link_note_name(item)
+    for target in re.findall(r"\]\(([^)\s]+\.md)\)", body):
+        yield resolve_link_note_name(target)
 
 
 def test_every_entity_becomes_a_concept(tmp_path: Path):
@@ -221,8 +229,8 @@ def test_every_edge_becomes_a_triple_on_its_subject(tmp_path: Path):
     out = tmp_path / "b"
     _export_graph(out)
     fm = _entity_fm(out, "ogham-e42.md")
-    assert resolve_wiki_link(fm["OWNS"][0]) == "entity-graph-e88"
-    assert resolve_wiki_link(fm["DEPENDS_ON"][0]) == "supabase-e99"
+    assert resolve_link_note_name(fm["x-ogham-owns"][0]) == "entity-graph-e88"
+    assert resolve_link_note_name(fm["x-ogham-depends-on"][0]) == "supabase-e99"
 
 
 def test_edges_are_not_duplicated_onto_the_object(tmp_path: Path):
@@ -234,11 +242,11 @@ def test_edges_are_not_duplicated_onto_the_object(tmp_path: Path):
     out = tmp_path / "b"
     _export_graph(out)
     fm = _entity_fm(out, "entity-graph-e88.md")
-    assert "OWNED_BY" not in fm
-    assert "OWNS" not in fm
+    assert "x-ogham-owned-by" not in fm
+    assert "x-ogham-owns" not in fm
     # The object of DEPENDS_ON gets the same treatment; asserting only one
     # direction on one predicate would pass against a partial inverse synthesis.
-    assert "DEPENDED_ON_BY" not in _entity_fm(out, "supabase-e99.md")
+    assert "x-ogham-depended-on-by" not in _entity_fm(out, "supabase-e99.md")
 
 
 def test_aliases_are_carried(tmp_path: Path):
@@ -251,12 +259,15 @@ def test_memory_concepts_link_to_their_entities(tmp_path: Path):
     out = tmp_path / "b"
     _export_graph(out)
     fm, _ = read_concept(next((out / "memories").glob("*.md")))
-    assert {resolve_wiki_link(v) for v in fm["MENTIONS"]} == {"ogham-e42", "supabase-e99"}
+    assert {resolve_link_note_name(v) for v in fm["x-ogham-mentions"]} == {
+        "ogham-e42",
+        "supabase-e99",
+    }
 
 
 def test_no_edge_survives_without_its_endpoint_concept(tmp_path: Path):
-    """Every wiki link anywhere in the bundle must resolve to a file in the
-    bundle -- entity triples and memory MENTIONS alike.
+    """Every link anywhere in the bundle must resolve to a file in the
+    bundle -- entity triples and memory mentions alike, frontmatter and body.
 
     Dangling is structurally impossible on the read side (list_entities is the
     union of memory_entities with every edge endpoint) and filtered on the
@@ -271,12 +282,13 @@ def test_no_edge_survives_without_its_endpoint_concept(tmp_path: Path):
     for md in sorted(out.rglob("*.md")):
         if md.name == "index.md":
             continue
-        fm, _ = read_concept(md)
-        for target in _wiki_targets(fm):
+        fm, body = read_concept(md)
+        for target in _link_targets(fm, body):
             seen += 1
-            assert target in present, f"{md.name}: [[{target}]] is dangling"
+            assert target in present, f"{md.name}: {target} is dangling"
     # A bundle whose links all vanished would satisfy the loop vacuously.
-    assert seen == 4, "expected 2 edge triples + 2 MENTIONS links"
+    # Each edge is carried twice: frontmatter key + body link.
+    assert seen == 8, "expected (2 edge triples + 2 mentions) x 2 carriers"
 
 
 def test_memories_still_import_from_a_graph_bearing_bundle(tmp_path: Path):
@@ -394,24 +406,23 @@ def test_export_matches_the_database_graph(tmp_path, monkeypatch, pg_test_profil
         fm, _ = read_concept(md)
         bundle_entities[md.stem] = fm
 
-    assert {(fm["canonical_name"], fm["entity_type"]) for fm in bundle_entities.values()} == {
-        (e.canonical_name, e.entity_type) for e in db_entities
-    }
+    assert {
+        (fm["x-ogham-canonical-name"], fm["x-ogham-entity-type"]) for fm in bundle_entities.values()
+    } == {(e.canonical_name, e.entity_type) for e in db_entities}
 
     # Resolve each triple's object through the bundle's own files, so the
     # comparison never borrows an id from the database to interpret the bundle.
     bundle_triples = set()
     for stem, fm in bundle_entities.items():
         for key, value in fm.items():
-            if not isinstance(value, list) or key == "aliases":
+            predicate = _PREDICATE_BY_KEY.get(key)
+            if predicate is None or not isinstance(value, list):
                 continue
             for item in value:
-                target = resolve_wiki_link(item)
-                if target is None:
-                    continue
-                assert target in bundle_entities, f"{stem}: [[{target}]] is dangling"
-                object_name = bundle_entities[target]["canonical_name"]
-                bundle_triples.add((fm["canonical_name"], key, object_name))
+                target = resolve_link_note_name(item)
+                assert target in bundle_entities, f"{stem}: {target} is dangling"
+                object_name = bundle_entities[target]["x-ogham-canonical-name"]
+                bundle_triples.add((fm["x-ogham-canonical-name"], predicate, object_name))
 
     assert bundle_triples == {
         (name_by_id[e.subject_id], str(e.predicate), name_by_id[e.object_id]) for e in db_edges
@@ -467,5 +478,5 @@ def test_export_writes_memory_concepts_from_a_real_backend(
     fm, _ = next(
         (read_concept(p) for p in concepts if p.stem.endswith(memory_id.replace("-", "")[:8]))
     )
-    assert fm["id"] == memory_id
-    assert isinstance(fm["id"], str)
+    assert fm["x-ogham-id"] == memory_id
+    assert isinstance(fm["x-ogham-id"], str)

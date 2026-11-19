@@ -72,6 +72,6 @@ def test_session_start_returns_markdown_when_search_succeeds():
     ):
         result = session_start(cwd="/tmp/proj", profile="work", limit=4)
 
-    assert "## Session Context" in result
+    assert result.startswith("\u27e6ogham\u27e7")
     assert "first memory body" in result
     assert "second memory body" in result

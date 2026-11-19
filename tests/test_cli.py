@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch
 
 import pytest
@@ -302,3 +303,43 @@ def test_cli_serve_sse():
 
     assert result.exit_code == 0
     mock_main.assert_called_once_with(transport="sse", host=None, port=9000)
+
+
+def test_cli_search_marks_and_demotes_superseded_memories():
+    """TBU-301: `ogham search` called the database directly and never ran the
+    supersession step, so a stale memory ranked as if it were current."""
+    from ogham.cli import app
+
+    rows = [
+        {
+            "id": "old-1",
+            "content": "STALE gateway",
+            "relevance": 0.9,
+            "tags": [],
+            "created_at": "2026-01-01T00:00:00+00:00",
+        },
+        {
+            "id": "new-1",
+            "content": "FRESH gateway",
+            "relevance": 0.5,
+            "tags": [],
+            "created_at": "2026-06-01T00:00:00+00:00",
+        },
+    ]
+    with (
+        patch("ogham.embeddings.generate_embedding", return_value=[0.0] * 512),
+        patch("ogham.database.hybrid_search_memories", return_value=rows),
+        patch(
+            "ogham.database.in_result_contradictions",
+            return_value=[{"stale_id": "old-1", "newer_id": "new-1", "strength": 1.0}],
+        ),
+        patch("ogham.database.gap_out_of_result_contradictions", return_value={"pairs": []}),
+    ):
+        result = runner.invoke(app, ["search", "gateway", "--json"])
+        table = runner.invoke(app, ["search", "gateway"])
+
+    assert result.exit_code == 0
+    out = json.loads(result.output)
+    assert [r["content"] for r in out] == ["FRESH gateway", "STALE gateway"]
+    assert out[1]["superseded_by"] == "new-1"
+    assert "(superseded)" in table.output
