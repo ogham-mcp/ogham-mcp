@@ -17,7 +17,7 @@ Four classifiers in `extraction.py` route queries to different retrieval paths. 
 
 ### 1. Standard Path (default)
 
-```
+```text
 Query → Embed → hybrid_search_memories() → [optional graph traversal] → [optional temporal rerank] → results
 ```
 
@@ -27,7 +27,7 @@ Query → Embed → hybrid_search_memories() → [optional graph traversal] → 
 
 ### 2. Ordering Queries
 
-```
+```text
 Query → Embed → hybrid_search(10x limit) → strided_retrieval → entity_thread → chronological sort → trim
 ```
 
@@ -37,7 +37,7 @@ Query → Embed → hybrid_search(10x limit) → strided_retrieval → entity_th
 
 ### 3. Multi-hop Temporal Queries
 
-```
+```text
 Query → extract_query_anchors() → per-anchor searches → interleave → merge with standard search → entity_thread → results
 ```
 
@@ -49,7 +49,7 @@ Query → extract_query_anchors() → per-anchor searches → interleave → mer
 
 ### 4. Broad Summary Queries
 
-```
+```text
 Query → Embed → hybrid_search(10x limit) → strided_retrieval → MMR_rerank → results
 ```
 
@@ -74,6 +74,7 @@ Applied to standard path when temporal intent is detected.
 ## Date Extraction Pipeline
 
 Where memory dates come from (checked in order by `_extract_memory_date`):
+
 1. `metadata.dates[0]` — extracted at store time by `extract_dates()`
 2. Content prefix: `[Date: 2024-01-15]` pattern
 3. `created_at` timestamp (fallback)
@@ -81,6 +82,7 @@ Where memory dates come from (checked in order by `_extract_memory_date`):
 ## Temporal Query Resolution (`resolve_temporal_query`)
 
 Three-tier resolution:
+
 1. **parsedatetime** (free, no deps): Handles "last Tuesday", "3 weeks ago", "between X and Y"
 2. **Month reference**: "in January", "last March" → full month range
 3. **LLM fallback** (optional): Uses `TEMPORAL_LLM_MODEL` setting with litellm. Disabled by default

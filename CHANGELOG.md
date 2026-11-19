@@ -4,6 +4,48 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.19.1] - 2026-11-09 -- Security updates and an embedding cache that gives disk space back
+
+### Security
+
+- **Dependencies updated to clear known advisories.** `ogham-mcp` now
+  requires `fastmcp>=3.4.10` (fixes GHSA-7xgj-8392-5q4r) and `mcp>=1.30`
+  (fixes CVE-2026-116684, CVE-2026-116685, CVE-2026-116686 and
+  CVE-2026-59951). Upgrading pulls them in.
+- **The Docker image is rebuilt on current dependencies.** It installs from
+  the project's lockfile, which had fallen behind on packages with published
+  advisories, among them `pyjwt`, `authlib`, `cryptography`, `aiohttp`,
+  `urllib3` and `pillow`. If you run the image, pull the new tag.
+- Embedding providers moved to new major versions in the lockfile:
+  `google-genai` 3.x and `openai` 3.x. Gemini embeddings are unchanged:
+  memories re-embedded with the new client match their stored vectors
+  exactly, so no re-embed is needed. The ONNX (BGE-M3) path gives identical
+  output on the new `onnxruntime` and `tokenizers`.
+
+### Fixed
+
+- **Gemini Embedding 2 Preview is retired.** Google retired
+  `gemini-embedding-2-preview` on 2026-11-06 and redirects it to
+  `gemini-embedding-2`, which uses the same embedding space, so no re-embed
+  is needed. If your `GEMINI_EMBED_MODEL` still names the preview, Ogham now
+  switches it to `gemini-embedding-2` and logs a warning asking you to update
+  your config. The default has been `gemini-embedding-2` since 0.15.0.
+- **The embedding cache never gave disk space back.** Evicting or clearing
+  entries freed space inside the file but never returned it to the disk, so
+  `~/.cache/ogham/embeddings.db` only grew. One real cache reached 2.16 GB
+  around about 7 MB of live entries. On first open after upgrading, the file
+  is compacted once. From then on, space is returned whenever entries are
+  removed. `ogham-cli` shares this file and has the same fix.
+- **Installing the Mistral extra failed on import.** `pip install
+  ogham-mcp[mistral]` resolved `mistralai` 3.x, which removed the client
+  class Ogham imports. The extra is now capped below 2.
+- **Running the test suite cleared your real embedding cache.** Tests now use
+  their own cache directory. This only affected people running the tests from
+  a checkout.
+- The README listed `gemini-embedding-2-preview` as the Gemini default. The
+  default is `gemini-embedding-2`. Both names reach the same model, so nothing
+  changes if you set either.
+
 ## [0.19.0] - 2026-08-20 -- Reading the graph back, and entities that say how they were established
 
 ### Added
@@ -445,8 +487,6 @@ narrower behaviour rather than failing.
   self-hosted Supabase, and vanilla Postgres. The test suite now checks
   SQL function signatures across all three variants, not just their
   columns.
-
-
 
 ## [0.15.3] - 2026-07-05 -- Gemini pre-normalize skip + column-parity gate
 
@@ -1394,9 +1434,11 @@ Supabase users: paste the migration body into the SQL Editor.
 ## [0.9.1] - 2026-04-08
 
 ### Fixed
+
 - **ONNX provider**: `_embed_onnx()` was using `result["dense"]` against an `OnnxResult` dataclass and failed on cache misses with `'OnnxResult' object is not subscriptable`. Now uses `result.dense`. Cached queries worked because the bug only triggered on the embedding path -- thanks to Josh for the report.
 
 ### Added
+
 - **Preference extraction** -- new `preference:` entity tag, with 280 trigger words across all 18 supported languages (English, German, French, Spanish, Italian, Portuguese, Dutch, Russian, Polish, Turkish, Irish, Arabic, Hindi, Japanese, Korean, Chinese, Ukrainian, plus pt-BR variants). Detects "prefer", "favorite", "like better", "rather", "always get", "go-to" and equivalents at ingest time. Extracted memories get tagged automatically and surface for recommendation-style queries.
 - **Multi-word phrase matching** in entity extraction `_match()` -- phrases like "always get", "better than", "tercih ederim" now match via substring lookup. Single Latin words still use word-boundary matching to avoid partial false positives.
 - **`format_results_with_sessions()`** in `service.py` -- formats search results with timeline table at the top, session boundary headers (`=== SESSION: 2024-04-12 ===`), entity and date annotations per memory. Used by gateway chat endpoints and benchmark scripts. Produces the same enriched context that drove the LongMemEval 91.8% and BEAM 100K 0.554 results.
@@ -1404,14 +1446,17 @@ Supabase users: paste the migration body into the SQL Editor.
 - **BEAM batch QA harness** (`benchmarks/beam_batch.py`) -- three-phase pipeline (`prepare` / `submit` / `judge`) using OpenAI Batch API for 50% cost savings. Implements the BEAM paper's exact Appendix G nugget judge prompt for direct comparability to published numbers. Skips event_ordering (which uses Kendall tau-b in the paper, needs separate equivalence-detector pipeline).
 
 ### Changed
+
 - BEAM benchmark default `EMBEDDING_BATCH_SIZE` is now `None` (uses provider default) instead of hardcoded 1000. Gemini caps batches at 100 requests; Voyage allows 1000. The previous hardcoded value broke ingest on Gemini.
 - Added comment to `BEAM_GRAPH_DEPTH` env var explaining why graph augmentation is disabled by default. Experiments showed that graph_depth=1 with the current memory-similarity graph hurts retrieval significantly (-13 to -44pp across all categories), because similarity edges duplicate vector-search hits and displace diverse evidence. The win requires a real entity-relationship graph (memory→entity edges), planned for v0.10.
 
 ### Documentation
+
 - New blog post: ["BEAM benchmark -- a fair look at where we stand on long-term memory"](https://ogham-mcp.dev/blog/beam-benchmark-v090/) -- 0.554 nugget score vs paper's 0.358, honest gaps in retrieval, what we're fixing next.
 - New blog post: ["From 62% to 92% -- what we learned about reading, not retrieval"](https://ogham-mcp.dev/blog/longmemeval-92/) -- the LongMemEval journey from 62% to 91.8% via context engineering.
 
 ### Benchmark numbers (v0.9.1)
+
 - **LongMemEval QA accuracy**: 0.918 (459/500), gpt-5.4-mini reader with reasoning, paper Appendix G judge
 - **LongMemEval R@10**: 0.972
 - **BEAM 100K QA nugget score**: 0.554 (vs paper best 0.358)
@@ -1420,6 +1465,7 @@ Supabase users: paste the migration body into the SQL Editor.
 ## [0.3.0] - 2026-03-07 — Relationship Graph
 
 ### Added
+
 - **Relationship graph** — `memory_relationships` table with typed, weighted edges (`similar`, `supports`, `contradicts`, `related`, `follows`, `derived_from`). Built entirely in PostgreSQL with recursive CTEs — no separate graph database or LLM needed
 - **Auto-linking** — new memories are automatically linked to similar existing memories on store via HNSW vector search (threshold 0.85, max 5 links). One database round-trip, no LLM in the write path
 - `explore_knowledge` tool — hybrid search seeds + recursive CTE graph traversal. Finds memories by meaning, then expands via relationship edges to pull in connected context
@@ -1431,9 +1477,11 @@ Supabase users: paste the migration body into the SQL Editor.
 - Benchmark coverage for auto-link, explore graph, and get related operations
 
 ### Fixed
+
 - `link_unlinked_memories` RPC infinite loop — `PERFORM` discarded return value, causing memories with no similar neighbors to be reprocessed indefinitely. Fixed with `SELECT INTO` and conditional increment
 
 ### Schema Changes
+
 - Run `sql/migrations/008_memory_relationships.sql`, `009_graph_explorer.sql`, `010_impact_analysis.sql` in order, or re-run `sql/schema.sql` for fresh installs
 - New table: `memory_relationships` (source_id, target_id, relationship, strength, metadata)
 - New enum: `relationship_type`
@@ -1442,22 +1490,26 @@ Supabase users: paste the migration body into the SQL Editor.
 ## [0.2.1] - 2026-03-05 — Supabase Best Practices
 
 ### Changed
+
 - **RLS hardened** — `FORCE ROW LEVEL SECURITY` on `memories` and `profile_settings`, deny `anon` role access by default
 - **Composite index** — replaced separate `profile` and `created_at` indexes with `(profile, created_at DESC)` for faster filtered queries
 - **Keyset pagination** — `get_all_memories_full` and `get_all_memories_content` now use cursor-based pagination instead of OFFSET
 - **Batch re-embed** — `re_embed_all` uses new `batch_update_embeddings` RPC (batches of 50) instead of individual updates
 
 ### Added
+
 - `batch_update_embeddings` RPC function for efficient bulk embedding updates
 - `CHECK` constraint on `profile_settings.ttl_days` (`>= 1` or NULL)
 - RLS policies on `profile_settings` table
 
 ### Schema Changes
+
 - Run `sql/migrate_best_practices.sql` to upgrade existing installs
 
 ## [0.2.0] - 2026-03-05 — Quality of Life Release
 
 ### Added
+
 - **LRU embedding cache** with configurable max size (`EMBEDDING_CACHE_MAX_SIZE`, default 1000) and `get_cache_stats()` tool for monitoring
 - **Memory expiration** with profile-bound TTLs — `set_profile_ttl()` sets days until memories expire, `cleanup_expired()` permanently removes them
 - **Profile settings table** (`profile_settings`) for storing per-profile TTL configuration
@@ -1468,6 +1520,7 @@ Supabase users: paste the migration body into the SQL Editor.
 - **Export/import** — `export_profile()` exports as JSON or Markdown, `import_memories_tool()` imports with dedup
 
 ### Changed
+
 - `match_memories`, `get_profile_counts`, `get_memory_stats_sql` RPCs now filter expired memories
 - `list_recent_memories` now filters expired memories and returns `expires_at`
 - `store_memory` now computes `expires_at` from profile TTL when set
@@ -1475,6 +1528,7 @@ Supabase users: paste the migration body into the SQL Editor.
 - Embedding cache changed from unbounded dict to OrderedDict-based LRU
 
 ### Schema Changes
+
 - New table: `profile_settings` (profile, ttl_days, created_at, updated_at)
 - New column: `memories.expires_at` (timestamptz, nullable)
 - New RPCs: `cleanup_expired_memories()`, `count_expired_memories()`
@@ -1483,6 +1537,7 @@ Supabase users: paste the migration body into the SQL Editor.
 ## [0.1.1] - 2026-03-05
 
 ### Added
+
 - `health_check` tool for diagnosing connection issues
 - Startup validation -- exits with clear errors if Supabase or Ollama aren't reachable
 - Retry with exponential backoff on transient failures (embedding: 3 attempts, DB reads: 2)
@@ -1493,10 +1548,12 @@ Supabase users: paste the migration body into the SQL Editor.
 - Tool execution timing logged to stderr
 
 ### Fixed
+
 - `update_memory` / `store_memory` crash when Supabase returns empty results
 - `delete_memory` / `update_memory` could affect memories in other profiles
 
 ### Changed
+
 - `get_stats()` returns `total` instead of `total_memories`
 - OpenAI is now an optional dependency (`uv sync --extra openai`)
 - New RPC functions required -- re-run `sql/schema.sql`
@@ -1504,6 +1561,7 @@ Supabase users: paste the migration body into the SQL Editor.
 ## [0.1.0] - 2026-03-05
 
 ### Added
+
 - Initial release
 - MCP server with stdio transport
 - Supabase PostgreSQL + pgvector backend

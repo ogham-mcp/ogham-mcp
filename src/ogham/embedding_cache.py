@@ -32,6 +32,39 @@ class EmbeddingCache:
         )
         self._conn.commit()
         self._migrate_sparse()
+        self._ensure_incremental_vacuum()
+
+    def _ensure_incremental_vacuum(self) -> None:
+        """Make deleted rows give their space back to the filesystem.
+
+        SQLite reuses freed pages for later inserts but never returns them to
+        the disk unless auto_vacuum is on. Eviction and clear() both delete,
+        so without this the file only grows -- one real cache reached 2.16 GB
+        holding ~7 MB of rows. auto_vacuum is a property of the FILE, which the
+        Go CLI shares and converts the same way; whichever opens it first does
+        the conversion and the other sees it done.
+
+        Converting an existing file needs one VACUUM, which can fail with
+        SQLITE_BUSY while another process holds the database. The cache is
+        best-effort, so skip and retry on the next open.
+        """
+        if self._conn.execute("PRAGMA auto_vacuum").fetchone()[0] == 2:  # INCREMENTAL
+            return
+        try:
+            self._conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
+            self._conn.execute("VACUUM")
+        except sqlite3.OperationalError:
+            pass
+
+    def _reclaim(self) -> None:
+        """Return freed pages to the filesystem. Caller holds self._lock."""
+        try:
+            # fetchall: each step of incremental_vacuum frees pages; stepping
+            # once from execute() is not guaranteed to run it to completion.
+            self._conn.execute("PRAGMA incremental_vacuum").fetchall()
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
 
     def _migrate_sparse(self) -> None:
         """Add sparse column if it doesn't exist yet."""
@@ -88,6 +121,7 @@ class EmbeddingCache:
             count = self._conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
             self._conn.execute("DELETE FROM embeddings")
             self._conn.commit()
+            self._reclaim()
             self._hits = 0
             self._misses = 0
             return count
@@ -116,3 +150,4 @@ class EmbeddingCache:
                 (excess,),
             )
             self._conn.commit()
+            self._reclaim()

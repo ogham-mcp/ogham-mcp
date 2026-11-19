@@ -84,7 +84,7 @@ def _postgres_integration_db_safe() -> tuple[bool, str]:
 
 
 @pytest.fixture(autouse=True)
-def _isolated_unit_environment(monkeypatch, request):
+def _isolated_unit_environment(monkeypatch, request, tmp_path_factory):
     """Keep unit tests independent from a developer's local Ogham env."""
     is_external_integration = request.node.get_closest_marker(
         "integration"
@@ -102,9 +102,17 @@ def _isolated_unit_environment(monkeypatch, request):
         monkeypatch.setenv("EMBEDDING_PROVIDER", "ollama")
         monkeypatch.setenv("DEFAULT_PROFILE", "default")
 
+    # EVERY test -- integration included -- gets its own embedding cache. The
+    # default is ~/.cache/ogham/embeddings.db, which the running MCP server
+    # and the Go CLI share; test_tools.py calls clear_embedding_cache(), so
+    # without this each run wiped a developer's real cache, and the
+    # fill-then-clear churn left the file 2.16 GB of free pages.
+    monkeypatch.setenv("EMBEDDING_CACHE_DIR", str(tmp_path_factory.mktemp("embedding_cache")))
+    import ogham.embeddings as _embeddings
     from ogham.config import settings
     from ogham.database import _reset_backend, _reset_entity_graph
 
+    _embeddings._cache = None
     settings._reset()
     _reset_backend()
     _reset_entity_graph()
@@ -112,6 +120,7 @@ def _isolated_unit_environment(monkeypatch, request):
     _reset_entity_graph()
     _reset_backend()
     settings._reset()
+    _embeddings._cache = None
 
 
 @pytest.fixture(scope="session", autouse=True)

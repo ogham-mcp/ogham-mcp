@@ -62,7 +62,7 @@ Run the schema migration (`sql/schema.sql` for Supabase, `sql/schema_postgres.sq
 | **Docker** | `docker pull ghcr.io/ogham-mcp/ogham-mcp` | Isolation, self-hosted |
 | **Git clone** | `git clone` + `uv sync` | Development, contributions |
 
-**Claude Code**
+#### Claude Code
 
 ```bash
 claude mcp add ogham -- uvx ogham-mcp
@@ -87,7 +87,7 @@ claude mcp add ogham -- uvx ogham-mcp
 }
 ```
 
-**Docker**
+#### Docker
 
 ```bash
 docker run --rm \
@@ -98,7 +98,7 @@ docker run --rm \
   ghcr.io/ogham-mcp/ogham-mcp
 ```
 
-**From source**
+#### From source
 
 ```bash
 git clone https://github.com/ogham-mcp/ogham-mcp.git
@@ -207,7 +207,7 @@ Full breakdown: [ogham-mcp.dev/features](https://ogham-mcp.dev/features/#retriev
 
 ## How it works
 
-```
+```text
 AI Client (Claude Code, Cursor, Kiro, OpenCode, ...)
     |
     | stdio or SSE (MCP protocol)
@@ -340,6 +340,7 @@ hybrid_search(query="architecture decisions", profiles=["work", "shared"])
 
 # Python library
 from ogham.service import search_memories_enriched
+
 results = search_memories_enriched(
     query="architecture decisions",
     profile="work",
@@ -370,7 +371,7 @@ When `profiles` is set, results include memories from all listed profiles with a
 | `OLLAMA_EMBED_MODEL` | No | `embeddinggemma` | Ollama embedding model |
 | `MISTRAL_EMBED_MODEL` | No | `mistral-embed` | Mistral embedding model |
 | `VOYAGE_EMBED_MODEL` | No | `voyage-4-lite` | Voyage embedding model |
-| `GEMINI_EMBED_MODEL` | No | `gemini-embedding-2-preview` | Gemini embedding model |
+| `GEMINI_EMBED_MODEL` | No | `gemini-embedding-2` | Gemini embedding model |
 | `RERANK_ENABLED` | No | `false` | Enable FlashRank cross-encoder reranking |
 | `RERANK_ALPHA` | No | `0.55` | Cross-encoder score weight (0-1) |
 | `DEFAULT_MATCH_THRESHOLD` | No | `0.7` | Similarity threshold (see below) |
@@ -379,7 +380,7 @@ When `profiles` is set, results include memories from all listed profiles with a
 | `OGHAM_RECALL_ENABLED` | No | `true` | Enable memory recall/context retrieval |
 | `OGHAM_INSCRIBE_ENABLED` | No | `true` | Enable memory capture/content writes |
 
-**Embedding providers**
+### Embedding providers
 
 | Provider | Default dimensions | Recommended threshold | Notes |
 |----------|-------------------|----------------------|-------|
@@ -387,7 +388,7 @@ When `profiles` is set, results include memories from all listed profiles with a
 | Ollama | 512 | 0.70 | Tight clustering, scores run 0.8-0.9 |
 | Mistral | 1024 | 0.60 | Fixed 1024 dims, can't truncate. Schema must be `vector(1024)` |
 | Voyage | 512 (schema default) | 0.45 | Moderate spread |
-| Gemini | 512 | 0.35 | `gemini-embedding-2-preview`, supports MRL truncation |
+| Gemini | 512 | 0.35 | `gemini-embedding-2`, supports MRL truncation |
 | ONNX | 1024 | 0.35 | Local BGE-M3 inference, dense + sparse vectors. See ONNX section |
 
 `EMBEDDING_DIM` must match the `vector(N)` column in your database schema. The default schema uses `vector(512)`. If you use Mistral, you need to alter the column to `vector(1024)` before storing anything.
@@ -423,7 +424,7 @@ ogham hooks install
 | Kiro | Instructions for Hook UI (recall on Prompt Submit, inscribe on Agent Stop) |
 | Codex, Cursor, others | Project instruction file (CLAUDE.md, AGENTS.md, or .cursorrules) |
 
-**Two commands, named after the Ogham stones:**
+### Two commands, named after the Ogham stones
 
 - **recall** -- read from the stone. Searches Ogham for memories relevant to your project and injects them as context. Fires at session start and after compaction.
 - **inscribe** -- carve into the stone. Captures meaningful tool activity as memories. Skips noise (`ls`, `cat`, `git status`) and only stores signal (commits, deploys, errors, config changes). Fires after tool use and before compaction. Secrets are masked before storing.
@@ -466,7 +467,7 @@ Admin operations such as config, health, stats, audit, export, delete, and clean
 <details>
 <summary><b>MCP tools (memory, search, graph, typed-edge, importers, profiles, import/export, maintenance)</b></summary>
 
-**Memory operations**
+### Memory operations
 
 | Tool | Description | Key parameters |
 |------|-------------|----------------|
@@ -480,7 +481,7 @@ Admin operations such as config, health, stats, audit, export, delete, and clean
 | `reinforce_memory` | Increase confidence score | `memory_id` |
 | `contradict_memory` | Decrease confidence score | `memory_id` |
 
-**Search**
+### Search
 
 | Tool | Description | Key parameters |
 |------|-------------|----------------|
@@ -488,7 +489,7 @@ Admin operations such as config, health, stats, audit, export, delete, and clean
 | `list_recent` | List recent memories | `limit`, `profile` |
 | `find_related` | Find memories related to a given one | `memory_id`, `limit` |
 
-**Knowledge graph**
+### Knowledge graph
 
 | Tool | Description | Key parameters |
 |------|-------------|----------------|
@@ -509,7 +510,7 @@ one. The same word can legitimately land under two types -- `ValueError` is both
 an `entity:` (interior capitalisation) and an `error:` (the `Error` suffix). Pass
 a qualified reference to be explicit:
 
-```
+```python
 store_triple(subject="error:ValueError", ...)   # exactly the error node
 store_triple(subject="ValueError", ...)         # lowest-id match, and logs the collision
 ```
@@ -535,13 +536,13 @@ Existing entities are classified from their type on upgrade. Nothing in retrieva
 reads it yet -- it exists so that when enrichment does start writing entities, a
 machine-suggested one is distinguishable from adapter-derived fact.
 
-**Importers**
+### Importers
 
 | Tool | Description | Key parameters |
 |------|-------------|----------------|
 | `import_linear` | Import Linear issues as memories, read-only, deduped by tracker id (v0.16) | see [`/docs/import-linear/`](https://ogham-mcp.dev/docs/import-linear/) |
 
-**Profiles**
+### Profiles
 
 | Tool | Description | Key parameters |
 |------|-------------|----------------|
@@ -550,7 +551,7 @@ machine-suggested one is distinguishable from adapter-derived fact.
 | `list_profiles` | List all profiles with counts | -- |
 | `set_profile_ttl` | Set auto-expiry for a profile | `profile`, `ttl_days` |
 
-**Import / export**
+### Import / export
 
 | Tool | Description | Key parameters |
 |------|-------------|----------------|
@@ -559,7 +560,7 @@ machine-suggested one is distinguishable from adapter-derived fact.
 
 **`--format okf`** writes an [Open Knowledge Format v0.1](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing) conformant bundle: a directory of one-markdown-file-per-memory with YAML frontmatter, a bundle-root `index.md` declaring `okf_version: "0.1"`, and a self-contained `viewer.html` (Cytoscape.js graph, opens with `file://`, no server or CDN needed). Round-trip preserves UUID, content, tags, source, and metadata; the embedding is regenerated on import. Pass `include_viewer=false` to skip the HTML graph. See the [OKF round-trip write-up](https://ogham-mcp.dev/blog/okf-round-trip-v015/) for the background.
 
-**Maintenance**
+### Maintenance
 
 | Tool | Description | Key parameters |
 |------|-------------|----------------|
@@ -626,7 +627,7 @@ ogham import ogham-okf-<profile>-<timestamp>
 
 The bundle is a directory tree:
 
-```
+```text
 ogham-okf-<profile>-<timestamp>/
 ├── index.md                     # declares okf_version: "0.1" (+ ogham_graph_version: 1)
 ├── context.jsonld               # predicate URIs, with Schema.org alignments where they fit
@@ -688,7 +689,7 @@ User-facing write-up: [Ogham v0.15 speaks Open Knowledge Format](https://ogham-m
 <details>
 <summary><b>Importing existing memory (Claude Code, Claude.ai, JSON)</b></summary>
 
-**From Claude Code (auto-memory MD files)**
+### From Claude Code (auto-memory MD files)
 
 Claude Code's auto-memory system writes per-project notes under `~/.claude/projects/<encoded-cwd>/memory/`. Each note is a markdown file with YAML frontmatter (`name`, `description`, `type`, optional `originSessionId`). Pull them into Ogham:
 
@@ -703,7 +704,7 @@ The encoded-cwd directory naming is lossy on hyphenated repo names: `openbrain-s
 
 The importer respects `inscribe_enabled()` -- `--no-inscribe` and `OGHAM_INSCRIBE_ENABLED=false` skip the import. Re-runs are dedup-safe via the `--dedup` cosine threshold (default 0.8). MCP tool: `import_claude_code_memories(directory, project_tag=...)`.
 
-**From Claude.ai (conversation data export)**
+### From Claude.ai (conversation data export)
 
 Anthropic offers a first-party data export at **Settings → Privacy → Request your data**. After ~24-48h you receive a ZIP containing `conversations.json`. Pull it into Ogham:
 
@@ -721,7 +722,7 @@ UUIDs from the export land in metadata so re-importing the same export later onl
 
 **Bulk imports skip per-memory enrichment** -- the Claude Code, Claude.ai, and JSON importers all write through `import_memories`, which embeds + dedups + inserts in batches but **skips per-memory entity extraction and auto-link** (a 600-memory import would otherwise run thousands of secondary RPCs). Imported memories are immediately searchable via embedding + keyword. To populate the entity graph after a bulk import, run `ogham backfill-entities --profile <name>` (see Entity graph below).
 
-**From a JSON export**
+### From a JSON export
 
 ```bash
 ogham export --profile work > backup.json
@@ -840,7 +841,7 @@ OGHAM_RUN_EXTERNAL_INTEGRATION=1 uv run pytest -m integration -v
 make test-external
 ```
 
-**Upgrading an existing Ogham database**
+### Upgrading an existing Ogham database
 
 For v0.10.x → v0.11.0 (memory lifecycle release), see [UPGRADING.md](https://github.com/ogham-mcp/ogham-mcp/blob/main/UPGRADING.md). The short version:
 
@@ -862,6 +863,7 @@ For older versions (v0.4.x through v0.10.x), the same `upgrade.sh` script walks 
 ```
 
 Selected migration highlights:
+
 - **016** adds the `sparse_embedding` column for ONNX BGE-M3 sparse vectors.
 - **017** upgrades the search function to true Reciprocal Rank Fusion with length-normalised keyword scoring ([Cormack et al., 2009](https://doi.org/10.1145/1571941.1572114)).
 - **025 / 026** add the memory lifecycle table + triggers (see [UPGRADING.md](https://github.com/ogham-mcp/ogham-mcp/blob/main/UPGRADING.md)).
