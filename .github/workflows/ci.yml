@@ -74,7 +74,12 @@ jobs:
         run: |
           uv venv .venv-users
           wheel="$(ls dist/ogham_mcp-*.whl)"
-          uv pip install --python .venv-users/bin/python "${wheel}[postgres,dev]"
+          # onnx: the public repo carries tests/test_onnx_embedder.py (public-only,
+          # see .syncignore), which imports numpy at module level. Unlocked,
+          # [postgres,dev] does not pull numpy in, so collection failed on the
+          # v0.20.0 sync. Installing the extra also tests ONNX against the
+          # newest onnxruntime a user would get.
+          uv pip install --python .venv-users/bin/python "${wheel}[postgres,dev,onnx]"
           uv pip list --python .venv-users/bin/python
 
       # agent_zero_import.py is hatch-excluded from the wheel (pyproject), so its
