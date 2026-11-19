@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import ogham.tools.memory as memtool
 
 
@@ -13,7 +15,11 @@ def _patch_search(monkeypatch, rows):
 
 
 def test_gap_auto_silent_when_healthy(monkeypatch):
-    rows = [{"id": "a", "created_at": "2026-05-26T00:00:00+00:00", "confidence": 0.9, "tags": []}]
+    # Relative, not a fixed date: a hardcoded "healthy" timestamp ages past
+    # gap_stale_days (90) and turns this test red with no code change. It did,
+    # on 2026-08-24, and public CI stayed red for six weeks.
+    fresh = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    rows = [{"id": "a", "created_at": fresh, "confidence": 0.9, "tags": []}]
     _patch_search(monkeypatch, rows)
     out = memtool.hybrid_search("q", gap="auto")
     assert out["gap_note"] is None
