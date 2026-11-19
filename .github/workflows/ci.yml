@@ -44,3 +44,153 @@ jobs:
           EMBEDDING_PROVIDER: ollama
           DEFAULT_PROFILE: default
         run: uv run pytest tests/ -m "not integration and not postgres_integration"
+
+  # TBU-279. Every other job installs from uv.lock, which no `pip install`
+  # user ever sees. This one builds the wheel and installs it into a fresh venv
+  # with NO lockfile, so dependencies resolve to the newest versions the
+  # pyproject bounds allow -- what a user gets. Same test selection as
+  # lint-type-test, no Postgres.
+  test-resolved-for-users:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+
+      - name: Build wheel
+        run: uv build --wheel
+
+      # No `uv sync`, no `--frozen`: plain resolution against the wheel metadata.
+      # pytest tooling comes from the dev extra, installed with the wheel.
+      - name: Install wheel into a fresh venv (no lockfile)
+        run: |
+          uv venv .venv-users
+          wheel="$(ls dist/ogham_mcp-*.whl)"
+          uv pip install --python .venv-users/bin/python "${wheel}[postgres,dev]"
+          uv pip list --python .venv-users/bin/python
+
+      # agent_zero_import.py is hatch-excluded from the wheel (pyproject), so its
+      # test cannot run against the installed package.
+      # Run from tests/ with pythonpath overridden so the installed wheel, not
+      # src/, is what gets imported (pyproject sets pythonpath = ["src"]).
+      - name: Tests against the resolved install
+        env:
+          DATABASE_BACKEND: supabase
+          SUPABASE_URL: https://fake.supabase.co
+          SUPABASE_KEY: fake-key
+          EMBEDDING_PROVIDER: ollama
+          DEFAULT_PROFILE: default
+        run: |
+          .venv-users/bin/python -c "import ogham; print(ogham.__file__)"
+          .venv-users/bin/python -m pytest tests/ -o pythonpath= --ignore=tests/test_agent_zero_import.py -m "not integration and not postgres_integration" -q
+
+  # TBU-214. Until this job existed the schema drift gate and ~130
+  # postgres_integration tests ran on one laptop and nowhere else, so the SQL
+  # layer was verified to INSTALL and never to BEHAVE.
+  #
+  # Every value below was established by running the suite against a clean
+  # container rather than by reading the code -- see the issue for the bisection.
+  postgres-integration:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: ogham
+          POSTGRES_PASSWORD: ogham_test
+          # The DB NAME MUST CONTAIN "scratch". tests/conftest.py gates on that
+          # literal substring in four places (pytest_configure, both destructive
+          # -DB guards, and the pg_url fixture). Name it anything else and every
+          # postgres_integration test SELF-SKIPS while the job reports green --
+          # which is precisely the failure this job exists to end.
+          POSTGRES_DB: ogham_scratch
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra postgres
+
+      # The drift gate shells out to `pg_dump --schema-only`, and pg_dump refuses
+      # to read a server newer than itself. ubuntu-latest ships a PostgreSQL 16
+      # client, so against the pg17 service above it aborts with "server version
+      # mismatch" -- and tests/test_schema_migration_drift.py raises on that
+      # rather than skipping. Match the client to the server.
+      #
+      # The alternative is dropping the service image to pg16, which needs no
+      # setup at all. It is kept on 17 because that is the version the schemas
+      # are actually developed against; if this step turns flaky, pg16 is the
+      # cheap fallback and the gate works identically on it.
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+            https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+          # Installing the package is NOT enough. /usr/bin/pg_dump is the
+          # postgresql-client-common wrapper, which dispatches to the DEFAULT
+          # version -- still 16, because the runner's preinstalled
+          # postgresql-client-16 remains. The first CI run installed 17.11
+          # successfully and still ran pg_dump 16.14 against a 17.11 server.
+          # Put the versioned binaries ahead of the wrapper.
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
+      - name: Verify pg_dump matches the server major version
+        run: |
+          # Assert rather than print. A silent mismatch here surfaces ~20 tests
+          # later as an opaque RuntimeError from the drift gate; failing at the
+          # point of the mistake is worth six lines.
+          got="$(pg_dump --version | grep -oE '[0-9]+' | head -1)"
+          echo "pg_dump major: $got (which: $(command -v pg_dump))"
+          if [ "$got" != "17" ]; then
+            echo "::error::pg_dump is major $got but the service container is 17 --" \
+                 "the drift gate will abort with a server version mismatch."
+            exit 1
+          fi
+
+      - name: Postgres integration tests
+        env:
+          DATABASE_URL: postgresql://ogham:ogham_test@localhost:5432/ogham_scratch
+          # Without this the backend defaults to supabase and the fixtures die on
+          # AttributeError: 'SupabaseBackend' object has no attribute '_execute'.
+          DATABASE_BACKEND: postgres
+          EMBEDDING_DIM: "512"
+          # ~10 of these tests drive service.store_memory_enriched, which embeds
+          # for real. openai is already a CORE dependency (no extra needed) and
+          # text-embedding-3-small matches EMBEDDING_DIM=512. Measured on a cold
+          # cache: 25 embeddings per run. There is no offline path -- with a bad
+          # key those 10 fail, and a warm ~/.cache/ogham/embeddings.db is the only
+          # reason they can appear to pass without one.
+          EMBEDDING_PROVIDER: openai
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DEFAULT_PROFILE: default
+        run: uv run pytest tests/ -m postgres_integration -q

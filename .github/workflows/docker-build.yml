@@ -60,3 +60,64 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # TBU-215: the image is what most users `docker pull`, and until
+      # 2026-08-03 it had never been started before a release. Runs on the
+      # amd64 image only -- the build is multi-arch and the runner is amd64,
+      # so arm64 would need QEMU for no extra signal.
+      #
+      # KNOWN GAP: pull_request does not push, so there is nothing in the
+      # registry to pull and this step is skipped. Coverage is main + tags,
+      # which is the release path. A PR that breaks the image is caught on
+      # merge, not before it.
+      - name: Smoke-test the pushed image
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+
+          IMAGE=$(printf '%s\n' "${{ steps.meta.outputs.tags }}" | head -1)
+          echo "Smoke-testing $IMAGE"
+
+          # Expectations come from the checkout, so they cannot drift from
+          # what this commit actually claims to ship.
+          EXPECTED_VERSION=$(python3 -c \
+            "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          # -maxdepth 1 on purpose: sql/migrations has archive/ and
+          # rollback/ subdirectories, and the image-side check uses a
+          # non-recursive iterdir(). Counting recursively here compares 66
+          # against 36 and fails every run.
+          EXPECTED_MIGRATIONS=$(find sql/migrations -maxdepth 1 -name '*.sql' | wc -l | tr -d ' ')
+          echo "Expecting version=$EXPECTED_VERSION migrations=$EXPECTED_MIGRATIONS"
+          export EXPECTED_VERSION EXPECTED_MIGRATIONS
+
+          docker pull --platform linux/amd64 "$IMAGE"
+
+          # Values travel as env vars, not string interpolation, so the
+          # assertion script has no shell-quoting surface.
+          docker run --rm --platform linux/amd64 \
+            -e EXPECTED_VERSION -e EXPECTED_MIGRATIONS \
+            --entrypoint python "$IMAGE" -c '
+          import os
+          import importlib.metadata as m
+          import importlib.resources as r
+
+          import ogham.cli, ogham.server, ogham.supersession  # noqa: F401
+
+          got = m.version("ogham-mcp")
+          want = os.environ["EXPECTED_VERSION"]
+          assert got == want, f"version: image {got}, repo {want}"
+
+          root = r.files("ogham") / "sql"
+          migs = [p for p in (root / "migrations").iterdir() if p.name.endswith(".sql")]
+          want_n = int(os.environ["EXPECTED_MIGRATIONS"])
+          assert len(migs) == want_n, f"migrations: image {len(migs)}, repo {want_n}"
+
+          for schema in ("schema.sql", "schema_postgres.sql", "schema_selfhost_supabase.sql"):
+              assert (root / schema).is_file(), f"missing fresh-install schema {schema}"
+
+          print(f"ok: {got}, {len(migs)} migrations, 3 schemas")
+          '
+
+          # Entrypoint is `ogham`, so this exercises the CLI as shipped.
+          docker run --rm --platform linux/amd64 "$IMAGE" --help > /dev/null
+          echo "Image smoke test passed"

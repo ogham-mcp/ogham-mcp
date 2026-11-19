@@ -1,3 +1,7 @@
+# TBU-256: the dev repo carries a copy of this workflow. make sync
+# never copies the workflows directory, so this file is maintained in BOTH
+# repos (see docs/ci-workflows.md in dev). Action pins follow this repo's ci.yml.
+#
 # Ephemeral Postgres + pgvector smoke test.
 #
 # Catches the PR #23 / PR #25 bug class: Python backend sends N parameters
@@ -53,7 +57,7 @@ jobs:
 
       - name: Wait for Postgres
         run: |
-          for i in {1..30}; do
+          for _ in {1..30}; do
             pg_isready -h localhost -p 5432 -U ogham && break
             sleep 1
           done
@@ -145,7 +149,7 @@ jobs:
 
       - name: Wait for Postgres
         run: |
-          for i in {1..30}; do
+          for _ in {1..30}; do
             pg_isready -h localhost -p 5432 -U ogham && break
             sleep 1
           done
@@ -166,7 +170,7 @@ jobs:
           if [ -d sql/migrations ]; then
             for f in sql/migrations/[0-9]*.sql; do
               if [ -f "$f" ]; then
-                echo "Applying $(basename $f)..."
+                echo "Applying $(basename "$f")..."
                 psql -h localhost -U ogham -d ogham_test -v ON_ERROR_STOP=1 -f "$f"
               fi
             done
