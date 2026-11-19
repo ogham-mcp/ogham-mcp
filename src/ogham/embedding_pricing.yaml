@@ -48,7 +48,7 @@ mistral:
 gemini:
   gemini-embedding-001: 0.000075     # $0.075 / 1M input tokens (paid tier)
   gemini-embedding-2: null           # GA price not yet published; treat as 0 cost-wise
-  gemini-embedding-2-preview: null   # legacy alias of gemini-embedding-2, will be retired
+  gemini-embedding-2-preview: null   # retired 2026-11-06; config.py rewrites it to gemini-embedding-2
 
 # Local-inference providers -- always free.
 ollama:

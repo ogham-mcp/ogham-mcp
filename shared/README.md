@@ -44,7 +44,7 @@ The shared-data version stream is **independent** of the Python
 package version (`ogham-mcp 0.X.Y`) and the Go CLI version
 (`ogham-cli vX.Y.Z`). It ships via its own Makefile targets:
 
-```
+```bash
 # In the dev repo, edit shared/* and bump shared/schema.yaml + CHANGELOG.md
 make sync-shared                     # mirror dev/shared/ → public/shared/
 cd $(PUB_REPO) && git diff shared/   # review
@@ -55,7 +55,7 @@ cd $(PUB_REPO) && git push origin main && git push origin shared-data-v0.1.0
 
 Consumers then bump:
 
-```
+```bash
 # Go (ogham-cli)
 git subtree pull --prefix=internal/native/shared $(PUB_REPO) shared-data-v0.1.0 --squash
 
