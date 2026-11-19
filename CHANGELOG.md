@@ -4,6 +4,54 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.20.0] - 2026-11-19 -- Labelled recall, OKF v0.3, and fewer surprises on import
+
+### Changed
+
+- **Recalled context is labelled, dated and filtered.** The hooks that inject
+  memories at session start and after compaction now wrap them in a marked
+  block that says they are notes from earlier sessions, not instructions. Each
+  line shows its date and source. Memories captured by hooks, and memories a
+  newer memory contradicts, are left out. If you parse this output, update
+  your parser.
+- **Edit and Write tool calls are no longer captured by default.** They were
+  stored as one-line `Edit: <path>` memories that crowded out real notes at
+  recall time. Set `OGHAM_HOOKS_CAPTURE_FILE_EDITS=1` to keep capturing them.
+  Memories you already have are not touched. `ogham hooks install` no longer
+  adds the PostToolUse hook unless capture is on.
+- **OKF exports follow OKF v0.3.** Bundles declare `okf_version: "0.3"`. Links
+  from memories to entities are written as standard Markdown links, so other
+  OKF tools can see the knowledge graph; before, they were wikilinks, which
+  v0.3 does not treat as links. Ogham's own fields now use an `x-ogham-`
+  prefix. Entity `aliases` keeps its plain name, so Obsidian still reads it.
+  Superseded memories export as `status: deprecated` with `superseded_by`
+  (Postgres backend).
+- **Bundles from older versions still import.** The reverse does not hold:
+  importing a 0.20 bundle into 0.19 or older creates every memory as new and
+  leaves the links section in the text. Upgrade before you import.
+- **Core dependencies have upper bounds at their next major version**, so a
+  fresh `pip install` cannot pick up an untested major release. `openai` 3.x is
+  supported.
+- The `all` extra now includes the ONNX dependencies (`onnxruntime`,
+  `tokenizers`). The Docker image already had them, but only by accident.
+
+### Fixed
+
+- **`ogham search` showed superseded memories as if they were current.** They
+  now sort last, are marked `(superseded)`, and carry `superseded_by` in
+  `--json` output.
+- **OKF import refused bundles it should accept.** A bundle without an
+  `index.md`, or without `okf_version`, now imports with a warning. A
+  directory with no OKF concepts is still refused.
+- **Imported memories all got importance 0.5.** Import now keeps an importance
+  value carried in the bundle, and computes one for new memories when there is
+  none. Re-importing without a value no longer overwrites a stored one.
+- **Re-importing into Supabase reset `surprise` to 0.5.** It is now written
+  only when the record carries a value or the memory is new.
+- **Entities created by graph import now get an explicit evidence class**
+  (`inferred`) instead of relying on the column default. Graph import needs
+  migration 049, which shipped in 0.19.0.
+
 ## [0.19.1] - 2026-11-09 -- Security updates and an embedding cache that gives disk space back
 
 ### Security

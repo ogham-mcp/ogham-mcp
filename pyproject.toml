@@ -1,6 +1,6 @@
 [project]
 name = "ogham-mcp"
-version = "0.19.1"
+version = "0.20.0"
 description = "Shared memory MCP server — persistent, searchable, cross-client"
 # Without `readme` the published METADATA carries a zero-byte description, so
 # the PyPI page shows the one-line summary and no route to the repo or docs.
@@ -35,20 +35,24 @@ classifiers = [
 ]
 dependencies = [
     # Security floors (2026-11-06 audit). fastmcp 3.4.10 fixes GHSA-7xgj-8392-5q4r.
-    # fastmcp only asks for mcp>=1.24, so mcp is floored here directly.
+    # fastmcp only asks for mcp>=1.24, so mcp is floored here directly: 1.30.0
+    # fixes CVE-2026-116684/5/6 and CVE-2026-59951, 1.28.1 / 1.27.2 the PYSECs.
+    # We do not import mcp ourselves; this line exists only as a constraint.
     "fastmcp>=3.4.10,<4",
     "mcp>=1.30,<2",
-    "postgrest>=2.0",
-    "pydantic-settings>=2.0",
-    "python-dotenv>=1.0",
-    "ollama>=0.4",
-    "openai>=1.0",
-    "typer>=0.24",
-    "parsedatetime>=2.6",
-    "pyyaml>=6.0",
-    "geotext>=0.4",
-    "tenacity>=9.1.4",
-    "json-repair>=0.30",
+    # Upper bounds (TBU-279): each is the next major above what uv.lock tests.
+    # openai 3.x is covered by test-resolved-for-users in ci.yml.
+    "postgrest>=2.0,<3",
+    "pydantic-settings>=2.0,<3",
+    "python-dotenv>=1.0,<2",
+    "ollama>=0.4,<1",
+    "openai>=1.0,<4",
+    "typer>=0.24,<1",
+    "parsedatetime>=2.6,<3",
+    "pyyaml>=6.0,<7",
+    "geotext>=0.4,<1",
+    "tenacity>=9.1.4,<10",
+    "json-repair>=0.30,<1",
 ]
 
 # A visitor landing on the PyPI page should be one click from the source, the
@@ -75,11 +79,12 @@ gemini = ["google-genai>=1.0"]
 # Excluded from `all` because the model is 2.2 GB at runtime and the
 # wheel adds ~25 MB of ONNX runtime + tokenizer deps. Self-hosters who
 # want sparse three-signal hybrid search without API costs install
-# explicitly: `pip install ogham-mcp[onnx]`.
+# explicitly: `pip install ogham-mcp[onnx]`. numpy comes transitively
+# from onnxruntime; no need to declare separately.
 onnx = ["onnxruntime>=1.17", "tokenizers>=0.19"]
 rerank = ["flashrank>=0.2"]
 dashboard = ["prefab-ui>=0.18", "fastapi>=0.115", "uvicorn>=0.34"]
-all = ["mistralai>=1.0,<2", "voyageai>=0.3", "google-genai>=1.0", "psycopg-pool>=3.1", "psycopg[binary]>=3.1", "flashrank>=0.2", "prefab-ui>=0.18", "fastapi>=0.115", "uvicorn>=0.34"]
+all = ["mistralai>=1.0,<2", "voyageai>=0.3", "google-genai>=1.0", "psycopg-pool>=3.1", "psycopg[binary]>=3.1", "flashrank>=0.2", "prefab-ui>=0.18", "fastapi>=0.115", "uvicorn>=0.34", "onnxruntime>=1.17", "tokenizers>=0.19"]
 
 [project.scripts]
 ogham = "ogham.cli:main"
