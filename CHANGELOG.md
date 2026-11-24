@@ -4,6 +4,39 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.20.1] - 2026-11-24 -- Long notes stop being marked as superseded
+
+### Fixed
+
+- **Storing a memory could mark an unrelated older memory as superseded.**
+  When a new memory looked similar to an existing one, Ogham checked whether
+  one said "not" or "never" and the other did not, and if so recorded that the
+  new one contradicts the old. Since 0.20.0, recall and search hide or demote a
+  contradicted memory. The check had two bugs. It read only the first 200
+  characters of the existing memory, so a negation further in was missed. And
+  a word match tells you nothing about a long note that says "not" somewhere
+  in passing. The check now reads the whole existing memory, and only records
+  a contradiction when both memories are 300 characters or shorter. Set
+  `OGHAM_CONTRADICTION_MAX_CHARS` to change the limit. Longer pairs still show
+  up in the store response's `conflicts` list.
+
+### Cleaning up existing contradictions
+
+This release stops new false contradictions. It does not remove the ones
+already in your database. To count the ones Ogham recorded automatically
+(Postgres and Supabase):
+
+```sql
+SELECT count(*) FROM memory_relationships
+WHERE relationship = 'contradicts'
+  AND created_by = 'auto'
+  AND metadata->>'reason' = 'opposite_polarity';
+```
+
+To remove them, back up first, then run the same filter as a `DELETE`. The
+filter matches only contradictions this check recorded. A few of them may have
+been right, and deleting them brings the older memory back into recall.
+
 ## [0.20.0] - 2026-11-19 -- Labelled recall, OKF v0.3, and fewer surprises on import
 
 ### Changed
