@@ -275,3 +275,77 @@ def test_store_graceful_when_create_relationship_fails():
     # Store succeeds even if contradicts-edge creation fails
     assert response["status"] == "stored"
     assert "contradicts" not in response
+
+
+def _store_against(existing_content: str, new_content: str):
+    """Store new_content with one >75%-similar existing memory; return (response, create_rel)."""
+    from ogham.service import store_memory_enriched
+
+    existing = {"id": "mem-old", "content": existing_content, "similarity": 0.84}
+    with (
+        patch("ogham.service.generate_embedding", return_value=FAKE_EMBEDDING),
+        patch("ogham.service.hybrid_search_memories", return_value=[existing]),
+        patch("ogham.service.db_get_profile_ttl", return_value=None),
+        patch(
+            "ogham.service.db_store",
+            return_value={"id": "mem-new", "created_at": "2026-01-01T00:00:00Z"},
+        ),
+        patch("ogham.service.db_auto_link", return_value=0),
+        patch("ogham.service.create_relationship") as create_rel,
+        patch("ogham.service.emit_audit_event"),
+        patch("ogham.service.extract_dates", return_value=[]),
+        patch("ogham.service.extract_entities", return_value=[]),
+        patch("ogham.service.extract_recurrence", return_value=[]),
+        patch("ogham.service.compute_importance", return_value=0.7),
+        patch("ogham.hooks._mask_secrets", side_effect=lambda t: t),
+    ):
+        response = store_memory_enriched(content=new_content, profile="default", source="test")
+    return response, create_rel
+
+
+def test_polarity_reads_the_whole_existing_memory_not_a_preview():
+    """TBU-304: polarity must be compared on the same population on both sides.
+
+    The existing memory's negation marker sits after character 200. Reading only
+    a 200-char preview made it look positive, so a long new memory that also
+    contains a marker was recorded as contradicting it -- and since v0.20 a
+    contradicts edge hides the target from recall.
+    """
+    head = "Checkpoint: shipped the CLI release, merged the queue, and tagged it. " * 3
+    assert 200 < len(head) < 260
+    existing_content = head + "Drain is no longer synchronous."
+    assert "no longer" not in existing_content[:200]
+    assert len(existing_content) <= 300  # inside the length gate, so polarity decides
+
+    response, create_rel = _store_against(
+        existing_content,
+        "Handoff note: the outbox is no longer drained synchronously.",
+    )
+
+    assert "contradicts" not in response
+    create_rel.assert_not_called()
+
+
+def test_short_true_contradiction_still_detected():
+    """The fix must not blind the producer to a real short supersession."""
+    response, create_rel = _store_against(
+        "We deploy the API on Railway",
+        "We no longer deploy the API on Railway, replaced by Fly",
+    )
+
+    assert response["contradicts"][0]["id"] == "mem-old"
+    create_rel.assert_called_once()
+
+
+def test_long_memories_never_get_an_auto_contradicts_edge():
+    """TBU-304: polarity on multi-paragraph notes is noise, so no edge -- but the
+    similar memory is still reported in `conflicts`."""
+    filler = " Notes on the release, the queue and the follow-up work." * 6
+    response, create_rel = _store_against(
+        "We deploy the API on Railway." + filler,
+        "We no longer deploy the API on Railway, replaced by Fly." + filler,
+    )
+
+    assert "contradicts" not in response
+    assert response["conflicts"][0]["id"] == "mem-old"
+    create_rel.assert_not_called()

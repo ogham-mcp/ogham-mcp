@@ -289,6 +289,7 @@ def store_memory_enriched(
     # background thread's result is discarded.
     surprise = 0.5
     conflicts: list[dict[str, Any]] = []
+    conflict_full_content: dict[str, str] = {}
     conflict_threshold = float(os.environ.get("OGHAM_CONFLICT_THRESHOLD", "0.75"))
     conflict_timeout_ms = float(os.environ.get("OGHAM_CONFLICT_TIMEOUT_MS", "1500"))
     try:
@@ -314,6 +315,10 @@ def store_memory_enriched(
                             "content_preview": r.get("content", "")[:200],
                         }
                     )
+                    # Polarity must read the whole memory, as it does for the
+                    # new one. Kept out of `conflicts` so the response shape
+                    # does not change (TBU-304).
+                    conflict_full_content[str(r.get("id", ""))] = r.get("content", "") or ""
     except FuturesTimeout:
         logger.warning(
             "store_memory: surprise scoring timed out after %.0fms; "
@@ -392,11 +397,31 @@ def store_memory_enriched(
     # `contradicts` relationship edge. Retrieval code can later suppress
     # superseded memories using these edges. Heuristic is intentionally
     # conservative -- false positives pollute the audit trail.
+    #
+    # TBU-304: polarity is a substring match for negation markers. On a short
+    # statement ("we no longer deploy on Railway") that is a usable signal; on
+    # a multi-paragraph note it only says that a word like "previously"
+    # appears somewhere, and it produced edges between unrelated checkpoints.
+    # So an edge is written only when BOTH memories are short. Longer pairs
+    # are still reported in `conflicts`, which never hides anything.
     contradictions: list[dict[str, Any]] = []
-    if conflicts:
+    max_chars = int(os.environ.get("OGHAM_CONTRADICTION_MAX_CHARS", "300"))
+    if conflicts and len(content) <= max_chars:
         new_polarity = detect_negation_polarity(content)
         for conflict in conflicts:
-            existing_polarity = detect_negation_polarity(conflict.get("content_preview", ""))
+            # TBU-304: this used to read `content_preview` (first 200 chars)
+            # while the new side read the full text. A marker anywhere in a
+            # long new memory against a clean preview recorded a false
+            # contradicts edge, and since v0.20 that edge hides the target
+            # from recall. Both sides now read the same population.
+            existing_text = (
+                conflict_full_content.get(str(conflict["id"]))
+                or conflict.get("content_preview")
+                or ""
+            )
+            if len(existing_text) > max_chars:
+                continue
+            existing_polarity = detect_negation_polarity(existing_text)
             if new_polarity != existing_polarity:
                 try:
                     create_relationship(
