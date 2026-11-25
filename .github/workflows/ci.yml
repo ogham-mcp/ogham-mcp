@@ -104,6 +104,12 @@ jobs:
   # Every value below was established by running the suite against a clean
   # container rather than by reading the code -- see the issue for the bisection.
   postgres-integration:
+    # Dependabot PRs cannot read Actions secrets, so OPENAI_API_KEY is empty and
+    # every embedding test errors. Skip the whole job for them: it shows as
+    # SKIPPED, never as a green run that self-skipped its tests. Deliberately
+    # not a Dependabot secret -- that would hand the key to unreviewed action
+    # code on every bump PR. Pushes to main still run it.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
 
     services:
